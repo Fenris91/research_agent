@@ -139,6 +139,19 @@ logging:
   console: true
 
 # ============================================
+# Researcher Lookup
+# ============================================
+researcher_lookup:
+  input_file: "./data/researchers.txt"
+  output_dir: "./data/researchers"
+  sources:
+    openalex: true
+    semantic_scholar: true
+    web_search: true
+  web_search_provider: "duckduckgo"  # free, no key required
+  request_delay: 0.5  # seconds between API requests
+
+# ============================================
 # Paths
 # ============================================
 paths:

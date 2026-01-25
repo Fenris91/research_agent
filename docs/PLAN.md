@@ -4,8 +4,66 @@
 
 This document outlines a concrete implementation plan for building an autonomous research assistant agent focused on social sciences (social anthropology, geography, etc.). The system will perform literature review, paper summarization, data analysis, and web synthesis—with the ability to autonomously search and grow its own knowledge base.
 
-**Hardware:** NVIDIA RTX 5090 (32GB VRAM), AMD 9X3D, 32GB system RAM  
+**Hardware:** NVIDIA RTX 5090 (32GB VRAM), AMD 9X3D, 32GB system RAM
 **Primary Framework:** HuggingFace Transformers (with path to vLLM/PyTorch)
+
+---
+
+## Implementation Status (Updated: January 2025)
+
+### Completed
+
+| Component | Status | File(s) |
+|-----------|--------|---------|
+| **Academic Paper Search** | Done | `src/tools/academic_search.py` |
+| - Semantic Scholar API | Done | Search with citation data, DOI, fields |
+| - OpenAlex API | Done | Broad coverage, abstract reconstruction |
+| - Unpaywall (OA finder) | Done | Find open access PDFs |
+| - Deduplication | Done | DOI + title matching |
+| **Web Search** | Done | `src/tools/web_search.py` |
+| - DuckDuckGo (free) | Done | No API key required |
+| - Tavily (paid) | Done | AI-optimized search |
+| - Serper (paid) | Done | Google results |
+| **Researcher Lookup** | Done | `src/tools/researcher_lookup.py` |
+| - OpenAlex Authors | Done | Works, citations, affiliations |
+| - Semantic Scholar Authors | Done | H-index, paper count |
+| - Web Search | Done | Academic profiles, news |
+| - CLI Script | Done | `src/scripts/lookup_researchers.py` |
+| **Vector Store** | Done | `src/db/vector_store.py` |
+| - ChromaDB integration | Done | Persistent storage |
+| - Multiple collections | Done | papers, notes, web_sources |
+| - CRUD operations | Done | Add, search, delete, list |
+| **Embedding Model** | Done | `src/db/embeddings.py` |
+| - Sentence Transformers | Done | BGE models supported |
+| - Query/document encoding | Done | Optimized for retrieval |
+| **Research Agent** | Done | `src/agents/research_agent.py` |
+| - LangGraph workflow | Done | 5-node state machine |
+| - Query classification | Done | literature_review, factual, etc. |
+| - Local KB search | Done | Vector store integration |
+| - External search | Done | Academic + web APIs |
+| - Response synthesis | Done | Structured output (no LLM) |
+| - Ingestion candidates | Done | Score and rank papers |
+| **Gradio UI** | Partial | `src/ui/app.py` |
+| - Basic structure | Done | Tabs for chat, KB, researcher |
+| - Researcher Lookup tab | Done | Functional |
+| - Chat integration | Pending | Needs agent wiring |
+
+### In Progress
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| LLM Integration | Pending | Need to add local LLM for synthesis |
+| PDF Processing | Pending | Document processor scaffolded |
+| Citation Explorer | Pending | API methods exist, tool not wired |
+
+### Not Started
+
+| Component | Notes |
+|-----------|-------|
+| Data Analysis Tools | Pandas/visualization integration |
+| Reranker | BGE reranker for better retrieval |
+| Fine-tuning | Domain-specific model training |
+| Export/Citation Management | Zotero/BibTeX export |
 
 ---
 

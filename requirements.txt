@@ -47,6 +47,7 @@ habanero>=1.2.6
 httpx>=0.27.0
 aiohttp>=3.9.0
 requests>=2.31.0
+ddgs>=9.0.0  # Free web search via DuckDuckGo, no API key
 
 # ============================================
 # Data Analysis

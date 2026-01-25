@@ -58,8 +58,10 @@ secrets/
 # ============================================
 # Data & Cache (large files)
 # ============================================
-data/
-cache/
+data/*
+!data/.gitkeep
+cache/*
+!cache/.gitkeep
 *.pdf
 *.csv
 *.xlsx
@@ -78,9 +80,11 @@ models/
 # ============================================
 # Logs & Outputs
 # ============================================
-logs/
+logs/*
+!logs/.gitkeep
 *.log
-exports/
+exports/*
+!exports/.gitkeep
 outputs/
 
 # ============================================
