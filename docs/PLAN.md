@@ -44,17 +44,27 @@ This document outlines a concrete implementation plan for building an autonomous
 | - Response synthesis | Done | Structured output (no LLM) |
 | - Ingestion candidates | Done | Score and rank papers |
 | **LLM Integration** | Done | `src/models/llm_utils.py` |
-| - Qwen2.5-32B primary model | Done | With GPTQ quantization |
-| - Mistral 7B fallback | Done | Public model, good quality |
-| - TinyLlama 1.1B fallback | Done | Lightweight, CPU-friendly |
+| - Ollama integration | Done | Primary backend, local inference |
+| - qwen3:32b support | Done | Default model with thinking mode |
+| - mistral-small3.2 support | Done | Fast fallback option |
+| - Model switching | Done | Switch models at runtime |
+| - HuggingFace fallback | Done | Qwen2.5-32B GPTQ if no Ollama |
 | - VRAM diagnostics | Done | Real-time GPU memory monitoring |
-| - Lazy loading support | Done | Defers loading on VRAM constraints |
 | **Gradio UI** | Done | `src/ui/app.py` |
 | - Basic structure | Done | Tabs for chat, KB, researcher |
 | - Researcher Lookup tab | Done | Functional |
 | - Chat integration | Done | Agent fully wired and working |
+| - Model selector | Done | Switch models in Settings |
 | - LLM response generation | Done | Inference with attention mask handling |
 | - Error handling | Done | Graceful fallbacks |
+| **Unit Tests** | Done | `tests/test_core.py` |
+| - Vector store tests | Done | 3 tests |
+| - Embedding model tests | Done | 4 tests |
+| - Academic search tests | Done | 2 tests |
+| - Web search tests | Done | 1 test |
+| - Researcher lookup tests | Done | 1 test |
+| - Ollama integration tests | Done | 5 tests |
+| - Agent model switch tests | Done | 2 tests |
 
 ### In Progress
 
@@ -148,16 +158,24 @@ pip install scipy scikit-learn
 
 ### 1.2 Base Model Selection & Setup
 
-For 32GB VRAM, recommended options:
+**Primary Backend: Ollama** (recommended for ease of use)
+
+| Model | Size | Backend | Notes |
+|-------|------|---------|-------|
+| **qwen3:32b** | 32B | Ollama | Default - best reasoning, has "thinking" mode |
+| **mistral-small3.2** | 24B | Ollama | Fast fallback, reliable |
+| **qwen2.5-coder:32b** | 32B | Ollama | Good for code-related queries |
+| **deepseek-coder-v2** | 16B | Ollama | Lightweight alternative |
+
+**Fallback: HuggingFace Transformers**
 
 | Model | Size | Quantization | VRAM Usage | Notes |
 |-------|------|--------------|------------|-------|
 | **Qwen2.5-32B-Instruct** | 32B | 4-bit GPTQ | ~18GB | Best reasoning, good for research |
-| **Mistral-Small-24B** | 24B | 4-bit | ~14GB | Fast, good instruction following |
-| **Llama-3.1-70B** | 70B | 4-bit GPTQ | ~38GB | Won't fit, need cloud |
-| **Qwen2.5-14B-Instruct** | 14B | FP16 | ~28GB | Full precision option |
+| **Mistral-7B-Instruct** | 7B | FP16 | ~14GB | Fast, good instruction following |
+| **TinyLlama-1.1B** | 1.1B | FP32 | ~4GB | Lightweight fallback |
 
-**Recommended starting point: Qwen2.5-32B-Instruct-GPTQ-Int4**
+**Recommended: Ollama with qwen3:32b** (run `ollama pull qwen3:32b`)
 
 ```python
 # models/llm_loader.py

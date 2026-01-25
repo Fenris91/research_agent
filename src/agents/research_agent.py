@@ -107,9 +107,46 @@ class ResearchAgent:
         self.web_search = web_search
         self.llm_generate = llm_generate
         self.config = config or AgentConfig()
+        self.ollama_base_url = ollama_base_url
 
         # Build the workflow graph
         self.graph = self._build_graph()
+
+    def switch_model(self, model_name: str) -> bool:
+        """
+        Switch to a different Ollama model.
+
+        Args:
+            model_name: Name of the Ollama model to switch to
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.use_ollama or self.model is None:
+            logger.warning("Cannot switch model: not using Ollama")
+            return False
+
+        try:
+            self.model.switch_model(model_name)
+            logger.info(f"Switched to model: {model_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to switch model: {e}")
+            return False
+
+    def get_current_model(self) -> str:
+        """Get the name of the currently active model."""
+        if self.use_ollama and self.model:
+            return self.model.model_name
+        elif self.tokenizer:
+            return self.tokenizer.name_or_path
+        return "unknown"
+
+    def list_available_models(self) -> list:
+        """List available Ollama models."""
+        if self.use_ollama and self.model:
+            return self.model.list_available_models()
+        return []
 
     def _test_vram_on_initialization(self):
         """
@@ -252,7 +289,7 @@ class ResearchAgent:
         # Check if model is loaded (for Ollama, tokenizer is None)
         if self.model and (self.tokenizer or self.use_ollama):
             # Use the loaded model
-            result["answer"] = self.infer(user_query, max_tokens=256)
+            result["answer"] = self.infer(user_query, max_tokens=1024)
         else:
             result["answer"] = "Fallback mode: Model not available. Query received but processing requires model loading."
             result["status"] = "deferred"
@@ -285,14 +322,26 @@ def create_research_agent(
     academic_search=None,
     web_search=None,
     llm_generate: Optional[Callable] = None,
-    config: Optional[AgentConfig] = None
+    config: Optional[AgentConfig] = None,
+    use_ollama: bool = False,
+    ollama_model: str = "mistral",
+    ollama_base_url: str = "http://localhost:11434"
 ) -> ResearchAgent:
-    """Factory function to create a ResearchAgent instance."""
+    """Factory function to create a ResearchAgent instance.
+
+    Args:
+        use_ollama: If True, use Ollama instead of HuggingFace models
+        ollama_model: Ollama model name (e.g., "qwen3:32b", "mistral-small3.2")
+        ollama_base_url: Ollama server URL
+    """
     return ResearchAgent(
         vector_store=vector_store,
         embedder=embedder,
         academic_search=academic_search,
         web_search=web_search,
         llm_generate=llm_generate,
-        config=config
+        config=config,
+        use_ollama=use_ollama,
+        ollama_model=ollama_model,
+        ollama_base_url=ollama_base_url
     )

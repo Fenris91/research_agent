@@ -72,7 +72,8 @@ chroma_db/
 qdrant_storage/
 
 # Model cache (can be huge)
-models/
+/models/
+!src/models/
 *.bin
 *.safetensors
 *.gguf

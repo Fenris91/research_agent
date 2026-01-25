@@ -64,6 +64,24 @@ def create_app(agent=None):
                 clear = gr.Button("Clear Chat")
 
             with gr.Accordion("Settings", open=False):
+                gr.Markdown("### LLM Model")
+                with gr.Row():
+                    model_dropdown = gr.Dropdown(
+                        choices=["Loading..."],
+                        value="Loading...",
+                        label="Select Model",
+                        scale=3,
+                        interactive=True
+                    )
+                    refresh_models_btn = gr.Button("🔄", scale=1, min_width=50)
+
+                current_model_display = gr.Textbox(
+                    label="Current Model",
+                    interactive=False,
+                    placeholder="No model loaded"
+                )
+
+                gr.Markdown("### Search Settings")
                 search_depth = gr.Slider(
                     minimum=1,
                     maximum=20,
@@ -202,6 +220,50 @@ def create_app(agent=None):
             analysis_plot = gr.Plot(label="Visualization")
 
         # Event handlers
+
+        def get_available_models():
+            """Get list of available Ollama models."""
+            if agent is None or not agent.use_ollama:
+                return ["No Ollama models available"]
+            try:
+                models = agent.list_available_models()
+                if models:
+                    # Sort with preferred models first
+                    preferred = ["qwen3:32b", "qwen2.5-coder:32b", "mistral-small3.2:latest"]
+                    sorted_models = []
+                    for p in preferred:
+                        if p in models:
+                            sorted_models.append(p)
+                    for m in models:
+                        if m not in sorted_models:
+                            sorted_models.append(m)
+                    return sorted_models
+                return ["No models found"]
+            except Exception as e:
+                logger.error(f"Error getting models: {e}")
+                return ["Error loading models"]
+
+        def get_current_model():
+            """Get the currently active model name."""
+            if agent is None:
+                return "No agent loaded"
+            return agent.get_current_model()
+
+        def switch_model(model_name):
+            """Switch to a different model."""
+            if agent is None:
+                return "No agent loaded"
+            if agent.switch_model(model_name):
+                return f"✓ Switched to: {model_name}"
+            return f"✗ Failed to switch to: {model_name}"
+
+        def refresh_model_list():
+            """Refresh the model dropdown and current model display."""
+            models = get_available_models()
+            current = get_current_model()
+            # Return: dropdown choices, dropdown value, current model display
+            return gr.update(choices=models, value=current), current
+
         def respond(message, history):
             """Handle chat messages."""
             if agent is None:
@@ -355,6 +417,23 @@ def create_app(agent=None):
         clear.click(lambda: [], outputs=[chatbot])
         refresh_btn.click(refresh_stats, outputs=[kb_stats])
 
+        # Model selector events
+        refresh_models_btn.click(
+            refresh_model_list,
+            outputs=[model_dropdown, current_model_display]
+        )
+        model_dropdown.change(
+            switch_model,
+            inputs=[model_dropdown],
+            outputs=[current_model_display]
+        )
+
+        # Initialize model list on load
+        app.load(
+            refresh_model_list,
+            outputs=[model_dropdown, current_model_display]
+        )
+
         # Researcher lookup events
         lookup_btn.click(
             lookup_researchers,
@@ -410,9 +489,10 @@ if __name__ == "__main__":
     # Ensure we can import from src
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../..")
     
-    # Check for Ollama preference via environment variable (default: true with qwen3)
+    # Check for Ollama preference via environment variable
+    # Default: use Ollama with qwen3:32b (most capable), falls back to mistral-small3.2
     use_ollama = os.getenv("USE_OLLAMA", "true").lower() == "true"
-    ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:32b")
+    ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:32b")  # Default to most capable
     ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     
     agent = None
