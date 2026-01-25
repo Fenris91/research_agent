@@ -65,13 +65,18 @@ This document outlines a concrete implementation plan for building an autonomous
 | - Researcher lookup tests | Done | 1 test |
 | - Ollama integration tests | Done | 5 tests |
 | - Agent model switch tests | Done | 2 tests |
+| - Citation explorer tests | Done | 2 tests |
+| **Citation Explorer** | Done | `src/tools/citation_explorer.py` |
+| - Get citations | Done | Papers citing/cited by a paper |
+| - Find highly connected | Done | Discover foundational works |
+| - Suggest related | Done | Citation overlap analysis |
+| - Build citation graph | Done | Network visualization data |
 
 ### In Progress
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | PDF Processing | Pending | Document processor scaffolded |
-| Citation Explorer | Pending | API methods exist, tool not wired |
 
 ### Not Started
 

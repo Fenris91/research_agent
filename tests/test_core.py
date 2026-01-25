@@ -318,3 +318,47 @@ class TestAgentModelSwitch:
         models = agent.list_available_models()
         assert isinstance(models, list)
         assert "qwen3:32b" in models or len(models) > 0
+
+
+# ============================================
+# Citation Explorer Tests
+# ============================================
+
+class TestCitationExplorer:
+    """Tests for citation explorer functionality."""
+
+    @pytest.mark.asyncio
+    async def test_get_citations(self):
+        """Test fetching citations for a paper."""
+        from src.tools.citation_explorer import CitationExplorer
+
+        explorer = CitationExplorer()
+
+        # Use a known paper ID (Neil Smith's gentrification book)
+        paper_id = "555d276eeef60f7a02c1347df45ecda067f44837"
+        citations = await explorer.get_citations(paper_id, direction="both", limit=3)
+
+        assert "citing" in citations
+        assert "cited" in citations
+        assert isinstance(citations["citing"], list)
+        assert isinstance(citations["cited"], list)
+
+        await explorer.close()
+
+    @pytest.mark.asyncio
+    async def test_citation_link_dataclass(self):
+        """Test CitationLink dataclass."""
+        from src.tools.citation_explorer import CitationLink
+
+        link = CitationLink(
+            paper_id="test123",
+            title="Test Paper",
+            year=2024,
+            direction="citing",
+            authors=["Author One"],
+            citation_count=50
+        )
+
+        assert link.paper_id == "test123"
+        assert link.direction == "citing"
+        assert link.citation_count == 50
