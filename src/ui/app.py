@@ -410,9 +410,9 @@ if __name__ == "__main__":
     # Ensure we can import from src
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../..")
     
-    # Check for Ollama preference via environment variable
-    use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
-    ollama_model = os.getenv("OLLAMA_MODEL", "mistral")
+    # Check for Ollama preference via environment variable (default: true with qwen3)
+    use_ollama = os.getenv("USE_OLLAMA", "true").lower() == "true"
+    ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:32b")
     ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     
     agent = None

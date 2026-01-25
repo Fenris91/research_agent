@@ -249,7 +249,8 @@ class ResearchAgent:
             "answer": ""
         }
         
-        if self.model and self.tokenizer:
+        # Check if model is loaded (for Ollama, tokenizer is None)
+        if self.model and (self.tokenizer or self.use_ollama):
             # Use the loaded model
             result["answer"] = self.infer(user_query, max_tokens=256)
         else:
