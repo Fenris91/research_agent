@@ -9,7 +9,7 @@ This document outlines a concrete implementation plan for building an autonomous
 
 ---
 
-## Implementation Status (Updated: January 2025)
+## Implementation Status (Updated: January 25, 2026)
 
 ### Completed
 
@@ -43,16 +43,23 @@ This document outlines a concrete implementation plan for building an autonomous
 | - External search | Done | Academic + web APIs |
 | - Response synthesis | Done | Structured output (no LLM) |
 | - Ingestion candidates | Done | Score and rank papers |
-| **Gradio UI** | Partial | `src/ui/app.py` |
+| **LLM Integration** | Done | `src/models/llm_utils.py` |
+| - Qwen2.5-32B primary model | Done | With GPTQ quantization |
+| - Mistral 7B fallback | Done | Public model, good quality |
+| - TinyLlama 1.1B fallback | Done | Lightweight, CPU-friendly |
+| - VRAM diagnostics | Done | Real-time GPU memory monitoring |
+| - Lazy loading support | Done | Defers loading on VRAM constraints |
+| **Gradio UI** | Done | `src/ui/app.py` |
 | - Basic structure | Done | Tabs for chat, KB, researcher |
 | - Researcher Lookup tab | Done | Functional |
-| - Chat integration | Pending | Needs agent wiring |
+| - Chat integration | Done | Agent fully wired and working |
+| - LLM response generation | Done | Inference with attention mask handling |
+| - Error handling | Done | Graceful fallbacks |
 
 ### In Progress
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| LLM Integration | Pending | Need to add local LLM for synthesis |
 | PDF Processing | Pending | Document processor scaffolded |
 | Citation Explorer | Pending | API methods exist, tool not wired |
 

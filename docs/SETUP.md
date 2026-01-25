@@ -1,5 +1,36 @@
 # Research Agent - Setup Instructions
 
+## Recent Updates (January 25, 2026)
+
+### LLM Integration Complete ✓
+- **Implemented multi-tier model fallback system** with Qwen2.5-32B → Mistral 7B → TinyLlama
+- **Fixed async/await issues** in the agent - synchronous wrapper for CLI/UI integration
+- **Added VRAM diagnostics** - real-time GPU memory monitoring and reporting
+- **Resolved import paths** - corrected relative imports for the module structure
+- **Fixed Gradio chatbot format** - proper message formatting with role/content keys
+- **Optimized inference** - attention mask handling and proper token slicing for clean outputs
+
+### Running the Application
+
+**Start the Gradio UI:**
+```bash
+cd /home/afro/projects/research_agent
+python src/ui/app.py
+```
+
+The app will:
+1. Initialize the ResearchAgent with the LLM
+2. Load Mistral 7B (falls back gracefully if needed)
+3. Automatically detect your GPU (5090 with 32GB VRAM)
+4. Launch at http://localhost:7860
+
+**Test via command line:**
+```bash
+python -c 'from src.agents.research_agent import ResearchAgent; agent = ResearchAgent(); result = agent.run("What is participatory action research?"); print(result)'
+```
+
+---
+
 ## Step 1: Move the Plan to WSL
 
 Your `research_assistant_implementation_plan.md` is downloaded in Edge (probably in `C:\Users\<YourUsername>\Downloads\`).

@@ -208,10 +208,22 @@ def create_app(agent=None):
                 # Demo mode
                 response = f"[Demo mode] You asked: {message}\n\nThe agent is not loaded. Run with a real agent to get responses."
             else:
-                # Real mode - would be async
-                response = "Agent response would appear here"
+                # Real mode - call the agent
+                try:
+                    result = agent.run(message)
+                    response = result.get("answer", "No response generated")
+                except Exception as e:
+                    response = f"Error: {str(e)}"
 
-            history.append((message, response))
+            # Append in Gradio's message format
+            history.append({
+                "role": "user",
+                "content": message
+            })
+            history.append({
+                "role": "assistant",
+                "content": response
+            })
             return "", history
 
         def refresh_stats():
@@ -392,6 +404,24 @@ def launch_app(
 
 
 if __name__ == "__main__":
-    # Launch in demo mode
-    print("Launching in demo mode (no agent loaded)...")
-    launch_app()
+    # Launch with agent
+    import sys
+    import os
+    
+    # Ensure we can import from src
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../..")
+    
+    agent = None
+    try:
+        from src.agents.research_agent import ResearchAgent
+        
+        print("Initializing Research Agent...")
+        agent = ResearchAgent()
+        print("✓ Agent loaded successfully")
+        launch_app(agent=agent)
+    except Exception as e:
+        print(f"⚠️ Failed to load agent: {e}")
+        import traceback
+        traceback.print_exc()
+        print("\nLaunching in demo mode...")
+        launch_app(agent=None)
