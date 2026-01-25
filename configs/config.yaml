@@ -1,0 +1,148 @@
+# Research Agent Configuration
+# Copy to config.local.yaml and modify for your setup
+
+# ============================================
+# Model Configuration
+# ============================================
+model:
+  # Options for 32GB VRAM:
+  # - "Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4" (recommended)
+  # - "mistralai/Mistral-Small-Instruct-2409" 
+  # - "Qwen/Qwen2.5-14B-Instruct" (full precision)
+  # - "ollama:qwen2.5:32b" (if using Ollama)
+  
+  provider: "huggingface"  # "huggingface" or "ollama"
+  name: "Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4"
+  
+  # Ollama settings (if provider: "ollama")
+  ollama_base_url: "http://localhost:11434"
+  ollama_model: "qwen2.5:32b-instruct-q4_K_M"
+  
+  # Generation settings
+  max_new_tokens: 2048
+  temperature: 0.7
+  top_p: 0.9
+  repetition_penalty: 1.1
+
+# ============================================
+# Embedding Model
+# ============================================
+embedding:
+  name: "BAAI/bge-large-en-v1.5"
+  device: "cuda"  # "cuda" or "cpu"
+  dimension: 1024
+  
+  # Optional reranker for better retrieval
+  reranker:
+    enabled: true
+    model: "BAAI/bge-reranker-base"
+
+# ============================================
+# Vector Store
+# ============================================
+vector_store:
+  type: "chromadb"  # "chromadb" or "qdrant"
+  persist_directory: "./data/chroma_db"
+  
+  # Qdrant settings (if type: "qdrant")
+  # qdrant_url: "http://localhost:6333"
+  # qdrant_api_key: null
+
+# ============================================
+# Retrieval Settings
+# ============================================
+retrieval:
+  top_k: 5
+  similarity_threshold: 0.7
+  
+  # Chunking for document ingestion
+  chunk_size: 512
+  chunk_overlap: 50
+
+# ============================================
+# Academic Search APIs
+# ============================================
+search:
+  semantic_scholar:
+    enabled: true
+    # Free tier: 100 requests per 5 minutes
+    rate_limit_requests: 100
+    rate_limit_window: 300  # seconds
+    
+  openalex:
+    enabled: true
+    # Very generous limits, no key needed
+    email: null  # Optional: set for polite pool
+    
+  unpaywall:
+    enabled: true
+    email: null  # Required for API access
+    
+  crossref:
+    enabled: true
+    email: null  # Optional: for polite pool
+    
+  # Web search for grey literature
+  web_search:
+    enabled: true
+    provider: "tavily"  # "tavily" or "serper"
+    # API key loaded from environment: TAVILY_API_KEY or SERPER_API_KEY
+
+# ============================================
+# Knowledge Base Ingestion
+# ============================================
+ingestion:
+  # Require user approval before adding sources
+  auto_ingest: false
+  
+  # If auto_ingest: true, minimum relevance score to auto-add
+  auto_threshold: 0.85
+  
+  # Quality filters
+  require_abstract: true
+  min_year: null  # e.g., 2015
+  
+  # Citation chain exploration
+  follow_citations: true
+  max_citation_depth: 1
+
+# ============================================
+# Data Analysis
+# ============================================
+analysis:
+  # Default visualization settings
+  figure_dpi: 150
+  default_style: "seaborn-v0_8-whitegrid"
+  
+  # Export formats
+  export_formats:
+    - "png"
+    - "csv"
+
+# ============================================
+# User Interface
+# ============================================
+ui:
+  port: 7860
+  host: "127.0.0.1"
+  share: false  # Set true to create public link
+  
+  # Theme
+  theme: "soft"  # "soft", "default", "glass", etc.
+
+# ============================================
+# Logging
+# ============================================
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "./logs/research_agent.log"
+  console: true
+
+# ============================================
+# Paths
+# ============================================
+paths:
+  data_dir: "./data"
+  cache_dir: "./cache"
+  exports_dir: "./exports"
+  logs_dir: "./logs"
