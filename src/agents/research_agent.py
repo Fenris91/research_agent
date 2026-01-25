@@ -55,22 +55,51 @@ class ResearchAgent:
         academic_search=None,
         web_search=None,
         llm_generate: Optional[Callable] = None,
-        config: Optional[AgentConfig] = None
+        config: Optional[AgentConfig] = None,
+        use_ollama: bool = False,
+        ollama_model: str = "mistral",
+        ollama_base_url: str = "http://localhost:11434"
     ):
         """
         Initialize the research agent.
+        
+        Args:
+            use_ollama: If True, use Ollama instead of HuggingFace models
+            ollama_model: Ollama model name (e.g., "mistral", "llama2", "neural-chat")
+            ollama_base_url: Ollama server URL
         """
         self.model = None
         self.tokenizer = None
         self._load_model_on_demand = True
+        self.use_ollama = use_ollama
         
-        try:
-            self.model, self.tokenizer = get_qlora_pipeline()
-            self._test_vram_on_initialization()
-            self._load_model_on_demand = False
-        except VRAMConstraintError as e:
-            print(f"⚠️ Model loading deferred due to VRAM constraints: {str(e)}")
-            self._load_model_on_demand = True
+        if use_ollama:
+            # Try Ollama first
+            try:
+                from ..models.llm_utils import get_ollama_pipeline, OllamaUnavailableError
+                self.model = get_ollama_pipeline(model_name=ollama_model, base_url=ollama_base_url)
+                self._load_model_on_demand = False
+                print(f"✓ Using Ollama model: {ollama_model}")
+            except OllamaUnavailableError as e:
+                print(f"⚠️ Ollama unavailable: {str(e)}")
+                print("Falling back to HuggingFace models...")
+                try:
+                    self.model, self.tokenizer = get_qlora_pipeline()
+                    self._test_vram_on_initialization()
+                    self._load_model_on_demand = False
+                    self.use_ollama = False
+                except VRAMConstraintError as e:
+                    print(f"⚠️ Model loading deferred due to VRAM constraints: {str(e)}")
+                    self._load_model_on_demand = True
+        else:
+            # Try HuggingFace models
+            try:
+                self.model, self.tokenizer = get_qlora_pipeline()
+                self._test_vram_on_initialization()
+                self._load_model_on_demand = False
+            except VRAMConstraintError as e:
+                print(f"⚠️ Model loading deferred due to VRAM constraints: {str(e)}")
+                self._load_model_on_demand = True
 
         self.vector_store = vector_store
         self.embedder = embedder
@@ -93,34 +122,40 @@ class ResearchAgent:
 
     def infer(self, prompt: str, max_tokens=512):
         """
-        Execute LLM inference with memory safety checks
+        Execute LLM inference with memory safety checks.
+        Supports both HuggingFace and Ollama models.
         """
         try:
-            # Pre-alloc check
-            check_vram()
-            
-            inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda")
-            input_length = inputs["input_ids"].shape[1]
-            
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    inputs["input_ids"],
-                    attention_mask=inputs.get("attention_mask"),
-                    max_new_tokens=max_tokens,
-                    do_sample=True,
-                    top_p=0.95,
-                    temperature=0.7,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                    pad_token_id=self.tokenizer.eos_token_id
-                )
+            if self.use_ollama:
+                # Use Ollama
+                return self.model.generate(prompt, max_tokens=max_tokens, temperature=0.7)
+            else:
+                # Use HuggingFace model
+                # Pre-alloc check
+                check_vram()
                 
-            # Post-alloc check
-            check_vram()
-            
-            # Decode only the generated tokens (exclude input)
-            generated_tokens = outputs[0][input_length:]
-            response = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
-            return response
+                inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda")
+                input_length = inputs["input_ids"].shape[1]
+                
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        inputs["input_ids"],
+                        attention_mask=inputs.get("attention_mask"),
+                        max_new_tokens=max_tokens,
+                        do_sample=True,
+                        top_p=0.95,
+                        temperature=0.7,
+                        eos_token_id=self.tokenizer.eos_token_id,
+                        pad_token_id=self.tokenizer.eos_token_id
+                    )
+                    
+                # Post-alloc check
+                check_vram()
+                
+                # Decode only the generated tokens (exclude input)
+                generated_tokens = outputs[0][input_length:]
+                response = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+                return response
             
         except torch.OutOfMemoryError as e:
             # Implement exponential backoff strategy

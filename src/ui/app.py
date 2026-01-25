@@ -402,7 +402,6 @@ def launch_app(
         show_error=True
     )
 
-
 if __name__ == "__main__":
     # Launch with agent
     import sys
@@ -411,12 +410,22 @@ if __name__ == "__main__":
     # Ensure we can import from src
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../..")
     
+    # Check for Ollama preference via environment variable
+    use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
+    ollama_model = os.getenv("OLLAMA_MODEL", "mistral")
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    
     agent = None
     try:
         from src.agents.research_agent import ResearchAgent
         
         print("Initializing Research Agent...")
-        agent = ResearchAgent()
+        if use_ollama:
+            print(f"Using Ollama model: {ollama_model}")
+            agent = ResearchAgent(use_ollama=True, ollama_model=ollama_model, ollama_base_url=ollama_url)
+        else:
+            print("Using HuggingFace models (set USE_OLLAMA=true to use Ollama)")
+            agent = ResearchAgent()
         print("✓ Agent loaded successfully")
         launch_app(agent=agent)
     except Exception as e:
