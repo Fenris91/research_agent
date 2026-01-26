@@ -12,7 +12,7 @@ import re
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, cast
 from dataclasses import dataclass
 
 # Try to import optional libraries
@@ -22,6 +22,7 @@ try:
     PYMUPDF_AVAILABLE = True
 except ImportError:
     PYMUPDF_AVAILABLE = False
+    fitz = None
 
 try:
     from unstructured.partition.auto import partition
@@ -29,6 +30,7 @@ try:
     UNSTRUCTURED_AVAILABLE = True
 except ImportError:
     UNSTRUCTURED_AVAILABLE = False
+    partition = None
 
 try:
     import pypdf
@@ -36,6 +38,7 @@ try:
     PYPDF_AVAILABLE = True
 except ImportError:
     PYPDF_AVAILABLE = False
+    pypdf = None
 
 try:
     from docx import Document as DocxDocument
@@ -43,6 +46,7 @@ try:
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
+    DocxDocument = None
 
 
 @dataclass
@@ -131,6 +135,8 @@ class DocumentProcessor:
         else:
             raise ValueError(f"Unsupported file type: {file_path.suffix}")
 
+        content = self._normalize_text(content)
+
         if not content.strip():
             raise ValueError(f"No content extracted from document: {file_path}")
 
@@ -192,11 +198,11 @@ class DocumentProcessor:
 
     def _extract_pdf_unstructured(self, file_path: Path) -> Tuple[str, Dict[str, Any]]:
         """Extract PDF content using unstructured library."""
-        elements = partition(filename=str(file_path))
+        elements = cast(Any, partition)(filename=str(file_path))
 
         # Separate content by type
         text_content = []
-        metadata = {"elements": []}
+        metadata = cast(Dict[str, Any], {"elements": []})
 
         for element in elements:
             text_content.append(str(element))
@@ -218,11 +224,11 @@ class DocumentProcessor:
 
     def _extract_pdf_pymupdf(self, file_path: Path) -> Tuple[str, Dict[str, Any]]:
         """Extract PDF content using PyMuPDF (fitz)."""
-        doc = fitz.open(str(file_path))
+        doc: Any = cast(Any, fitz).open(str(file_path))
 
         # Extract basic metadata
         doc_metadata = doc.metadata if doc.metadata else {}
-        metadata = {
+        metadata: Dict[str, Any] = {
             "page_count": len(doc),
             "title": doc_metadata.get("title", ""),
             "author": doc_metadata.get("author", ""),
@@ -235,20 +241,35 @@ class DocumentProcessor:
         full_text = ""
         sections = []
         current_section = {"title": "Introduction", "content": "", "page": 0}
+        first_page_lines = []
 
         try:
-            for page_num, page in enumerate(doc):
-                blocks = page.get_text("dict")["blocks"]
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                blocks = cast(Any, page.get_text("dict")).get("blocks", [])
 
                 for block in blocks:
                     if "lines" in block:
                         for line in block["lines"]:
-                            text = "".join([span["text"] for span in line["spans"]])
+                            spans = cast(Any, line).get("spans", [])
+                            text = "".join(
+                                [cast(Any, span).get("text", "") for span in spans]
+                            )
 
                             # Try to detect headers by font size
-                            if line["spans"]:
-                                font_size = line["spans"][0]["size"]
-                                is_bold = line["spans"][0]["flags"] & 2**4 != 0
+                            if spans:
+                                font_size = max(
+                                    cast(Any, span).get("size", 0) for span in spans
+                                )
+                                is_bold = any(
+                                    (cast(Any, span).get("flags", 0) & 2**4) != 0
+                                    for span in spans
+                                )
+
+                                if page_num == 0 and text.strip():
+                                    first_page_lines.append(
+                                        (text.strip(), font_size, is_bold)
+                                    )
 
                                 # Header detection: larger font, bold, short text
                                 if (
@@ -266,16 +287,27 @@ class DocumentProcessor:
                                 else:
                                     current_section["content"] += text + " "
 
-                            full_text += text + " "
+                            full_text += text + "\n"
         except Exception as e:
             print(f"Error extracting structured text: {e}")
             # Fallback to simple text extraction
-            full_text = doc.get_text()
+            text_pages = []
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                text_pages.append(page.get_text())
+            full_text = "\n".join(text_pages)
 
         if current_section["content"]:
             sections.append(current_section)
 
         metadata["sections"] = sections
+
+        if not metadata.get("title") or not metadata.get("authors"):
+            title, authors = self._extract_title_authors_from_lines(first_page_lines)
+            if title and not metadata.get("title"):
+                metadata["title"] = title
+            if authors and not metadata.get("authors"):
+                metadata["authors"] = authors
 
         doc.close()
         return full_text.strip(), metadata
@@ -283,9 +315,9 @@ class DocumentProcessor:
     def _extract_pdf_pypdf(self, file_path: Path) -> Tuple[str, Dict[str, Any]]:
         """Extract PDF content using pypdf (fallback method)."""
         with open(file_path, "rb") as file:
-            pdf_reader = pypdf.PdfReader(file)
+            pdf_reader = cast(Any, pypdf).PdfReader(file)
 
-            metadata = {
+            metadata: Dict[str, Any] = {
                 "page_count": len(pdf_reader.pages),
             }
 
@@ -313,9 +345,9 @@ class DocumentProcessor:
 
     def _extract_docx_content(self, file_path: Path) -> Tuple[str, Dict[str, Any]]:
         """Extract content from DOCX file."""
-        doc = DocxDocument(str(file_path))
+        doc = cast(Any, DocxDocument)(str(file_path))
 
-        metadata = {}
+        metadata: Dict[str, Any] = {}
 
         if hasattr(doc, "core_properties"):
             core = doc.core_properties
@@ -351,7 +383,10 @@ class DocumentProcessor:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
 
-        metadata = {"word_count": len(content.split()), "char_count": len(content)}
+        metadata: Dict[str, Any] = {
+            "word_count": len(content.split()),
+            "char_count": len(content),
+        }
 
         # Try to extract title (first line that looks like a title)
         lines = content.split("\n")
@@ -477,18 +512,20 @@ class DocumentProcessor:
 
             # Look for patterns like "Author Name", "Author Name1, Author Name2"
             if 5 < len(line) < 200:
-                # Multiple authors separated by commas or "and"
-                if "," in line or " and " in line.lower():
+                if line.lower().startswith("by "):
+                    line = line[3:].strip()
+
+                if self._looks_like_author_line(line):
                     potential_authors = re.split(r",\s*|\s+and\s+", line)
                     for author in potential_authors:
                         author = author.strip()
-                        if 3 < len(author) < 50 and not any(
-                            x in author.lower()
-                            for x in ["university", "department", "institute"]
-                        ):
+                        if self._is_name_candidate(author):
                             authors.append(author)
-                # Single author
-                elif len(line.split()) <= 4 and line[0].isupper():
+                elif (
+                    1 < len(line.split()) <= 4
+                    and line[0].isupper()
+                    and self._is_name_candidate(line)
+                ):
                     authors.append(line)
 
             # Stop after we find some authors or reach abstract
@@ -504,6 +541,219 @@ class DocumentProcessor:
         unique_string = f"{file_path}_{stat.st_size}_{stat.st_mtime}"
         return hashlib.md5(unique_string.encode()).hexdigest()[:16]
 
+    def _normalize_text(self, content: str) -> str:
+        """Normalize extracted text for downstream processing."""
+        text = content.replace("\r\n", "\n").replace("\r", "\n")
+        text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    def _extract_title_authors_from_lines(self, lines: List[Tuple[str, float, bool]]):
+        """Extract title and authors from first-page lines."""
+        if not lines:
+            return None, []
+
+        max_size = max(size for _, size, _ in lines)
+        title = None
+        title_index = None
+        authors = []
+
+        title_lines = []
+        for i, (text, size, _) in enumerate(lines):
+            cleaned = text.strip()
+            if not cleaned:
+                continue
+            if any(x in cleaned.lower() for x in ["abstract", "introduction"]):
+                continue
+            if size >= max_size - 0.5 and len(cleaned) < 200:
+                title_lines.append((i, cleaned))
+
+        if title_lines:
+            title_index = title_lines[0][0]
+            combined = []
+            last_index = title_index - 1
+            for idx, text in title_lines:
+                if idx == last_index + 1 and len(" ".join(combined + [text])) < 200:
+                    combined.append(text)
+                    last_index = idx
+                elif not combined:
+                    combined.append(text)
+                    last_index = idx
+                else:
+                    break
+            title = " ".join(combined).strip()
+
+        if title and "  " in title:
+            parts = re.split(r"\s{2,}", title)
+            if len(parts) > 1 and self._looks_like_author_line(parts[-1]):
+                candidates = re.split(r",\s*|\s+and\s+", parts[-1].strip())
+                for author in candidates:
+                    author = author.strip()
+                    if self._is_name_candidate(author):
+                        authors.append(author)
+                if authors:
+                    title = " ".join(parts[:-1]).strip()
+
+        if title_index is None:
+            return None, []
+
+        for text, _, _ in lines[title_index + 1 :]:
+            cleaned = text.strip()
+            if not cleaned:
+                break
+            if any(
+                x in cleaned.lower() for x in ["abstract", "introduction", "keywords"]
+            ):
+                break
+            if len(cleaned) > 200:
+                break
+
+            line = cleaned
+            if line.lower().startswith("by "):
+                line = line[3:].strip()
+
+            if not self._looks_like_author_line(line):
+                break
+
+            candidates = re.split(r",\s*|\s+and\s+", line)
+            for author in candidates:
+                author = author.strip()
+                if self._is_name_candidate(author):
+                    authors.append(author)
+            if authors:
+                break
+
+        if not authors:
+            for text, _, _ in lines:
+                cleaned = text.strip()
+                if not cleaned:
+                    continue
+                if self._looks_like_author_line(cleaned):
+                    candidates = re.split(r",\s*|\s+and\s+", cleaned)
+                    for author in candidates:
+                        author = author.strip()
+                        if self._is_name_candidate(author):
+                            authors.append(author)
+                    if authors:
+                        break
+
+        return title, authors
+
+    def _looks_like_author_line(self, text: str) -> bool:
+        """Heuristic to detect likely author lines."""
+        cleaned = text.strip()
+        if not cleaned:
+            return False
+        if cleaned.endswith("."):
+            return False
+        if cleaned.isupper() and " " not in cleaned:
+            return False
+        if ":" in cleaned:
+            return False
+        if any(ch.isdigit() for ch in cleaned):
+            return False
+
+        blocked_tokens = [
+            "university",
+            "department",
+            "institute",
+            "school",
+            "college",
+            "@",
+            "http",
+            "report",
+            "copyright",
+            "association",
+            "programme",
+            "program",
+            "suite",
+            "blvd",
+            "street",
+            "st.",
+            "avenue",
+            "road",
+            "rd.",
+            "isbn",
+            "rights",
+            "reserved",
+            "published",
+            "website",
+            "www",
+            "org",
+        ]
+        if any(token in cleaned.lower() for token in blocked_tokens):
+            return False
+
+        tokens = re.split(r"[ ,]+", cleaned)
+        tokens = [t for t in tokens if t and t.lower() != "and"]
+        if len(tokens) < 2:
+            return False
+
+        has_separator = "," in cleaned or " and " in cleaned.lower()
+        if not has_separator and len(tokens) != 2:
+            return False
+
+        particles = {"de", "da", "del", "la", "van", "von", "der", "di"}
+        lower_starts = sum(
+            1 for t in tokens if t[0].islower() and t.lower() not in particles
+        )
+        if lower_starts > 0:
+            return False
+
+        uppercase_tokens = sum(1 for t in tokens if t.isupper())
+        if uppercase_tokens >= len(tokens):
+            return False
+
+        return True
+
+    def _is_name_candidate(self, text: str) -> bool:
+        """Check if a token looks like a person name."""
+        cleaned = text.strip()
+        if not cleaned:
+            return False
+        if len(cleaned) < 3 or len(cleaned) > 60:
+            return False
+        if any(ch.isdigit() for ch in cleaned):
+            return False
+        if ":" in cleaned:
+            return False
+        if any(
+            token in cleaned.lower()
+            for token in [
+                "university",
+                "department",
+                "institute",
+                "school",
+                "college",
+                "@",
+                "http",
+                "report",
+                "rights",
+                "reserved",
+                "published",
+                "association",
+                "programme",
+                "program",
+                "suite",
+                "blvd",
+                "isbn",
+                "website",
+                "www",
+                "org",
+            ]
+        ):
+            return False
+        if cleaned.isupper():
+            return False
+        if not any(ch.isalpha() for ch in cleaned):
+            return False
+        if not cleaned[0].isupper():
+            return False
+        if len(cleaned.split()) < 2 and "." not in cleaned:
+            return False
+        return True
+
     def _extract_content_metadata(self, content: str) -> Dict[str, Any]:
         """Extract metadata heuristics from content."""
         normalized = " ".join(content.split())
@@ -518,7 +768,7 @@ class DocumentProcessor:
 
         doi_match = re.search(r"\b10\.\d{4,}/[^\s\]]+", normalized)
         if doi_match:
-            metadata["doi"] = doi_match.group()
+            metadata["doi"] = doi_match.group().rstrip(".,;)")
 
         return metadata
 

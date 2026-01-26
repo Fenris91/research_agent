@@ -19,9 +19,10 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
   - [x] researcher_lookup.py - Migrated
 
 - [ ] **PDF Processing** - Basic pipeline working, needs validation
-  - Validate PDF text/structure extraction on real PDFs
+  - Validate PDF text/structure extraction on real PDFs (validated on sample PDFs in Downloads)
   - Refine metadata extraction (title, authors, DOI)
   - Tune chunking for embeddings
+  - Added first-page title/author heuristics and text normalization
 
 - [ ] **Knowledge Base Management** - Upload/delete papers in UI
   - Process document uploads into vector store
