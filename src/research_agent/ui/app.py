@@ -306,14 +306,58 @@ def create_app(agent=None):
         vector_store = None
         embedder = None
         processor = None
+        reranker = None
+        rerank_top_k = None
+        _config_cache = None
+
+        def _load_config():
+            nonlocal _config_cache
+            if _config_cache is not None:
+                return _config_cache
+
+            config_path = Path("configs/config.yaml")
+            if not config_path.exists():
+                _config_cache = {}
+                return _config_cache
+
+            try:
+                import yaml
+
+                with config_path.open("r", encoding="utf-8") as f:
+                    _config_cache = yaml.safe_load(f) or {}
+            except Exception as e:  # pragma: no cover - defensive
+                logger.error(f"Failed to load config: {e}")
+                _config_cache = {}
+            return _config_cache
 
         def _get_kb_resources():
-            nonlocal vector_store, embedder, processor
+            nonlocal vector_store, embedder, processor, reranker, rerank_top_k
 
             if vector_store is None:
                 from research_agent.db.vector_store import ResearchVectorStore
 
-                vector_store = ResearchVectorStore()
+                cfg = _load_config()
+
+                if reranker is None:
+                    try:
+                        from research_agent.models.reranker import (
+                            load_reranker_from_config,
+                        )
+
+                        reranker = load_reranker_from_config(cfg)
+                        rerank_top_k = (
+                            cfg.get("retrieval", {}).get("rerank_top_k")
+                            if isinstance(cfg, dict)
+                            else None
+                        )
+                    except Exception as e:  # pragma: no cover - optional
+                        logger.warning(f"Reranker unavailable: {e}")
+                        reranker = None
+                        rerank_top_k = None
+
+                vector_store = ResearchVectorStore(
+                    reranker=reranker, rerank_top_k=rerank_top_k
+                )
 
             if embedder is None:
                 from research_agent.db.embeddings import get_embedder
