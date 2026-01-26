@@ -39,7 +39,7 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 - [x] **Complete Package Migration** - Finish moving all modules to `research_agent` package
 - [x] **Wire Citation Explorer to UI** - Add tab or section for exploring citations (Gradio tab + handlers wired)
-- [ ] **Reranker** - Add BGE reranker for better retrieval quality
+ - [ ] **Reranker** - Add BGE reranker for better retrieval quality (helper and tests added; needs wiring into retrieval path)
 
 ### Medium Priority
 
