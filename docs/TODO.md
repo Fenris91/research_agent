@@ -114,10 +114,7 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 2. **Knowledge Base Management**
    - Refresh stats/browse list and delete flows in UI
 
-3. **Reranker**
-   - Add BGE reranker and re-enable skipped retrieval tests
-
-4. **Network Visualization**
+3. **Network Visualization**
    - Implement citation graph rendering
    - Use existing `build_network_data()` output
 
