@@ -29,8 +29,8 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 ### High Priority
 
-- [ ] **Complete Package Migration** - Finish moving all modules to `research_agent` package
-- [ ] **Wire Citation Explorer to UI** - Add tab or section for exploring citations
+- [x] **Complete Package Migration** - Finish moving all modules to `research_agent` package
+- [x] **Wire Citation Explorer to UI** - Add tab or section for exploring citations
 - [ ] **Knowledge Base Management** - Upload/delete papers in UI
 - [ ] **Reranker** - Add BGE reranker for better retrieval quality
 

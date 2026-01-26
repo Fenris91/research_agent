@@ -184,6 +184,11 @@ def create_app(agent=None):
             # State to store full results
             researcher_results_state = gr.State([])
 
+        with gr.Tab("Citation Explorer"):
+            from research_agent.ui.components import render_citation_explorer
+
+            render_citation_explorer()
+
         with gr.Tab("Data Analysis"):
             gr.Markdown("## Analyze Your Data")
 
