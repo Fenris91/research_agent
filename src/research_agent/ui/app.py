@@ -102,7 +102,9 @@ def create_app(agent=None):
 
             with gr.Row():
                 upload_pdf = gr.File(
-                    label="Upload PDFs", file_types=[".pdf"], file_count="multiple"
+                    label="Upload Documents",
+                    file_types=[".pdf", ".txt", ".md", ".docx"],
+                    file_count="multiple",
                 )
                 upload_btn = gr.Button("Process & Add", variant="primary")
 
@@ -114,8 +116,22 @@ def create_app(agent=None):
 
             gr.Markdown("### Browse Papers")
             papers_table = gr.Dataframe(
-                headers=["Title", "Year", "Authors", "Added"],
+                headers=["Title", "Year", "Authors", "Added", "Paper ID"],
                 label="Papers in Knowledge Base",
+            )
+
+            with gr.Row():
+                delete_paper_id = gr.Textbox(
+                    label="Paper ID",
+                    placeholder="Enter paper ID to delete",
+                    scale=4,
+                )
+                delete_paper_btn = gr.Button("Delete", variant="stop", scale=1)
+
+            delete_status = gr.Textbox(
+                label="Delete Status",
+                interactive=False,
+                placeholder="Enter a paper ID to delete",
             )
 
         with gr.Tab("Researcher Lookup"):
@@ -287,10 +303,118 @@ def create_app(agent=None):
             history.append({"role": "assistant", "content": response})
             return "", history
 
-        def refresh_stats():
-            """Refresh knowledge base statistics."""
-            # TODO: Get real stats from vector store
-            return {"total_papers": 0, "total_notes": 0, "total_web_sources": 0}
+        vector_store = None
+        embedder = None
+        processor = None
+
+        def _get_kb_resources():
+            nonlocal vector_store, embedder, processor
+
+            if vector_store is None:
+                from research_agent.db.vector_store import ResearchVectorStore
+
+                vector_store = ResearchVectorStore()
+
+            if embedder is None:
+                from research_agent.db.embeddings import get_embedder
+
+                embedder = get_embedder()
+
+            if processor is None:
+                from research_agent.processors.document_processor import (
+                    DocumentProcessor,
+                )
+
+                processor = DocumentProcessor()
+
+            return vector_store, embedder, processor
+
+        def _format_papers_table(papers):
+            if not papers:
+                return []
+            table_data = []
+            for paper in papers:
+                table_data.append(
+                    [
+                        paper.get("title", "Unknown"),
+                        paper.get("year", ""),
+                        paper.get("authors", ""),
+                        paper.get("added_at", ""),
+                        paper.get("paper_id", ""),
+                    ]
+                )
+            return table_data
+
+        def refresh_stats_and_table():
+            """Refresh knowledge base statistics and paper list."""
+            store, _, _ = _get_kb_resources()
+            stats = store.get_stats()
+            papers = store.list_papers(limit=200)
+            return stats, _format_papers_table(papers)
+
+        def ingest_documents(files):
+            """Process and add documents to the knowledge base."""
+            if not files:
+                stats, table = refresh_stats_and_table()
+                return "No files selected.", stats, table
+
+            store, embedder_model, doc_processor = _get_kb_resources()
+            added = 0
+            skipped = 0
+            errors = []
+
+            for file_obj in files:
+                try:
+                    if isinstance(file_obj, str):
+                        file_path = file_obj
+                    elif isinstance(file_obj, dict) and "name" in file_obj:
+                        file_path = file_obj["name"]
+                    else:
+                        file_path = file_obj.name
+
+                    doc = doc_processor.process_document(file_path)
+                    paper_id = doc.metadata.get("doi") or doc.doc_id
+
+                    if store.get_paper(paper_id):
+                        skipped += 1
+                        continue
+
+                    chunk_texts = [chunk.text for chunk in doc.chunks]
+                    embeddings = embedder_model.embed_documents(
+                        chunk_texts, batch_size=32, show_progress=False
+                    )
+                    store.add_paper(paper_id, chunk_texts, embeddings, doc.metadata)
+                    added += 1
+                except Exception as e:
+                    errors.append(f"{getattr(file_obj, 'name', file_obj)}: {e}")
+
+            stats, table = refresh_stats_and_table()
+
+            status_parts = [f"Added {added} document(s)"]
+            if skipped:
+                status_parts.append(f"Skipped {skipped} duplicate(s)")
+            if errors:
+                status_parts.append("Errors: " + "; ".join(errors[:3]))
+                if len(errors) > 3:
+                    status_parts.append(f"(+{len(errors) - 3} more)")
+
+            return ". ".join(status_parts), stats, table
+
+        def delete_paper(paper_id):
+            """Delete a paper from the knowledge base."""
+            if not paper_id:
+                stats, table = refresh_stats_and_table()
+                return "Enter a paper ID to delete.", stats, table
+
+            store, _, _ = _get_kb_resources()
+            deleted = store.delete_paper(paper_id)
+            status = (
+                f"Deleted paper {paper_id}."
+                if deleted
+                else f"Paper not found: {paper_id}."
+            )
+            stats, table = refresh_stats_and_table()
+            return status, stats, table
 
         def lookup_researchers(names_text, use_oa, use_s2, use_web):
             """Look up researcher profiles."""
@@ -414,7 +538,17 @@ def create_app(agent=None):
         msg.submit(respond, [msg, chatbot], [msg, chatbot])
         submit.click(respond, [msg, chatbot], [msg, chatbot])
         clear.click(lambda: [], outputs=[chatbot])
-        refresh_btn.click(refresh_stats, outputs=[kb_stats])
+        refresh_btn.click(refresh_stats_and_table, outputs=[kb_stats, papers_table])
+        upload_btn.click(
+            ingest_documents,
+            inputs=[upload_pdf],
+            outputs=[upload_status, kb_stats, papers_table],
+        )
+        delete_paper_btn.click(
+            delete_paper,
+            inputs=[delete_paper_id],
+            outputs=[delete_status, kb_stats, papers_table],
+        )
 
         # Model selector events
         refresh_models_btn.click(

@@ -18,10 +18,15 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
   - [x] web_search.py - Migrated
   - [x] researcher_lookup.py - Migrated
 
-- [ ] **PDF Processing** - Document processor scaffolded but not functional
-  - Parse PDF text and structure
-  - Extract metadata (title, authors, DOI)
-  - Chunk documents for embedding
+- [ ] **PDF Processing** - Basic pipeline working, needs validation
+  - Validate PDF text/structure extraction on real PDFs
+  - Refine metadata extraction (title, authors, DOI)
+  - Tune chunking for embeddings
+
+- [ ] **Knowledge Base Management** - Upload/delete papers in UI
+  - Process document uploads into vector store
+  - Refresh stats and browse list
+  - Delete papers by ID
 
 ---
 
@@ -31,7 +36,6 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 - [x] **Complete Package Migration** - Finish moving all modules to `research_agent` package
 - [x] **Wire Citation Explorer to UI** - Add tab or section for exploring citations
-- [ ] **Knowledge Base Management** - Upload/delete papers in UI
 - [ ] **Reranker** - Add BGE reranker for better retrieval quality
 
 ### Medium Priority
