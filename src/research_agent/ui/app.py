@@ -561,6 +561,9 @@ def create_app(agent=None):
         # Initialize model list on load
         app.load(refresh_model_list, outputs=[model_dropdown, current_model_display])
 
+        # Initialize knowledge base stats/table on load
+        app.load(refresh_stats_and_table, outputs=[kb_stats, papers_table])
+
         # Researcher lookup events
         lookup_btn.click(
             lookup_researchers,

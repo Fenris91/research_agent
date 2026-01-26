@@ -50,24 +50,16 @@ def test_document_processor():
         # Process document
         doc = processor.process_document(test_file)
 
-        print("✅ Document Processing Test Results:")
-        print(f"Title: {doc.title}")
-        print(f"Authors: {doc.authors}")
-        print(f"Content length: {len(doc.content)} chars")
-        print(f"Number of chunks: {len(doc.chunks)}")
-        print(f"Metadata keys: {list(doc.metadata.keys())}")
-
-        # Show first chunk
-        if doc.chunks:
-            print("\nFirst chunk preview:")
-            print(f"Text: {doc.chunks[0].text[:150]}...")
-            print(f"Chunk metadata: {list(doc.chunks[0].metadata.keys())}")
-
         # Assertions
         assert doc.title
         assert doc.content
         assert doc.chunks
         assert doc.metadata.get("doi") == "10.1234/climate.2023.001"
+        validation = doc.metadata.get("validation", {})
+        assert validation.get("has_title") is True
+        assert validation.get("has_doi") is True
+        assert validation.get("chunk_count") == len(doc.chunks)
+        assert validation.get("avg_chunk_words", 0) > 0
 
     finally:
         # Clean up

@@ -162,6 +162,11 @@ class DocumentProcessor:
         # Create chunks
         chunks = self._create_chunks(content, metadata)
 
+        # Build lightweight validation summary
+        metadata["validation"] = self._build_validation_summary(
+            content=content, metadata=metadata, chunks=chunks
+        )
+
         return ProcessedDocument(
             title=metadata.get("title", "Unknown Title"),
             authors=metadata.get("authors", []),
@@ -766,11 +771,37 @@ class DocumentProcessor:
             "has_references": "references" in normalized.lower()[-5000:],
         }
 
-        doi_match = re.search(r"\b10\.\d{4,}/[^\s\]]+", normalized)
+        doi_match = re.search(
+            r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", normalized, flags=re.IGNORECASE
+        )
         if doi_match:
             metadata["doi"] = doi_match.group().rstrip(".,;)")
+            metadata["doi_source"] = "content"
 
         return metadata
+
+    def _build_validation_summary(
+        self, content: str, metadata: Dict[str, Any], chunks: List[DocumentChunk]
+    ) -> Dict[str, Any]:
+        """Create a simple validation summary for extracted documents."""
+        word_count = metadata.get("word_count") or len(content.split())
+
+        avg_chunk_words = 0
+        if chunks:
+            avg_chunk_words = int(
+                sum(c.metadata.get("word_count", 0) for c in chunks) / len(chunks)
+            )
+
+        return {
+            "word_count": word_count,
+            "chunk_count": len(chunks),
+            "avg_chunk_words": avg_chunk_words,
+            "has_title": bool(metadata.get("title")),
+            "has_authors": bool(metadata.get("authors")),
+            "has_doi": bool(metadata.get("doi")),
+            "has_abstract": bool(metadata.get("has_abstract")),
+            "has_references": bool(metadata.get("has_references")),
+        }
 
     def get_supported_formats(self) -> List[str]:
         """Get list of supported file formats."""

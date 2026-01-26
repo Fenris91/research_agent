@@ -23,11 +23,13 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
   - Refine metadata extraction (title, authors, DOI)
   - Tune chunking for embeddings
   - Added first-page title/author heuristics and text normalization
+  - Added validation summary (title/authors/doi flags, chunk stats) and stronger DOI pattern
 
-- [ ] **Knowledge Base Management** - Upload/delete papers in UI
+- [x] **Knowledge Base Management** - Upload/delete papers in UI
   - Process document uploads into vector store
   - Refresh stats and browse list
   - Delete papers by ID
+  - Auto-refresh stats/table on UI load
 
 ---
 
