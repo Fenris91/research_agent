@@ -1,3 +1,4 @@
+# pyright: reportGeneralTypeIssues=false
 """
 Vector Store for Research Knowledge Base
 
@@ -11,7 +12,7 @@ Supports multiple collections:
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Optional, Any, Union
+from typing import List, Dict, Optional, Any, Union, cast
 
 import chromadb
 from chromadb.config import Settings
@@ -41,7 +42,9 @@ class ResearchVectorStore:
     def __init__(
         self,
         persist_dir: str = "./data/chroma_db",
-        embedding_function: Optional[Any] = None
+        embedding_function: Optional[Any] = None,
+        reranker: Optional[Any] = None,
+        rerank_top_k: Optional[int] = None,
     ):
         """
         Initialize the vector store.
@@ -53,29 +56,36 @@ class ResearchVectorStore:
         self.persist_dir = Path(persist_dir)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
 
+        # Optional reranker (e.g., BGE cross-encoder)
+        self.reranker = reranker
+        self.rerank_top_k = rerank_top_k
+
         # Initialize ChromaDB client
         self.client = chromadb.PersistentClient(
             path=str(self.persist_dir),
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True
-            )
+            settings=Settings(anonymized_telemetry=False, allow_reset=True),
         )
 
         # Initialize collections with cosine similarity
-        self.papers = self.client.get_or_create_collection(
-            name="academic_papers",
-            metadata={"hnsw:space": "cosine"}
+        self.papers: Any = cast(
+            Any,
+            self.client.get_or_create_collection(
+                name="academic_papers", metadata={"hnsw:space": "cosine"}
+            ),
         )
 
-        self.notes = self.client.get_or_create_collection(
-            name="research_notes",
-            metadata={"hnsw:space": "cosine"}
+        self.notes: Any = cast(
+            Any,
+            self.client.get_or_create_collection(
+                name="research_notes", metadata={"hnsw:space": "cosine"}
+            ),
         )
 
-        self.web_sources = self.client.get_or_create_collection(
-            name="web_sources",
-            metadata={"hnsw:space": "cosine"}
+        self.web_sources: Any = cast(
+            Any,
+            self.client.get_or_create_collection(
+                name="web_sources", metadata={"hnsw:space": "cosine"}
+            ),
         )
 
         logger.info(f"Initialized vector store at {self.persist_dir}")
@@ -85,10 +95,12 @@ class ResearchVectorStore:
         collections = {
             "papers": self.papers,
             "notes": self.notes,
-            "web_sources": self.web_sources
+            "web_sources": self.web_sources,
         }
         if collection not in collections:
-            raise ValueError(f"Unknown collection: {collection}. Use: {list(collections.keys())}")
+            raise ValueError(
+                f"Unknown collection: {collection}. Use: {list(collections.keys())}"
+            )
         return collections[collection]
 
     def _sanitize_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -116,7 +128,7 @@ class ResearchVectorStore:
         paper_id: str,
         chunks: List[str],
         embeddings: List[List[float]],
-        metadata: Dict[str, Any]
+        metadata: Dict[str, Any],
     ) -> None:
         """
         Add paper chunks to the knowledge base.
@@ -138,7 +150,7 @@ class ResearchVectorStore:
         base_metadata = {
             **metadata,
             "paper_id": paper_id,
-            "added_at": datetime.now(timezone.utc).isoformat()
+            "added_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Sanitize metadata
@@ -146,18 +158,17 @@ class ResearchVectorStore:
 
         # Create IDs and metadata for each chunk
         ids = [f"{paper_id}_chunk_{i}" for i in range(len(chunks))]
-        metadatas = [
-            {**base_metadata, "chunk_index": i}
-            for i in range(len(chunks))
-        ]
+        metadatas = [{**base_metadata, "chunk_index": i} for i in range(len(chunks))]
+        embeddings_any: Any = embeddings
+        metadatas_any: Any = metadatas
 
         # Add to collection
         self.papers.add(
             ids=ids,
-            embeddings=embeddings,
+            embeddings=embeddings_any,
             documents=chunks,
-            metadatas=metadatas
-        )
+            metadatas=metadatas_any,
+        )  # type: ignore[arg-type]
 
         logger.info(f"Added paper {paper_id} with {len(chunks)} chunks")
 
@@ -166,7 +177,7 @@ class ResearchVectorStore:
         note_id: str,
         content: str,
         embedding: List[float],
-        metadata: Dict[str, Any]
+        metadata: Dict[str, Any],
     ) -> None:
         """
         Add a research note to the knowledge base.
@@ -181,7 +192,7 @@ class ResearchVectorStore:
         note_metadata = {
             **metadata,
             "note_id": note_id,
-            "added_at": datetime.now(timezone.utc).isoformat()
+            "added_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Sanitize metadata
@@ -189,10 +200,10 @@ class ResearchVectorStore:
 
         self.notes.add(
             ids=[note_id],
-            embeddings=[embedding],
+            embeddings=cast(Any, [embedding]),
             documents=[content],
-            metadatas=[note_metadata]
-        )
+            metadatas=cast(Any, [note_metadata]),
+        )  # type: ignore[arg-type]
 
         logger.info(f"Added note {note_id}")
 
@@ -201,7 +212,7 @@ class ResearchVectorStore:
         source_id: str,
         chunks: List[str],
         embeddings: List[List[float]],
-        metadata: Dict[str, Any]
+        metadata: Dict[str, Any],
     ) -> None:
         """
         Add web content to the knowledge base.
@@ -223,7 +234,7 @@ class ResearchVectorStore:
         base_metadata = {
             **metadata,
             "source_id": source_id,
-            "added_at": datetime.now(timezone.utc).isoformat()
+            "added_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Sanitize metadata
@@ -231,17 +242,16 @@ class ResearchVectorStore:
 
         # Create IDs and metadata for each chunk
         ids = [f"{source_id}_chunk_{i}" for i in range(len(chunks))]
-        metadatas = [
-            {**base_metadata, "chunk_index": i}
-            for i in range(len(chunks))
-        ]
+        metadatas = [{**base_metadata, "chunk_index": i} for i in range(len(chunks))]
+        embeddings_any: Any = embeddings
+        metadatas_any: Any = metadatas
 
         self.web_sources.add(
             ids=ids,
-            embeddings=embeddings,
+            embeddings=embeddings_any,
             documents=chunks,
-            metadatas=metadatas
-        )
+            metadatas=metadatas_any,
+        )  # type: ignore[arg-type]
 
         logger.info(f"Added web source {source_id} with {len(chunks)} chunks")
 
@@ -250,7 +260,10 @@ class ResearchVectorStore:
         query_embedding: List[float],
         collection: str = "papers",
         n_results: int = 5,
-        filter_dict: Optional[Dict] = None
+        filter_dict: Optional[Dict] = None,
+        query_text: Optional[str] = None,
+        reranker: Optional[Any] = None,
+        rerank_top_k: Optional[int] = None,
     ) -> Dict:
         """
         Search for similar documents.
@@ -266,26 +279,47 @@ class ResearchVectorStore:
         """
         coll = self._get_collection(collection)
 
-        results = coll.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=filter_dict,
-            include=["documents", "metadatas", "distances"]
+        results = cast(
+            Dict[str, Any],
+            coll.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=filter_dict,
+                include=["documents", "metadatas", "distances"],
+            ),
         )
 
         # Flatten results (query returns nested lists)
-        return {
-            "ids": results["ids"][0] if results["ids"] else [],
-            "documents": results["documents"][0] if results["documents"] else [],
-            "metadatas": results["metadatas"][0] if results["metadatas"] else [],
-            "distances": results["distances"][0] if results["distances"] else []
+        flat = {
+            "ids": (results.get("ids") or [[]])[0],
+            "documents": (results.get("documents") or [[]])[0],
+            "metadatas": (results.get("metadatas") or [[]])[0],
+            "distances": (results.get("distances") or [[]])[0],
         }
+
+        effective_reranker = reranker or self.reranker
+        effective_top_k = rerank_top_k or self.rerank_top_k
+
+        if effective_reranker and query_text and flat["documents"]:
+            reranked = effective_reranker.rerank(
+                query_text, flat["documents"], top_k=effective_top_k
+            )
+            indices = [item.index for item in reranked]
+            flat = {
+                "ids": [flat["ids"][i] for i in indices],
+                "documents": [flat["documents"][i] for i in indices],
+                "metadatas": [flat["metadatas"][i] for i in indices],
+                "distances": [flat["distances"][i] for i in indices],
+                "rerank_scores": [item.score for item in reranked],
+            }
+
+        return flat
 
     def search_all(
         self,
         query_embedding: List[float],
         n_results: int = 5,
-        filter_dict: Optional[Dict] = None
+        filter_dict: Optional[Dict] = None,
     ) -> Dict[str, Dict]:
         """
         Search across all collections.
@@ -301,7 +335,9 @@ class ResearchVectorStore:
         return {
             "papers": self.search(query_embedding, "papers", n_results, filter_dict),
             "notes": self.search(query_embedding, "notes", n_results, filter_dict),
-            "web_sources": self.search(query_embedding, "web_sources", n_results, filter_dict)
+            "web_sources": self.search(
+                query_embedding, "web_sources", n_results, filter_dict
+            ),
         }
 
     def get_paper(self, paper_id: str) -> Optional[Dict]:
@@ -314,26 +350,28 @@ class ResearchVectorStore:
         Returns:
             Dict with chunks and metadata, or None if not found
         """
-        results = self.papers.get(
-            where={"paper_id": paper_id},
-            include=["documents", "metadatas"]
+        results = cast(
+            Dict[str, Any],
+            self.papers.get(
+                where={"paper_id": paper_id}, include=["documents", "metadatas"]
+            ),
         )
+        result_ids = results.get("ids") or []
+        documents = cast(List[str], results.get("documents") or [])
+        metadatas = cast(List[Dict[str, Any]], results.get("metadatas") or [])
 
-        if not results["ids"]:
+        if not result_ids:
             return None
 
         # Sort chunks by index
-        chunks_with_meta = list(zip(
-            results["documents"],
-            results["metadatas"]
-        ))
+        chunks_with_meta = list(zip(documents, metadatas))
         chunks_with_meta.sort(key=lambda x: x[1].get("chunk_index", 0))
 
         return {
             "paper_id": paper_id,
             "chunks": [c[0] for c in chunks_with_meta],
             "metadata": chunks_with_meta[0][1] if chunks_with_meta else {},
-            "num_chunks": len(chunks_with_meta)
+            "num_chunks": len(chunks_with_meta),
         }
 
     def delete_paper(self, paper_id: str) -> bool:
@@ -347,15 +385,14 @@ class ResearchVectorStore:
             True if paper was deleted, False if not found
         """
         # Get all chunk IDs for this paper
-        results = self.papers.get(
-            where={"paper_id": paper_id}
-        )
+        results = cast(Dict[str, Any], self.papers.get(where={"paper_id": paper_id}))
+        result_ids = results.get("ids") or []
 
-        if not results["ids"]:
+        if not result_ids:
             return False
 
-        self.papers.delete(ids=results["ids"])
-        logger.info(f"Deleted paper {paper_id} ({len(results['ids'])} chunks)")
+        self.papers.delete(ids=result_ids)
+        logger.info(f"Deleted paper {paper_id} ({len(result_ids)} chunks)")
         return True
 
     def delete_note(self, note_id: str) -> bool:
@@ -369,14 +406,15 @@ class ResearchVectorStore:
 
     def delete_web_source(self, source_id: str) -> bool:
         """Remove a web source from the knowledge base."""
-        results = self.web_sources.get(
-            where={"source_id": source_id}
+        results = cast(
+            Dict[str, Any], self.web_sources.get(where={"source_id": source_id})
         )
+        result_ids = results.get("ids") or []
 
-        if not results["ids"]:
+        if not result_ids:
             return False
 
-        self.web_sources.delete(ids=results["ids"])
+        self.web_sources.delete(ids=result_ids)
         logger.info(f"Deleted web source {source_id}")
         return True
 
@@ -390,17 +428,15 @@ class ResearchVectorStore:
         # Estimate unique papers (get sample to count unique paper_ids)
         unique_papers = 0
         if paper_chunks > 0:
-            all_papers = self.papers.get(include=["metadatas"])
-            unique_papers = len(set(
-                m.get("paper_id", "") for m in all_papers["metadatas"]
-            ))
+            all_papers = cast(Dict[str, Any], self.papers.get(include=["metadatas"]))
+            all_metadatas = all_papers.get("metadatas") or []
+            unique_papers = len(set(m.get("paper_id", "") for m in all_metadatas))
 
         unique_web = 0
         if web_chunks > 0:
-            all_web = self.web_sources.get(include=["metadatas"])
-            unique_web = len(set(
-                m.get("source_id", "") for m in all_web["metadatas"]
-            ))
+            all_web = cast(Dict[str, Any], self.web_sources.get(include=["metadatas"]))
+            all_web_metadatas = all_web.get("metadatas") or []
+            unique_web = len(set(m.get("source_id", "") for m in all_web_metadatas))
 
         return {
             "total_papers": unique_papers,
@@ -408,14 +444,10 @@ class ResearchVectorStore:
             "total_notes": note_count,
             "total_web_sources": unique_web,
             "total_web_chunks": web_chunks,
-            "total_chunks": paper_chunks + note_count + web_chunks
+            "total_chunks": paper_chunks + note_count + web_chunks,
         }
 
-    def list_papers(
-        self,
-        limit: int = 100,
-        offset: int = 0
-    ) -> List[Dict]:
+    def list_papers(self, limit: int = 100, offset: int = 0) -> List[Dict]:
         """
         List papers in the knowledge base.
 
@@ -427,58 +459,70 @@ class ResearchVectorStore:
             List of paper metadata dicts
         """
         # Get all paper metadata
-        all_results = self.papers.get(include=["metadatas"])
+        all_results = cast(Dict[str, Any], self.papers.get(include=["metadatas"]))
+        all_metadatas = all_results.get("metadatas") or []
 
-        if not all_results["metadatas"]:
+        if not all_metadatas:
             return []
 
         # Get unique papers
         seen_ids = set()
         papers = []
 
-        for meta in all_results["metadatas"]:
+        for meta in all_metadatas:
             paper_id = meta.get("paper_id", "")
             if paper_id and paper_id not in seen_ids:
                 seen_ids.add(paper_id)
-                papers.append({
-                    "paper_id": paper_id,
-                    "title": meta.get("title", "Unknown"),
-                    "year": meta.get("year"),
-                    "authors": meta.get("authors", ""),
-                    "added_at": meta.get("added_at", "")
-                })
+                papers.append(
+                    {
+                        "paper_id": paper_id,
+                        "title": meta.get("title", "Unknown"),
+                        "year": meta.get("year"),
+                        "authors": meta.get("authors", ""),
+                        "added_at": meta.get("added_at", ""),
+                    }
+                )
 
         # Sort by added_at (newest first)
         papers.sort(key=lambda x: x.get("added_at", ""), reverse=True)
 
         # Apply pagination
-        return papers[offset:offset + limit]
+        return papers[offset : offset + limit]
 
     def list_notes(self, limit: int = 100, offset: int = 0) -> List[Dict]:
         """List notes in the knowledge base."""
-        results = self.notes.get(include=["metadatas", "documents"])
+        results = cast(
+            Dict[str, Any], self.notes.get(include=["metadatas", "documents"])
+        )
+        result_metadatas = cast(List[Dict[str, Any]], results.get("metadatas") or [])
+        result_documents = cast(List[str], results.get("documents") or [])
+        result_ids = cast(List[str], results.get("ids") or [])
 
-        if not results["metadatas"]:
+        if not result_metadatas:
             return []
 
         notes = []
-        for i, meta in enumerate(results["metadatas"]):
-            notes.append({
-                "note_id": meta.get("note_id", results["ids"][i]),
-                "title": meta.get("title", "Untitled"),
-                "preview": results["documents"][i][:100] + "..." if len(results["documents"][i]) > 100 else results["documents"][i],
-                "added_at": meta.get("added_at", ""),
-                "tags": meta.get("tags", "")
-            })
+        for i, meta in enumerate(result_metadatas):
+            notes.append(
+                {
+                    "note_id": meta.get("note_id", result_ids[i]),
+                    "title": meta.get("title", "Untitled"),
+                    "preview": result_documents[i][:100] + "..."
+                    if len(result_documents[i]) > 100
+                    else result_documents[i],
+                    "added_at": meta.get("added_at", ""),
+                    "tags": meta.get("tags", ""),
+                }
+            )
 
         notes.sort(key=lambda x: x.get("added_at", ""), reverse=True)
-        return notes[offset:offset + limit]
+        return notes[offset : offset + limit]
 
     def clear_collection(self, collection: str) -> None:
         """Clear all documents from a collection."""
         coll = self._get_collection(collection)
         # Get all IDs and delete
-        all_ids = coll.get()["ids"]
+        all_ids = cast(Dict[str, Any], coll.get()).get("ids") or []
         if all_ids:
             coll.delete(ids=all_ids)
             logger.info(f"Cleared {len(all_ids)} documents from {collection}")
@@ -488,15 +532,12 @@ class ResearchVectorStore:
         self.client.reset()
         # Recreate collections
         self.papers = self.client.get_or_create_collection(
-            name="academic_papers",
-            metadata={"hnsw:space": "cosine"}
+            name="academic_papers", metadata={"hnsw:space": "cosine"}
         )
         self.notes = self.client.get_or_create_collection(
-            name="research_notes",
-            metadata={"hnsw:space": "cosine"}
+            name="research_notes", metadata={"hnsw:space": "cosine"}
         )
         self.web_sources = self.client.get_or_create_collection(
-            name="web_sources",
-            metadata={"hnsw:space": "cosine"}
+            name="web_sources", metadata={"hnsw:space": "cosine"}
         )
         logger.info("Reset vector store")
