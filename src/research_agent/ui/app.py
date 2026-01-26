@@ -312,20 +312,54 @@ def create_app(agent=None):
         with gr.Tab("Data Analysis"):
             gr.Markdown("## Analyze Your Data")
 
-            data_input = gr.File(
-                label="Upload CSV or Excel file", file_types=[".csv", ".xlsx", ".xls"]
-            )
+            with gr.Row():
+                data_input = gr.File(
+                    label="Upload CSV or Excel file",
+                    file_types=[".csv", ".xlsx", ".xls"],
+                    scale=2,
+                )
+                with gr.Column(scale=1):
+                    data_info = gr.Textbox(
+                        label="Data Info",
+                        interactive=False,
+                        placeholder="Upload a file to see info",
+                    )
 
-            analysis_type = gr.Radio(
-                choices=[
-                    "Descriptive Statistics",
-                    "Correlation Analysis",
-                    "Frequency Analysis",
-                    "Custom Query",
-                ],
-                label="Analysis Type",
-                value="Descriptive Statistics",
-            )
+            with gr.Row():
+                with gr.Column(scale=1):
+                    analysis_type = gr.Radio(
+                        choices=[
+                            "Descriptive Statistics",
+                            "Correlation Analysis",
+                            "Frequency Analysis",
+                            "Pivot Table",
+                            "Time Series",
+                            "Custom Query",
+                        ],
+                        label="Analysis Type",
+                        value="Descriptive Statistics",
+                    )
+
+                with gr.Column(scale=1):
+                    plot_type = gr.Radio(
+                        choices=["Histogram", "Box Plot", "Bar Chart", "Line Chart", "Scatter"],
+                        label="Plot Type",
+                        value="Histogram",
+                    )
+
+            with gr.Row():
+                column_select = gr.Dropdown(
+                    choices=[],
+                    label="Select Column(s)",
+                    multiselect=True,
+                    interactive=True,
+                )
+                group_by_col = gr.Dropdown(
+                    choices=[],
+                    label="Group By (for Pivot/Comparison)",
+                    multiselect=False,
+                    interactive=True,
+                )
 
             custom_query = gr.Textbox(
                 label="Custom analysis request",
@@ -333,12 +367,14 @@ def create_app(agent=None):
                 visible=True,
             )
 
-            analyze_btn = gr.Button("Analyze", variant="primary")
-
             with gr.Row():
-                analysis_output = gr.Markdown(label="Results")
+                analyze_btn = gr.Button("Analyze", variant="primary", scale=2)
+                download_plot_btn = gr.Button("Download Plot", scale=1)
+
+            analysis_output = gr.Markdown(label="Results")
 
             analysis_plot = gr.Plot(label="Visualization")
+            plot_download = gr.File(label="Download", visible=False)
 
         # Event handlers
 
@@ -832,60 +868,150 @@ def create_app(agent=None):
 
             return str(json_path)
 
-        def analyze_data(file_obj, analysis_type, custom_query):
+        # Store loaded dataframe in state
+        _analysis_df = {"df": None, "path": None}
+        _current_fig = {"fig": None}
+
+        def _load_data_file(file_obj):
+            """Load CSV/Excel file and return dataframe."""
+            import pandas as pd
+
+            if file_obj is None:
+                return None, None
+
+            if isinstance(file_obj, str):
+                file_path = file_obj
+            elif isinstance(file_obj, dict) and "name" in file_obj:
+                file_path = file_obj["name"]
+            else:
+                file_path = file_obj.name
+
+            if file_path.endswith(".csv"):
+                df = pd.read_csv(file_path, parse_dates=True, infer_datetime_format=True)
+            else:
+                df = pd.read_excel(file_path, parse_dates=True)
+
+            # Try to parse date columns
+            for col in df.columns:
+                if df[col].dtype == "object":
+                    try:
+                        import pandas as pd
+                        parsed = pd.to_datetime(df[col], errors="coerce")
+                        if parsed.notna().sum() > len(df) * 0.5:
+                            df[col] = parsed
+                    except Exception:
+                        pass
+
+            return df, file_path
+
+        def on_file_upload(file_obj):
+            """Handle file upload - update dropdowns and info."""
+            if file_obj is None:
+                _analysis_df["df"] = None
+                _analysis_df["path"] = None
+                return (
+                    "No file uploaded",
+                    gr.update(choices=[], value=[]),
+                    gr.update(choices=[], value=None),
+                )
+
+            df, path = _load_data_file(file_obj)
+            if df is None or df.empty:
+                return (
+                    "Failed to load file or file is empty",
+                    gr.update(choices=[], value=[]),
+                    gr.update(choices=[], value=None),
+                )
+
+            _analysis_df["df"] = df
+            _analysis_df["path"] = path
+
+            # Build column info
+            cols = list(df.columns)
+            numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+            date_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
+            cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+            info = f"**Rows:** {len(df)} | **Cols:** {len(cols)}\n"
+            info += f"Numeric: {len(numeric_cols)} | Date: {len(date_cols)} | Text: {len(cat_cols)}"
+
+            return (
+                info,
+                gr.update(choices=cols, value=numeric_cols[:2] if numeric_cols else cols[:2]),
+                gr.update(choices=["(None)"] + cols, value="(None)"),
+            )
+
+        def analyze_data(file_obj, analysis_type, plot_type, columns, group_by, custom_query):
             """Analyze uploaded CSV/Excel data."""
             import pandas as pd
             import matplotlib.pyplot as plt
 
-            if file_obj is None:
-                return "Please upload a CSV or Excel file.", None
+            if _analysis_df["df"] is None:
+                if file_obj is None:
+                    return "Please upload a CSV or Excel file.", None
+                df, _ = _load_data_file(file_obj)
+                if df is None:
+                    return "Failed to load file.", None
+            else:
+                df = _analysis_df["df"]
+
+            if df.empty:
+                return "The uploaded file is empty.", None
+
+            # Handle group_by
+            grp = group_by if group_by and group_by != "(None)" else None
+
+            # Handle columns selection
+            cols = columns if columns else []
 
             try:
-                # Load the file
-                if isinstance(file_obj, str):
-                    file_path = file_obj
-                elif isinstance(file_obj, dict) and "name" in file_obj:
-                    file_path = file_obj["name"]
-                else:
-                    file_path = file_obj.name
-
-                if file_path.endswith(".csv"):
-                    df = pd.read_csv(file_path)
-                else:
-                    df = pd.read_excel(file_path)
-
-                if df.empty:
-                    return "The uploaded file is empty.", None
-
-                # Run the selected analysis
                 if analysis_type == "Descriptive Statistics":
-                    result, fig = _descriptive_stats(df)
+                    result, fig = _descriptive_stats(df, cols, plot_type)
                 elif analysis_type == "Correlation Analysis":
-                    result, fig = _correlation_analysis(df)
+                    result, fig = _correlation_analysis(df, cols)
                 elif analysis_type == "Frequency Analysis":
-                    result, fig = _frequency_analysis(df)
+                    result, fig = _frequency_analysis(df, cols, plot_type)
+                elif analysis_type == "Pivot Table":
+                    result, fig = _pivot_table(df, cols, grp, plot_type)
+                elif analysis_type == "Time Series":
+                    result, fig = _time_series(df, cols, plot_type)
                 elif analysis_type == "Custom Query":
                     result, fig = _custom_analysis(df, custom_query)
                 else:
                     result, fig = "Unknown analysis type.", None
 
+                _current_fig["fig"] = fig
                 return result, fig
 
             except Exception as e:
                 logger.error(f"Data analysis error: {e}")
                 return f"Error analyzing data: {str(e)}", None
 
-        def _descriptive_stats(df):
+        def download_current_plot():
+            """Save current plot to file for download."""
+            import matplotlib.pyplot as plt
+
+            if _current_fig["fig"] is None:
+                return None
+
+            plot_path = Path("/tmp/analysis_plot.png")
+            _current_fig["fig"].savefig(plot_path, dpi=150, bbox_inches="tight")
+            return str(plot_path)
+
+        def _descriptive_stats(df, columns, plot_type):
             """Generate descriptive statistics."""
             import matplotlib.pyplot as plt
 
-            # Get numeric columns
-            numeric_df = df.select_dtypes(include=["number"])
+            # Use selected columns or all numeric
+            if columns:
+                numeric_cols = [c for c in columns if c in df.select_dtypes(include=["number"]).columns]
+            else:
+                numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
 
-            if numeric_df.empty:
-                return "No numeric columns found in the data.", None
+            if not numeric_cols:
+                return "No numeric columns found in selection.", None
 
-            # Generate stats
+            numeric_df = df[numeric_cols]
             stats = numeric_df.describe().round(2)
 
             # Format as markdown table
@@ -898,23 +1024,48 @@ def create_app(agent=None):
                 row_vals = [str(stats.loc[idx, col]) for col in stats.columns]
                 result += f"| {idx} | " + " | ".join(row_vals) + " |\n"
 
-            # Create histogram for first numeric column
+            # Create plot based on type
+            col = numeric_cols[0]
             fig, ax = plt.subplots(figsize=(10, 6))
-            col = numeric_df.columns[0]
-            ax.hist(numeric_df[col].dropna(), bins=20, edgecolor="black", alpha=0.7)
-            ax.set_xlabel(col)
-            ax.set_ylabel("Frequency")
-            ax.set_title(f"Distribution of {col}")
+
+            if plot_type == "Histogram":
+                ax.hist(numeric_df[col].dropna(), bins=20, edgecolor="black", alpha=0.7)
+                ax.set_ylabel("Frequency")
+            elif plot_type == "Box Plot":
+                numeric_df.boxplot(ax=ax)
+                ax.set_ylabel("Value")
+            elif plot_type == "Bar Chart":
+                numeric_df.mean().plot(kind="bar", ax=ax, edgecolor="black", alpha=0.7)
+                ax.set_ylabel("Mean")
+            elif plot_type == "Line Chart":
+                numeric_df.plot(ax=ax)
+            elif plot_type == "Scatter" and len(numeric_cols) >= 2:
+                ax.scatter(numeric_df[numeric_cols[0]], numeric_df[numeric_cols[1]], alpha=0.6)
+                ax.set_xlabel(numeric_cols[0])
+                ax.set_ylabel(numeric_cols[1])
+            else:
+                ax.hist(numeric_df[col].dropna(), bins=20, edgecolor="black", alpha=0.7)
+                ax.set_ylabel("Frequency")
+
+            ax.set_title(f"Distribution of {col}" if plot_type == "Histogram" else f"Analysis of {', '.join(numeric_cols[:3])}")
             plt.tight_layout()
 
             return result, fig
 
-        def _correlation_analysis(df):
+        def _correlation_analysis(df, columns):
             """Generate correlation matrix."""
             import matplotlib.pyplot as plt
             import numpy as np
 
-            numeric_df = df.select_dtypes(include=["number"])
+            # Use selected columns or all numeric
+            if columns:
+                numeric_cols = [c for c in columns if c in df.select_dtypes(include=["number"]).columns]
+                if len(numeric_cols) >= 2:
+                    numeric_df = df[numeric_cols]
+                else:
+                    numeric_df = df.select_dtypes(include=["number"])
+            else:
+                numeric_df = df.select_dtypes(include=["number"])
 
             if len(numeric_df.columns) < 2:
                 return "Need at least 2 numeric columns for correlation.", None
@@ -951,20 +1102,22 @@ def create_app(agent=None):
 
             return result, fig
 
-        def _frequency_analysis(df):
+        def _frequency_analysis(df, columns, plot_type):
             """Generate frequency counts for categorical columns."""
             import matplotlib.pyplot as plt
 
-            # Get categorical/object columns
-            cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+            # Use selected columns or categorical
+            if columns:
+                cat_cols = [c for c in columns if c in df.columns]
+            else:
+                cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
             if not cat_cols:
-                # Fall back to first column
                 cat_cols = [df.columns[0]]
 
             result = "### Frequency Analysis\n\n"
 
-            for col in cat_cols[:3]:  # Limit to first 3 categorical columns
+            for col in cat_cols[:3]:
                 counts = df[col].value_counts().head(10)
                 result += f"**{col}** (top 10):\n\n"
                 result += "| Value | Count | % |\n|---|---|---|\n"
@@ -974,15 +1127,129 @@ def create_app(agent=None):
                     result += f"| {val} | {cnt} | {pct:.1f}% |\n"
                 result += "\n"
 
-            # Plot first categorical column
+            # Plot first column
             col = cat_cols[0]
             counts = df[col].value_counts().head(10)
 
             fig, ax = plt.subplots(figsize=(10, 6))
-            counts.plot(kind="bar", ax=ax, edgecolor="black", alpha=0.7)
+            if plot_type == "Bar Chart" or plot_type == "Histogram":
+                counts.plot(kind="bar", ax=ax, edgecolor="black", alpha=0.7)
+            elif plot_type == "Line Chart":
+                counts.plot(kind="line", ax=ax, marker="o")
+            else:
+                counts.plot(kind="barh", ax=ax, edgecolor="black", alpha=0.7)
+
             ax.set_xlabel(col)
             ax.set_ylabel("Count")
             ax.set_title(f"Frequency of {col}")
+            plt.xticks(rotation=45, ha="right")
+            plt.tight_layout()
+
+            return result, fig
+
+        def _pivot_table(df, columns, group_by, plot_type):
+            """Generate pivot table analysis."""
+            import matplotlib.pyplot as plt
+
+            if not group_by:
+                return "Please select a 'Group By' column for pivot table.", None
+
+            # Get value column (first numeric from selection or first numeric overall)
+            numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+            if columns:
+                value_cols = [c for c in columns if c in numeric_cols]
+            else:
+                value_cols = numeric_cols[:1]
+
+            if not value_cols:
+                return "Need at least one numeric column for pivot table values.", None
+
+            value_col = value_cols[0]
+
+            # Create pivot
+            pivot = df.groupby(group_by)[value_col].agg(["mean", "sum", "count"]).round(2)
+            pivot = pivot.head(15)  # Limit rows
+
+            result = f"### Pivot Table: {value_col} by {group_by}\n\n"
+            result += "| " + group_by + " | Mean | Sum | Count |\n"
+            result += "|---|---|---|---|\n"
+
+            for idx in pivot.index:
+                result += f"| {idx} | {pivot.loc[idx, 'mean']} | {pivot.loc[idx, 'sum']} | {int(pivot.loc[idx, 'count'])} |\n"
+
+            # Plot
+            fig, ax = plt.subplots(figsize=(10, 6))
+            if plot_type == "Bar Chart" or plot_type == "Histogram":
+                pivot["mean"].plot(kind="bar", ax=ax, edgecolor="black", alpha=0.7)
+                ax.set_ylabel(f"Mean {value_col}")
+            elif plot_type == "Line Chart":
+                pivot["mean"].plot(kind="line", ax=ax, marker="o")
+                ax.set_ylabel(f"Mean {value_col}")
+            elif plot_type == "Box Plot":
+                df.boxplot(column=value_col, by=group_by, ax=ax)
+                ax.set_ylabel(value_col)
+            else:
+                pivot["mean"].plot(kind="bar", ax=ax, edgecolor="black", alpha=0.7)
+                ax.set_ylabel(f"Mean {value_col}")
+
+            ax.set_title(f"{value_col} by {group_by}")
+            ax.set_xlabel(group_by)
+            plt.xticks(rotation=45, ha="right")
+            plt.tight_layout()
+
+            return result, fig
+
+        def _time_series(df, columns, plot_type):
+            """Generate time series analysis."""
+            import matplotlib.pyplot as plt
+
+            # Find date column
+            date_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
+            if not date_cols:
+                return "No date/time columns detected. Upload data with dates or ensure date format is recognized.", None
+
+            date_col = date_cols[0]
+
+            # Get numeric columns to plot
+            numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+            if columns:
+                plot_cols = [c for c in columns if c in numeric_cols]
+            else:
+                plot_cols = numeric_cols[:3]
+
+            if not plot_cols:
+                return "No numeric columns to plot over time.", None
+
+            # Sort by date
+            df_sorted = df.sort_values(date_col)
+
+            result = f"### Time Series Analysis\n\n"
+            result += f"**Date column:** {date_col}\n"
+            result += f"**Date range:** {df_sorted[date_col].min()} to {df_sorted[date_col].max()}\n"
+            result += f"**Plotting:** {', '.join(plot_cols)}\n\n"
+
+            # Stats per column
+            for col in plot_cols:
+                result += f"**{col}:** min={df[col].min():.2f}, max={df[col].max():.2f}, mean={df[col].mean():.2f}\n"
+
+            # Plot
+            fig, ax = plt.subplots(figsize=(12, 6))
+
+            for col in plot_cols:
+                if plot_type == "Line Chart" or plot_type == "Histogram":
+                    ax.plot(df_sorted[date_col], df_sorted[col], label=col, marker="." if len(df) < 50 else "")
+                elif plot_type == "Scatter":
+                    ax.scatter(df_sorted[date_col], df_sorted[col], label=col, alpha=0.6)
+                elif plot_type == "Bar Chart":
+                    # Resample to fewer points for bar chart
+                    ax.bar(range(len(df_sorted)), df_sorted[col].values, label=col, alpha=0.7)
+                else:
+                    ax.plot(df_sorted[date_col], df_sorted[col], label=col)
+
+            ax.set_xlabel(date_col)
+            ax.set_ylabel("Value")
+            ax.set_title("Time Series")
+            ax.legend()
             plt.xticks(rotation=45, ha="right")
             plt.tight_layout()
 
@@ -1231,10 +1498,19 @@ def create_app(agent=None):
         )
 
         # Data analysis events
+        data_input.change(
+            on_file_upload,
+            inputs=[data_input],
+            outputs=[data_info, column_select, group_by_col],
+        )
         analyze_btn.click(
             analyze_data,
-            inputs=[data_input, analysis_type, custom_query],
+            inputs=[data_input, analysis_type, plot_type, column_select, group_by_col, custom_query],
             outputs=[analysis_output, analysis_plot],
+        )
+        download_plot_btn.click(
+            download_current_plot,
+            outputs=[plot_download],
         )
 
     return app

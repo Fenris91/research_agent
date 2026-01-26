@@ -43,7 +43,7 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 ### Medium Priority
 
-- [x] **Data Analysis Tools** - Pandas stats, correlation, frequency + plots
+- [x] **Data Analysis Tools** - Full suite with column selector, plot types, time series, pivot tables
 - [x] **Export/Citation Management** - BibTeX export from KB
 - [x] **Search Filters in UI** - Filter by year, field, citation count (Chat + KB tabs)
 - [x] **Network Visualization** - Citation graph using networkx/matplotlib
@@ -63,7 +63,12 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 - [x] **Network Visualization** - Citation graph rendering with networkx/matplotlib
 - [x] **PDF Processing Validation** - Validated on real academic PDFs (Perspectives.pdf, etc.)
 - [x] **BibTeX Export** - Export papers from KB to .bib file
-- [x] **Data Analysis Tools** - Descriptive stats, correlation, frequency analysis with plots
+- [x] **Data Analysis Tools** - Enhanced with:
+  - Column selector dropdown (auto-populated on file upload)
+  - Multiple plot types (histogram, box, bar, line, scatter)
+  - Download plot as PNG
+  - Auto date parsing for time series
+  - Pivot table analysis with group by
 
 ### January 26, 2026
 - [x] **Citation Explorer Code Fixes**

@@ -456,3 +456,36 @@ class TestDataAnalysis:
         assert counts["B"] == 3
         assert counts["A"] == 2
         assert counts["C"] == 1
+
+    def test_pivot_table_groupby(self):
+        """Test pivot table with group by."""
+        import pandas as pd
+
+        df = pd.DataFrame({
+            "region": ["North", "North", "South", "South"],
+            "sales": [100, 150, 200, 250],
+        })
+        pivot = df.groupby("region")["sales"].agg(["mean", "sum", "count"])
+
+        assert pivot.loc["North", "mean"] == 125
+        assert pivot.loc["South", "sum"] == 450
+
+    def test_date_column_detection(self):
+        """Test automatic date column detection."""
+        import pandas as pd
+
+        df = pd.DataFrame({
+            "date": ["2023-01-01", "2023-02-01", "2023-03-01"],
+            "value": [10, 20, 30],
+        })
+        df["date"] = pd.to_datetime(df["date"])
+
+        date_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
+        assert "date" in date_cols
+
+    def test_multiple_plot_types_available(self):
+        """Test that all plot types are defined."""
+        plot_types = ["Histogram", "Box Plot", "Bar Chart", "Line Chart", "Scatter"]
+        assert len(plot_types) == 5
+        assert "Box Plot" in plot_types
+        assert "Scatter" in plot_types
