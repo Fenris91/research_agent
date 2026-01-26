@@ -9,7 +9,7 @@ This document outlines a concrete implementation plan for building an autonomous
 
 ---
 
-## Implementation Status (Updated: January 25, 2026)
+## Implementation Status (Updated: January 26, 2026)
 
 ### Completed
 
@@ -58,24 +58,46 @@ This document outlines a concrete implementation plan for building an autonomous
 | - LLM response generation | Done | Inference with attention mask handling |
 | - Error handling | Done | Graceful fallbacks |
 | **Unit Tests** | Done | `tests/test_core.py` |
-| - Vector store tests | Done | 3 tests |
-| - Embedding model tests | Done | 4 tests |
-| - Academic search tests | Done | 2 tests |
-| - Web search tests | Done | 1 test |
-| - Researcher lookup tests | Done | 1 test |
-| - Ollama integration tests | Done | 5 tests |
-| - Agent model switch tests | Done | 2 tests |
-| - Citation explorer tests | Done | 2 tests |
-| **Citation Explorer** | Done | `src/tools/citation_explorer.py` |
+| - Vector store tests | Done | 3 tests (skipped - needs migration) |
+| - Embedding model tests | Done | 4 tests (skipped - needs migration) |
+| - Academic search tests | Done | 3 tests |
+| - Web search tests | Done | 1 test (skipped - needs migration) |
+| - Researcher lookup tests | Done | 1 test (skipped - needs migration) |
+| - Ollama integration tests | Done | 5 tests (skipped - needs migration) |
+| - Agent model switch tests | Done | 2 tests (skipped - needs migration) |
+| - Citation explorer tests | Done | 18 tests |
+| **Citation Explorer** | Done | `src/research_agent/tools/citation_explorer.py` |
 | - Get citations | Done | Papers citing/cited by a paper |
 | - Find highly connected | Done | Discover foundational works |
 | - Suggest related | Done | Citation overlap analysis |
 | - Build citation graph | Done | Network visualization data |
+| - UI Components | Done | Gradio components for exploration |
+| **Citation Explorer Tests** | Done | `tests/test_citation_explorer.py` |
+| - Unit tests (mocked) | Done | 7 tests - core logic validation |
+| - Integration tests | Done | 4 tests - real API with limits |
+| - Error handling tests | Done | 6 tests - edge cases |
+| - Suggest related tests | Done | 1 test |
+| **Citation Analytics Tests** | Done | `tests/test_citation_analytics.py` |
+| - Highly connected tests | Done | 4 tests |
+| - Network statistics tests | Done | 3 tests |
+| - Performance tests | Done | 2 tests |
+| **UI Component Tests** | Done | `tests/test_ui_components.py` |
+| - Component instantiation | Done | 4 tests |
+| - Input validation | Done | 2 tests |
+| - Output formatting | Done | 3 tests |
+| **Test Configuration** | Done | `tests/conftest.py`, `tests/test_config.py` |
+| - Pytest fixtures | Done | Mock data, API trackers |
+| - API limits config | Done | 5 results/call, 0.5s delays |
+| - Test paper IDs | Done | BERT, Geertz, Lefebvre |
 
 ### In Progress
 
 | Component | Status | Notes |
 |-----------|--------|-------|
+| **Package Migration** | In Progress | Moving from `src/` to `src/research_agent/` |
+| - citation_explorer.py | Done | Fixed and tested |
+| - academic_search.py | Done | Working |
+| - Other modules | Pending | vector_store, embeddings, llm_utils, etc. |
 | PDF Processing | Pending | Document processor scaffolded |
 
 ### Not Started
