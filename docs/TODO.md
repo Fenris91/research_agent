@@ -44,7 +44,7 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 ### Medium Priority
 
 - [ ] **Data Analysis Tools** - Pandas/visualization integration
-- [ ] **Export/Citation Management** - Zotero/BibTeX export
+- [x] **Export/Citation Management** - BibTeX export from KB
 - [x] **Search Filters in UI** - Filter by year, field, citation count (Chat + KB tabs)
 - [x] **Network Visualization** - Citation graph using networkx/matplotlib
 
@@ -62,6 +62,7 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 - [x] **Search Filters in UI** - Year range and min citations filters in Chat and KB tabs
 - [x] **Network Visualization** - Citation graph rendering with networkx/matplotlib
 - [x] **PDF Processing Validation** - Validated on real academic PDFs (Perspectives.pdf, etc.)
+- [x] **BibTeX Export** - Export papers from KB to .bib file
 
 ### January 26, 2026
 - [x] **Citation Explorer Code Fixes**
@@ -101,7 +102,7 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 ## Bugs / Tech Debt
 
-- [ ] Fix `datetime.utcnow()` deprecation warning in vector_store.py
+- [x] Fix `datetime.utcnow()` deprecation warning in vector_store.py (already uses timezone-aware datetime)
 - [ ] Add proper error handling for Semantic Scholar rate limits
 - [ ] Consider caching for API responses
 - [ ] Install pytest-timeout plugin for test timeouts
@@ -115,9 +116,9 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
    - Pandas integration for CSV/Excel analysis
    - Basic visualization generation
 
-2. **Export/Citation Management**
-   - BibTeX export from knowledge base
-   - Optional Zotero integration
+2. **Evaluation Suite**
+   - Test retrieval quality
+   - Benchmark embedding + reranker performance
 
 ---
 

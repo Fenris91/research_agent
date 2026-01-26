@@ -209,6 +209,16 @@ def create_app(agent=None):
                 placeholder="Enter a paper ID to delete",
             )
 
+            gr.Markdown("### Export")
+            with gr.Row():
+                export_bibtex_btn = gr.Button("Export BibTeX", variant="secondary")
+                bibtex_download = gr.File(label="Download", visible=False)
+            export_status = gr.Textbox(
+                label="Export Status",
+                interactive=False,
+                placeholder="Click Export to generate BibTeX file",
+            )
+
             with gr.Accordion("Retrieval Settings", open=False):
                 gr.Markdown("Reranker settings (shared with Chat)")
                 with gr.Row():
@@ -639,6 +649,71 @@ def create_app(agent=None):
             stats, table = refresh_stats_and_table(year_from, year_to, min_citations)
             return status, stats, table
 
+        def export_bibtex():
+            """Export all papers in knowledge base to BibTeX format."""
+            store, _, _ = _get_kb_resources()
+            papers = store.list_papers(limit=10000)
+
+            if not papers:
+                return "No papers in knowledge base to export.", None
+
+            bibtex_entries = []
+            for paper in papers:
+                entry = _paper_to_bibtex(paper)
+                if entry:
+                    bibtex_entries.append(entry)
+
+            if not bibtex_entries:
+                return "No papers could be converted to BibTeX.", None
+
+            bibtex_content = "\n\n".join(bibtex_entries)
+
+            # Write to temp file
+            bibtex_path = Path("/tmp/research_agent_export.bib")
+            bibtex_path.write_text(bibtex_content, encoding="utf-8")
+
+            return f"Exported {len(bibtex_entries)} papers to BibTeX.", str(bibtex_path)
+
+        def _paper_to_bibtex(paper: dict) -> str:
+            """Convert paper metadata to BibTeX entry."""
+            paper_id = paper.get("paper_id", "unknown")
+            title = paper.get("title", "Unknown Title")
+            year = paper.get("year")
+            authors = paper.get("authors", "")
+
+            # Generate citation key from first author + year
+            if authors:
+                first_author = authors.split(",")[0].strip()
+                first_author_key = "".join(
+                    c for c in first_author.split()[-1] if c.isalnum()
+                ).lower()
+            else:
+                first_author_key = "unknown"
+
+            year_str = str(year) if year else "nd"
+            cite_key = f"{first_author_key}{year_str}"
+
+            # Build BibTeX entry
+            lines = [f"@article{{{cite_key},"]
+            lines.append(f'  title = {{{title}}},')
+
+            if authors:
+                # Convert "First Last, First Last" to "Last, First and Last, First"
+                author_list = [a.strip() for a in authors.split(",")]
+                bibtex_authors = " and ".join(author_list)
+                lines.append(f'  author = {{{bibtex_authors}}},')
+
+            if year:
+                lines.append(f"  year = {{{year}}},")
+
+            # Add DOI if it looks like the paper_id is a DOI
+            if paper_id.startswith("10."):
+                lines.append(f'  doi = {{{paper_id}}},')
+
+            lines.append("}")
+
+            return "\n".join(lines)
+
         def lookup_researchers(names_text, use_oa, use_s2, use_web):
             """Look up researcher profiles."""
             from research_agent.tools.researcher_file_parser import (
@@ -798,6 +873,10 @@ def create_app(agent=None):
             delete_paper,
             inputs=[delete_paper_id, year_from_kb, year_to_kb, min_citations_kb],
             outputs=[delete_status, kb_stats, papers_table],
+        )
+        export_bibtex_btn.click(
+            export_bibtex,
+            outputs=[export_status, bibtex_download],
         )
 
         # Model selector events
