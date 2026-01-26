@@ -832,6 +832,242 @@ def create_app(agent=None):
 
             return str(json_path)
 
+        def analyze_data(file_obj, analysis_type, custom_query):
+            """Analyze uploaded CSV/Excel data."""
+            import pandas as pd
+            import matplotlib.pyplot as plt
+
+            if file_obj is None:
+                return "Please upload a CSV or Excel file.", None
+
+            try:
+                # Load the file
+                if isinstance(file_obj, str):
+                    file_path = file_obj
+                elif isinstance(file_obj, dict) and "name" in file_obj:
+                    file_path = file_obj["name"]
+                else:
+                    file_path = file_obj.name
+
+                if file_path.endswith(".csv"):
+                    df = pd.read_csv(file_path)
+                else:
+                    df = pd.read_excel(file_path)
+
+                if df.empty:
+                    return "The uploaded file is empty.", None
+
+                # Run the selected analysis
+                if analysis_type == "Descriptive Statistics":
+                    result, fig = _descriptive_stats(df)
+                elif analysis_type == "Correlation Analysis":
+                    result, fig = _correlation_analysis(df)
+                elif analysis_type == "Frequency Analysis":
+                    result, fig = _frequency_analysis(df)
+                elif analysis_type == "Custom Query":
+                    result, fig = _custom_analysis(df, custom_query)
+                else:
+                    result, fig = "Unknown analysis type.", None
+
+                return result, fig
+
+            except Exception as e:
+                logger.error(f"Data analysis error: {e}")
+                return f"Error analyzing data: {str(e)}", None
+
+        def _descriptive_stats(df):
+            """Generate descriptive statistics."""
+            import matplotlib.pyplot as plt
+
+            # Get numeric columns
+            numeric_df = df.select_dtypes(include=["number"])
+
+            if numeric_df.empty:
+                return "No numeric columns found in the data.", None
+
+            # Generate stats
+            stats = numeric_df.describe().round(2)
+
+            # Format as markdown table
+            result = "### Descriptive Statistics\n\n"
+            result += f"**Rows:** {len(df)} | **Columns:** {len(df.columns)}\n\n"
+            result += "| Statistic | " + " | ".join(stats.columns) + " |\n"
+            result += "|---" * (len(stats.columns) + 1) + "|\n"
+
+            for idx in stats.index:
+                row_vals = [str(stats.loc[idx, col]) for col in stats.columns]
+                result += f"| {idx} | " + " | ".join(row_vals) + " |\n"
+
+            # Create histogram for first numeric column
+            fig, ax = plt.subplots(figsize=(10, 6))
+            col = numeric_df.columns[0]
+            ax.hist(numeric_df[col].dropna(), bins=20, edgecolor="black", alpha=0.7)
+            ax.set_xlabel(col)
+            ax.set_ylabel("Frequency")
+            ax.set_title(f"Distribution of {col}")
+            plt.tight_layout()
+
+            return result, fig
+
+        def _correlation_analysis(df):
+            """Generate correlation matrix."""
+            import matplotlib.pyplot as plt
+            import numpy as np
+
+            numeric_df = df.select_dtypes(include=["number"])
+
+            if len(numeric_df.columns) < 2:
+                return "Need at least 2 numeric columns for correlation.", None
+
+            # Calculate correlation
+            corr = numeric_df.corr().round(3)
+
+            # Format as markdown
+            result = "### Correlation Matrix\n\n"
+            result += "| | " + " | ".join(corr.columns) + " |\n"
+            result += "|---" * (len(corr.columns) + 1) + "|\n"
+
+            for idx in corr.index:
+                row_vals = [str(corr.loc[idx, col]) for col in corr.columns]
+                result += f"| {idx} | " + " | ".join(row_vals) + " |\n"
+
+            # Create heatmap
+            fig, ax = plt.subplots(figsize=(10, 8))
+            im = ax.imshow(corr.values, cmap="RdBu_r", vmin=-1, vmax=1)
+
+            ax.set_xticks(np.arange(len(corr.columns)))
+            ax.set_yticks(np.arange(len(corr.index)))
+            ax.set_xticklabels(corr.columns, rotation=45, ha="right")
+            ax.set_yticklabels(corr.index)
+
+            # Add correlation values
+            for i in range(len(corr.index)):
+                for j in range(len(corr.columns)):
+                    ax.text(j, i, f"{corr.iloc[i, j]:.2f}", ha="center", va="center")
+
+            plt.colorbar(im, ax=ax, label="Correlation")
+            ax.set_title("Correlation Heatmap")
+            plt.tight_layout()
+
+            return result, fig
+
+        def _frequency_analysis(df):
+            """Generate frequency counts for categorical columns."""
+            import matplotlib.pyplot as plt
+
+            # Get categorical/object columns
+            cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+            if not cat_cols:
+                # Fall back to first column
+                cat_cols = [df.columns[0]]
+
+            result = "### Frequency Analysis\n\n"
+
+            for col in cat_cols[:3]:  # Limit to first 3 categorical columns
+                counts = df[col].value_counts().head(10)
+                result += f"**{col}** (top 10):\n\n"
+                result += "| Value | Count | % |\n|---|---|---|\n"
+                total = len(df)
+                for val, cnt in counts.items():
+                    pct = (cnt / total) * 100
+                    result += f"| {val} | {cnt} | {pct:.1f}% |\n"
+                result += "\n"
+
+            # Plot first categorical column
+            col = cat_cols[0]
+            counts = df[col].value_counts().head(10)
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+            counts.plot(kind="bar", ax=ax, edgecolor="black", alpha=0.7)
+            ax.set_xlabel(col)
+            ax.set_ylabel("Count")
+            ax.set_title(f"Frequency of {col}")
+            plt.xticks(rotation=45, ha="right")
+            plt.tight_layout()
+
+            return result, fig
+
+        def _custom_analysis(df, query):
+            """Handle custom analysis queries."""
+            import matplotlib.pyplot as plt
+
+            if not query or not query.strip():
+                return "Please enter a custom query.", None
+
+            query_lower = query.lower()
+
+            # Simple query parsing
+            result = f"### Custom Analysis: {query}\n\n"
+
+            # Check for common patterns
+            if "distribution" in query_lower or "histogram" in query_lower:
+                # Find mentioned column
+                col = _find_column_in_query(df, query)
+                if col:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    df[col].hist(ax=ax, bins=20, edgecolor="black", alpha=0.7)
+                    ax.set_title(f"Distribution of {col}")
+                    ax.set_xlabel(col)
+                    result += f"Showing distribution of **{col}**\n\n"
+                    result += df[col].describe().to_markdown()
+                    return result, fig
+
+            elif "compare" in query_lower or "by" in query_lower or "group" in query_lower:
+                # Try to find two columns to compare
+                cols = _find_columns_in_query(df, query, n=2)
+                if len(cols) >= 2:
+                    grouped = df.groupby(cols[0])[cols[1]].mean()
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    grouped.plot(kind="bar", ax=ax, edgecolor="black", alpha=0.7)
+                    ax.set_title(f"Mean {cols[1]} by {cols[0]}")
+                    result += grouped.to_markdown()
+                    return result, fig
+
+            elif "trend" in query_lower or "over time" in query_lower:
+                # Look for date column
+                date_cols = df.select_dtypes(include=["datetime64"]).columns
+                if len(date_cols) > 0:
+                    numeric_cols = df.select_dtypes(include=["number"]).columns
+                    if len(numeric_cols) > 0:
+                        fig, ax = plt.subplots(figsize=(10, 6))
+                        df.plot(x=date_cols[0], y=numeric_cols[0], ax=ax)
+                        ax.set_title(f"{numeric_cols[0]} over time")
+                        result += "Showing trend over time."
+                        return result, fig
+
+            # Default: show summary
+            result += "**Data Summary:**\n\n"
+            result += f"- Rows: {len(df)}\n"
+            result += f"- Columns: {len(df.columns)}\n"
+            result += f"- Column names: {', '.join(df.columns)}\n\n"
+            result += "**Tip:** Try queries like:\n"
+            result += "- 'Show distribution of [column]'\n"
+            result += "- 'Compare [column1] by [column2]'\n"
+
+            return result, None
+
+        def _find_column_in_query(df, query):
+            """Find a column name mentioned in the query."""
+            query_lower = query.lower()
+            for col in df.columns:
+                if col.lower() in query_lower:
+                    return col
+            # Return first numeric column as fallback
+            numeric = df.select_dtypes(include=["number"]).columns
+            return numeric[0] if len(numeric) > 0 else df.columns[0]
+
+        def _find_columns_in_query(df, query, n=2):
+            """Find multiple column names in query."""
+            query_lower = query.lower()
+            found = []
+            for col in df.columns:
+                if col.lower() in query_lower:
+                    found.append(col)
+                    if len(found) >= n:
+                        break
+            return found
+
         # Wire up events
         msg.submit(
             respond,
@@ -992,6 +1228,13 @@ def create_app(agent=None):
 
         export_json_btn.click(
             export_to_json, inputs=[researcher_results_state], outputs=[json_download]
+        )
+
+        # Data analysis events
+        analyze_btn.click(
+            analyze_data,
+            inputs=[data_input, analysis_type, custom_query],
+            outputs=[analysis_output, analysis_plot],
         )
 
     return app

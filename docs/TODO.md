@@ -43,7 +43,7 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 ### Medium Priority
 
-- [ ] **Data Analysis Tools** - Pandas/visualization integration
+- [x] **Data Analysis Tools** - Pandas stats, correlation, frequency + plots
 - [x] **Export/Citation Management** - BibTeX export from KB
 - [x] **Search Filters in UI** - Filter by year, field, citation count (Chat + KB tabs)
 - [x] **Network Visualization** - Citation graph using networkx/matplotlib
@@ -63,6 +63,7 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 - [x] **Network Visualization** - Citation graph rendering with networkx/matplotlib
 - [x] **PDF Processing Validation** - Validated on real academic PDFs (Perspectives.pdf, etc.)
 - [x] **BibTeX Export** - Export papers from KB to .bib file
+- [x] **Data Analysis Tools** - Descriptive stats, correlation, frequency analysis with plots
 
 ### January 26, 2026
 - [x] **Citation Explorer Code Fixes**
@@ -112,13 +113,13 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 ## Next Steps (Recommended Order)
 
-1. **Data Analysis Tools**
-   - Pandas integration for CSV/Excel analysis
-   - Basic visualization generation
-
-2. **Evaluation Suite**
+1. **Evaluation Suite**
    - Test retrieval quality
    - Benchmark embedding + reranker performance
+
+2. **API Response Caching**
+   - Cache Semantic Scholar / OpenAlex responses
+   - Reduce rate limit issues
 
 ---
 

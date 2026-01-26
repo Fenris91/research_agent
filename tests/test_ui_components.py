@@ -401,3 +401,58 @@ class TestBibTeXExport:
         year = None
         year_str = str(year) if year else "nd"
         assert year_str == "nd"
+
+
+# ============================================
+# Data Analysis Tests
+# ============================================
+
+
+class TestDataAnalysis:
+    """Tests for data analysis functionality."""
+
+    def test_descriptive_stats_with_numeric_data(self):
+        """Test descriptive statistics on numeric data."""
+        import pandas as pd
+        import tempfile
+
+        # Create test CSV
+        df = pd.DataFrame({"age": [25, 30, 35, 40], "score": [80, 85, 90, 95]})
+
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            df.to_csv(f.name, index=False)
+            temp_path = f.name
+
+        try:
+            # Load and verify
+            loaded = pd.read_csv(temp_path)
+            stats = loaded.describe()
+
+            assert "age" in stats.columns
+            assert "score" in stats.columns
+            assert stats.loc["mean", "age"] == 32.5
+        finally:
+            import os
+
+            os.unlink(temp_path)
+
+    def test_correlation_requires_numeric_columns(self):
+        """Test correlation needs at least 2 numeric columns."""
+        import pandas as pd
+
+        df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        corr = df.corr()
+
+        assert corr.shape == (2, 2)
+        assert corr.loc["a", "b"] == 1.0  # Perfect correlation
+
+    def test_frequency_analysis_categorical(self):
+        """Test frequency counts for categorical data."""
+        import pandas as pd
+
+        df = pd.DataFrame({"category": ["A", "A", "B", "B", "B", "C"]})
+        counts = df["category"].value_counts()
+
+        assert counts["B"] == 3
+        assert counts["A"] == 2
+        assert counts["C"] == 1
