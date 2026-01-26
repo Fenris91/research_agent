@@ -2,11 +2,20 @@
 Pytest configuration and fixtures for Research Agent tests.
 """
 
-import pytest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
+import sys
 from dataclasses import dataclass
 from typing import Optional, List
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+# Ensure src/ is on the path for test imports
+ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 # Test configuration
 from tests.test_config import Config
@@ -15,6 +24,7 @@ from tests.test_config import Config
 # ============================================
 # Event Loop Configuration
 # ============================================
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -28,9 +38,11 @@ def event_loop():
 # Test Paper IDs and Data
 # ============================================
 
+
 @dataclass
 class TestPaperInfo:
     """Information about test papers."""
+
     paper_id: str
     title: str
     author: str
@@ -45,21 +57,21 @@ TEST_PAPERS = {
         title="The Interpretation of Cultures",
         author="Clifford Geertz",
         year=1973,
-        expected_citations_min=100
+        expected_citations_min=100,
     ),
     "lefebvre_production_space": TestPaperInfo(
         paper_id="141568395",  # The Production of Space
         title="The Production of Space",
         author="Henri Lefebvre",
         year=1991,
-        expected_citations_min=50
+        expected_citations_min=50,
     ),
     "attention_is_all_you_need": TestPaperInfo(
         paper_id="204e3073870fae3d05bcbc2f6a8e263d9b72e776",  # Attention Is All You Need
         title="Attention Is All You Need",
         author="Vaswani et al.",
         year=2017,
-        expected_citations_min=1000
+        expected_citations_min=1000,
     ),
 }
 
@@ -92,10 +104,12 @@ def all_test_papers():
 # Mock Data Fixtures
 # ============================================
 
+
 @pytest.fixture
 def mock_citation_paper():
     """Create a mock CitationPaper."""
     from research_agent.tools.citation_explorer import CitationPaper
+
     return CitationPaper(
         paper_id="test_paper_001",
         title="Test Paper Title",
@@ -104,7 +118,7 @@ def mock_citation_paper():
         citation_count=100,
         abstract="This is a test abstract.",
         venue="Test Journal",
-        url="https://example.com/paper"
+        url="https://example.com/paper",
     )
 
 
@@ -118,7 +132,7 @@ def mock_citation_network():
         title="Seed Paper",
         year=2020,
         authors=["Seed Author"],
-        citation_count=500
+        citation_count=500,
     )
 
     citing = [
@@ -126,7 +140,7 @@ def mock_citation_network():
             paper_id=f"citing_{i}",
             title=f"Citing Paper {i}",
             year=2021 + i,
-            citation_count=10 * i
+            citation_count=10 * i,
         )
         for i in range(3)
     ]
@@ -136,16 +150,13 @@ def mock_citation_network():
             paper_id=f"cited_{i}",
             title=f"Cited Paper {i}",
             year=2015 + i,
-            citation_count=100 * i
+            citation_count=100 * i,
         )
         for i in range(3)
     ]
 
     return CitationNetwork(
-        seed_paper=seed,
-        citing_papers=citing,
-        cited_papers=cited,
-        highly_connected=[]
+        seed_paper=seed, citing_papers=citing, cited_papers=cited, highly_connected=[]
     )
 
 
@@ -159,7 +170,7 @@ def mock_api_response_citations():
                     "paperId": "citing_001",
                     "title": "A Paper That Cites",
                     "year": 2023,
-                    "citationCount": 50
+                    "citationCount": 50,
                 }
             },
             {
@@ -167,9 +178,9 @@ def mock_api_response_citations():
                     "paperId": "citing_002",
                     "title": "Another Citing Paper",
                     "year": 2024,
-                    "citationCount": 25
+                    "citationCount": 25,
                 }
-            }
+            },
         ]
     }
 
@@ -184,7 +195,7 @@ def mock_api_response_references():
                     "paperId": "cited_001",
                     "title": "A Referenced Paper",
                     "year": 2018,
-                    "citationCount": 200
+                    "citationCount": 200,
                 }
             },
             {
@@ -192,9 +203,9 @@ def mock_api_response_references():
                     "paperId": "cited_002",
                     "title": "Another Reference",
                     "year": 2019,
-                    "citationCount": 150
+                    "citationCount": 150,
                 }
-            }
+            },
         ]
     }
 
@@ -209,13 +220,14 @@ def mock_api_response_paper_details():
         "authors": [{"name": "Test Author"}],
         "citationCount": 100,
         "abstract": "This is a test abstract.",
-        "venue": "Test Journal"
+        "venue": "Test Journal",
     }
 
 
 # ============================================
 # Mock Academic Search Fixture
 # ============================================
+
 
 @pytest.fixture
 def mock_academic_search():
@@ -239,6 +251,7 @@ def mock_academic_search():
 # ============================================
 # Rate Limiting Helpers
 # ============================================
+
 
 class APICallTracker:
     """Track API calls for rate limiting tests."""
@@ -272,27 +285,26 @@ def api_call_tracker():
 # Integration Test Markers
 # ============================================
 
+
 def pytest_configure(config):
     """Configure custom pytest markers."""
     config.addinivalue_line(
         "markers", "integration: mark test as integration test (hits real APIs)"
     )
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
-    config.addinivalue_line(
-        "markers", "ui: mark test as UI component test"
-    )
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line("markers", "ui: mark test as UI component test")
 
 
 # ============================================
 # Skip Markers for Conditional Tests
 # ============================================
 
+
 @pytest.fixture
 def skip_if_no_network():
     """Skip test if no network connection."""
     import socket
+
     try:
         socket.create_connection(("api.semanticscholar.org", 443), timeout=5)
     except OSError:

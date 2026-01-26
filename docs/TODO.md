@@ -36,7 +36,7 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 ### High Priority
 
 - [x] **Complete Package Migration** - Finish moving all modules to `research_agent` package
-- [x] **Wire Citation Explorer to UI** - Add tab or section for exploring citations
+- [x] **Wire Citation Explorer to UI** - Add tab or section for exploring citations (Gradio tab + handlers wired)
 - [ ] **Reranker** - Add BGE reranker for better retrieval quality
 
 ### Medium Priority
@@ -62,6 +62,10 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
   - Fixed indentation issues (methods outside class)
   - Removed `self.search.s2` references
   - Fixed API field names (`citingPaper`, `citedPaper`)
+
+- [x] **Citation Explorer UI Wiring**
+  - Added dedicated Gradio tab and event handlers
+  - Uses async `explore_citations` with summary and tables
 
 - [x] **Comprehensive Test Suite** (44 tests passing)
   - Unit tests with mocked APIs
@@ -100,20 +104,16 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 ## Next Steps (Recommended Order)
 
-1. **Complete Package Migration**
-   - Move remaining modules to `src/research_agent/`
-   - Update all imports
-   - Re-enable skipped tests
-
-2. **Wire Citation Explorer to UI**
-   - Add Citation Explorer tab to main UI
-   - Connect event handlers
-   - Test end-to-end flow
-
-3. **PDF Processing**
+1. **PDF Processing**
    - Implement document processor
    - Add to knowledge base workflow
    - Test with real PDFs
+
+2. **Knowledge Base Management**
+   - Refresh stats/browse list and delete flows in UI
+
+3. **Reranker**
+   - Add BGE reranker and re-enable skipped retrieval tests
 
 4. **Network Visualization**
    - Implement citation graph rendering

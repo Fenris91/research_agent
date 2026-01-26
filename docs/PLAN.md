@@ -57,6 +57,7 @@ This document outlines a concrete implementation plan for building an autonomous
 | - Model selector | Done | Switch models in Settings |
 | - LLM response generation | Done | Inference with attention mask handling |
 | - Error handling | Done | Graceful fallbacks |
+| - Citation Explorer tab | Done | `src/research_agent/ui/components/citation_explorer.py` |
 | **Unit Tests** | Done | `tests/test_core.py` |
 | - Vector store tests | Done | 3 tests (skipped - needs migration) |
 | - Embedding model tests | Done | 4 tests (skipped - needs migration) |

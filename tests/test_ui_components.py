@@ -13,13 +13,14 @@ from unittest.mock import MagicMock, patch, AsyncMock
 # UI Component Tests
 # ============================================
 
+
 class TestCitationExplorerUI:
     """Tests for Citation Explorer Gradio UI components."""
 
     def test_render_citation_explorer_returns_dict(self):
         """Test that render_citation_explorer returns component dictionary."""
         # Mock Gradio components to avoid actual UI creation
-        with patch('research_agent.tools.citation_explorer.gr') as mock_gr:
+        with patch("research_agent.ui.components.citation_explorer.gr") as mock_gr:
             # Setup mock components
             mock_gr.Column.return_value.__enter__ = MagicMock()
             mock_gr.Column.return_value.__exit__ = MagicMock()
@@ -48,7 +49,9 @@ class TestCitationExplorerUI:
             mock_gr.DataFrame.return_value = mock_dataframe
             mock_gr.Plot.return_value = mock_plot
 
-            from research_agent.tools.citation_explorer import render_citation_explorer
+            from research_agent.ui.components.citation_explorer import (
+                render_citation_explorer,
+            )
 
             result = render_citation_explorer()
 
@@ -61,24 +64,19 @@ class TestCitationExplorerUI:
 
     def test_papers_to_dataframe_with_papers(self):
         """Test _papers_to_dataframe converts papers correctly."""
-        from research_agent.tools.citation_explorer import (
-            _papers_to_dataframe,
-            CitationPaper
-        )
+        from research_agent.ui.components.citation_explorer import _papers_to_dataframe
+        from research_agent.tools.citation_explorer import CitationPaper
 
         papers = [
             CitationPaper(
                 paper_id="paper_001",
                 title="Test Paper 1",
                 year=2023,
-                citation_count=100
+                citation_count=100,
             ),
             CitationPaper(
-                paper_id="paper_002",
-                title="Test Paper 2",
-                year=2024,
-                citation_count=50
-            )
+                paper_id="paper_002", title="Test Paper 2", year=2024, citation_count=50
+            ),
         ]
 
         result = _papers_to_dataframe(papers)
@@ -90,7 +88,7 @@ class TestCitationExplorerUI:
 
     def test_papers_to_dataframe_empty(self):
         """Test _papers_to_dataframe with empty list."""
-        from research_agent.tools.citation_explorer import _papers_to_dataframe
+        from research_agent.ui.components.citation_explorer import _papers_to_dataframe
 
         result = _papers_to_dataframe([])
 
@@ -98,17 +96,12 @@ class TestCitationExplorerUI:
 
     def test_papers_to_dataframe_none_values(self):
         """Test _papers_to_dataframe handles None values."""
-        from research_agent.tools.citation_explorer import (
-            _papers_to_dataframe,
-            CitationPaper
-        )
+        from research_agent.ui.components.citation_explorer import _papers_to_dataframe
+        from research_agent.tools.citation_explorer import CitationPaper
 
         papers = [
             CitationPaper(
-                paper_id="paper_001",
-                title=None,
-                year=None,
-                citation_count=None
+                paper_id="paper_001", title=None, year=None, citation_count=None
             )
         ]
 
@@ -123,13 +116,14 @@ class TestCitationExplorerUI:
 # Explore Citations Function Tests
 # ============================================
 
+
 class TestExploreCitations:
     """Tests for the explore_citations async function."""
 
     @pytest.mark.asyncio
     async def test_explore_citations_empty_input(self):
         """Test explore_citations with empty input."""
-        from research_agent.tools.citation_explorer import explore_citations
+        from research_agent.ui.components.citation_explorer import explore_citations
 
         result = await explore_citations("", "both", 20)
 
@@ -140,7 +134,7 @@ class TestExploreCitations:
     @pytest.mark.asyncio
     async def test_explore_citations_whitespace_input(self):
         """Test explore_citations with whitespace input."""
-        from research_agent.tools.citation_explorer import explore_citations
+        from research_agent.ui.components.citation_explorer import explore_citations
 
         result = await explore_citations("   ", "both", 20)
 
@@ -149,10 +143,12 @@ class TestExploreCitations:
     @pytest.mark.asyncio
     async def test_explore_citations_error_handling(self):
         """Test explore_citations handles errors gracefully."""
-        from research_agent.tools.citation_explorer import explore_citations
+        from research_agent.ui.components.citation_explorer import explore_citations
 
         # Mock the AcademicSearchTools to raise an error
-        with patch('research_agent.tools.citation_explorer.AcademicSearchTools') as mock_search_cls:
+        with patch(
+            "research_agent.ui.components.citation_explorer.AcademicSearchTools"
+        ) as mock_search_cls:
             mock_search = MagicMock()
             mock_search._get_client = AsyncMock(side_effect=Exception("Network error"))
             mock_search_cls.return_value = mock_search
@@ -166,6 +162,7 @@ class TestExploreCitations:
 # ============================================
 # Input Validation Tests
 # ============================================
+
 
 class TestInputValidation:
     """Tests for input validation in UI components."""
@@ -197,19 +194,23 @@ class TestInputValidation:
 # Output Formatting Tests
 # ============================================
 
+
 class TestOutputFormatting:
     """Tests for output formatting functions."""
 
     def test_summary_format(self):
         """Test citation network summary format."""
-        from research_agent.tools.citation_explorer import CitationPaper, CitationNetwork
+        from research_agent.tools.citation_explorer import (
+            CitationPaper,
+            CitationNetwork,
+        )
 
         network = CitationNetwork(
             seed_paper=CitationPaper(
                 paper_id="seed_001",
                 title="Test Seed Paper",
                 year=2020,
-                citation_count=500
+                citation_count=500,
             ),
             citing_papers=[
                 CitationPaper(paper_id=f"citing_{i}", title=f"Citing {i}")
@@ -219,14 +220,14 @@ class TestOutputFormatting:
                 CitationPaper(paper_id=f"cited_{i}", title=f"Cited {i}")
                 for i in range(3)
             ],
-            highly_connected=[]
+            highly_connected=[],
         )
 
         # Test that we can build the expected summary format
-        summary = f"""## Citation Network Summary
+        summary = f"""## 📊 Citation Network Summary
 
 **Seed Paper:** {network.seed_paper.title}
-- **Year:** {network.seed_paper.year or 'Unknown'}
+- **Year:** {network.seed_paper.year or "Unknown"}
 - **Citations:** {network.seed_paper.citation_count or 0}
 
 **Network Statistics:**
