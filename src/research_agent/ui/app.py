@@ -88,11 +88,38 @@ def create_app(agent=None):
                 value=False,
             )
 
+            gr.Markdown("### Search Filters")
+            with gr.Row():
+                year_from_chat = gr.Slider(
+                    minimum=1900,
+                    maximum=2030,
+                    value=1900,
+                    step=1,
+                    label="From Year",
+                    info="Use 1900 for no lower bound",
+                )
+                year_to_chat = gr.Slider(
+                    minimum=1900,
+                    maximum=2030,
+                    value=2030,
+                    step=1,
+                    label="To Year",
+                    info="Use 2030 for no upper bound",
+                )
+            min_citations_chat = gr.Slider(
+                minimum=0,
+                maximum=1000,
+                value=0,
+                step=10,
+                label="Min citations",
+                info="0 to disable",
+            )
+
             gr.Markdown("### Reranker (Retrieval)")
             with gr.Row():
                 reranker_enable_chat = gr.Checkbox(
                     label="Enable reranker (BGE)",
-                    value=None,
+                    value=False,
                     info="Improves ranking of retrieved chunks",
                 )
                 rerank_topk_chat = gr.Slider(
@@ -136,6 +163,33 @@ def create_app(agent=None):
             )
 
             gr.Markdown("### Browse Papers")
+
+            with gr.Row():
+                year_from_kb = gr.Slider(
+                    minimum=1900,
+                    maximum=2030,
+                    value=1900,
+                    step=1,
+                    label="From Year",
+                    info="1900 = no lower bound",
+                )
+                year_to_kb = gr.Slider(
+                    minimum=1900,
+                    maximum=2030,
+                    value=2030,
+                    step=1,
+                    label="To Year",
+                    info="2030 = no upper bound",
+                )
+            min_citations_kb = gr.Slider(
+                minimum=0,
+                maximum=1000,
+                value=0,
+                step=10,
+                label="Min citations",
+                info="0 = no filter",
+            )
+
             papers_table = gr.Dataframe(
                 headers=["Title", "Year", "Authors", "Added", "Paper ID"],
                 label="Papers in Knowledge Base",
@@ -159,7 +213,7 @@ def create_app(agent=None):
                 gr.Markdown("Reranker settings (shared with Chat)")
                 with gr.Row():
                     reranker_enable_kb = gr.Checkbox(
-                        label="Enable reranker (BGE)", value=None
+                        label="Enable reranker (BGE)", value=False
                     )
                     rerank_topk_kb = gr.Slider(
                         minimum=1,
@@ -325,7 +379,7 @@ def create_app(agent=None):
             # Return: dropdown choices, dropdown value, current model display
             return gr.update(choices=models, value=current), current
 
-        def respond(message, history):
+        def respond(message, history, year_from, year_to, min_citations):
             """Handle chat messages."""
             if agent is None:
                 # Demo mode
@@ -333,7 +387,12 @@ def create_app(agent=None):
             else:
                 # Real mode - call the agent
                 try:
-                    result = agent.run(message)
+                    filters = {
+                        "year_from": int(year_from) if year_from else None,
+                        "year_to": int(year_to) if year_to else None,
+                        "min_citations": int(min_citations) if min_citations else None,
+                    }
+                    result = agent.run(message, search_filters=filters)
                     response = result.get("answer", "No response generated")
                 except Exception as e:
                     response = f"Error: {str(e)}"
@@ -472,15 +531,27 @@ def create_app(agent=None):
                 status,
             )
 
-        def _format_papers_table(papers):
+        def _format_papers_table(papers, year_from=None, year_to=None, min_citations=0):
             if not papers:
                 return []
             table_data = []
             for paper in papers:
+                year = paper.get("year")
+                citations = paper.get("citations") or paper.get("citation_count")
+                if year_from and year and year < year_from:
+                    continue
+                if year_to and year and year > year_to:
+                    continue
+                if (
+                    min_citations
+                    and citations is not None
+                    and citations < min_citations
+                ):
+                    continue
                 table_data.append(
                     [
                         paper.get("title", "Unknown"),
-                        paper.get("year", ""),
+                        year or "",
                         paper.get("authors", ""),
                         paper.get("added_at", ""),
                         paper.get("paper_id", ""),
@@ -488,17 +559,24 @@ def create_app(agent=None):
                 )
             return table_data
 
-        def refresh_stats_and_table():
+        def refresh_stats_and_table(year_from=None, year_to=None, min_citations=0):
             """Refresh knowledge base statistics and paper list."""
             store, _, _ = _get_kb_resources()
             stats = store.get_stats()
-            papers = store.list_papers(limit=200)
-            return stats, _format_papers_table(papers)
+            papers = store.list_papers(limit=500)
+            return stats, _format_papers_table(
+                papers,
+                year_from=year_from if year_from and year_from > 1900 else None,
+                year_to=year_to if year_to and year_to < 2030 else None,
+                min_citations=min_citations or 0,
+            )
 
-        def ingest_documents(files):
+        def ingest_documents(files, year_from=None, year_to=None, min_citations=0):
             """Process and add documents to the knowledge base."""
             if not files:
-                stats, table = refresh_stats_and_table()
+                stats, table = refresh_stats_and_table(
+                    year_from, year_to, min_citations
+                )
                 return "No files selected.", stats, table
 
             store, embedder_model, doc_processor = _get_kb_resources()
@@ -531,7 +609,7 @@ def create_app(agent=None):
                 except Exception as e:
                     errors.append(f"{getattr(file_obj, 'name', file_obj)}: {e}")
 
-            stats, table = refresh_stats_and_table()
+            stats, table = refresh_stats_and_table(year_from, year_to, min_citations)
 
             status_parts = [f"Added {added} document(s)"]
             if skipped:
@@ -543,10 +621,12 @@ def create_app(agent=None):
 
             return ". ".join(status_parts), stats, table
 
-        def delete_paper(paper_id):
+        def delete_paper(paper_id, year_from=None, year_to=None, min_citations=0):
             """Delete a paper from the knowledge base."""
             if not paper_id:
-                stats, table = refresh_stats_and_table()
+                stats, table = refresh_stats_and_table(
+                    year_from, year_to, min_citations
+                )
                 return "Enter a paper ID to delete.", stats, table
 
             store, _, _ = _get_kb_resources()
@@ -556,7 +636,7 @@ def create_app(agent=None):
                 if deleted
                 else f"Paper not found: {paper_id}."
             )
-            stats, table = refresh_stats_and_table()
+            stats, table = refresh_stats_and_table(year_from, year_to, min_citations)
             return status, stats, table
 
         def lookup_researchers(names_text, use_oa, use_s2, use_web):
@@ -678,18 +758,45 @@ def create_app(agent=None):
             return str(json_path)
 
         # Wire up events
-        msg.submit(respond, [msg, chatbot], [msg, chatbot])
-        submit.click(respond, [msg, chatbot], [msg, chatbot])
+        msg.submit(
+            respond,
+            [msg, chatbot, year_from_chat, year_to_chat, min_citations_chat],
+            [msg, chatbot],
+        )
+        submit.click(
+            respond,
+            [msg, chatbot, year_from_chat, year_to_chat, min_citations_chat],
+            [msg, chatbot],
+        )
         clear.click(lambda: [], outputs=[chatbot])
-        refresh_btn.click(refresh_stats_and_table, outputs=[kb_stats, papers_table])
+        refresh_btn.click(
+            refresh_stats_and_table,
+            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            outputs=[kb_stats, papers_table],
+        )
+        year_from_kb.change(
+            refresh_stats_and_table,
+            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            outputs=[kb_stats, papers_table],
+        )
+        year_to_kb.change(
+            refresh_stats_and_table,
+            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            outputs=[kb_stats, papers_table],
+        )
+        min_citations_kb.change(
+            refresh_stats_and_table,
+            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            outputs=[kb_stats, papers_table],
+        )
         upload_btn.click(
             ingest_documents,
-            inputs=[upload_pdf],
+            inputs=[upload_pdf, year_from_kb, year_to_kb, min_citations_kb],
             outputs=[upload_status, kb_stats, papers_table],
         )
         delete_paper_btn.click(
             delete_paper,
-            inputs=[delete_paper_id],
+            inputs=[delete_paper_id, year_from_kb, year_to_kb, min_citations_kb],
             outputs=[delete_status, kb_stats, papers_table],
         )
 
@@ -705,7 +812,73 @@ def create_app(agent=None):
         app.load(refresh_model_list, outputs=[model_dropdown, current_model_display])
 
         # Initialize knowledge base stats/table on load
-        app.load(refresh_stats_and_table, outputs=[kb_stats, papers_table])
+        app.load(
+            refresh_stats_and_table,
+            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            outputs=[kb_stats, papers_table],
+        )
+
+        # Reranker toggle syncing (Chat + KB share state)
+        reranker_enable_chat.change(
+            _set_reranker_settings,
+            inputs=[reranker_enable_chat, rerank_topk_chat],
+            outputs=[
+                reranker_enable_chat,
+                rerank_topk_chat,
+                reranker_enable_kb,
+                rerank_topk_kb,
+                rerank_status_chat,
+                rerank_status_kb,
+            ],
+        )
+        rerank_topk_chat.change(
+            _set_reranker_settings,
+            inputs=[reranker_enable_chat, rerank_topk_chat],
+            outputs=[
+                reranker_enable_chat,
+                rerank_topk_chat,
+                reranker_enable_kb,
+                rerank_topk_kb,
+                rerank_status_chat,
+                rerank_status_kb,
+            ],
+        )
+        reranker_enable_kb.change(
+            _set_reranker_settings,
+            inputs=[reranker_enable_kb, rerank_topk_kb],
+            outputs=[
+                reranker_enable_chat,
+                rerank_topk_chat,
+                reranker_enable_kb,
+                rerank_topk_kb,
+                rerank_status_chat,
+                rerank_status_kb,
+            ],
+        )
+        rerank_topk_kb.change(
+            _set_reranker_settings,
+            inputs=[reranker_enable_kb, rerank_topk_kb],
+            outputs=[
+                reranker_enable_chat,
+                rerank_topk_chat,
+                reranker_enable_kb,
+                rerank_topk_kb,
+                rerank_status_chat,
+                rerank_status_kb,
+            ],
+        )
+        app.load(
+            _set_reranker_settings,
+            inputs=[reranker_enable_chat, rerank_topk_chat],
+            outputs=[
+                reranker_enable_chat,
+                rerank_topk_chat,
+                reranker_enable_kb,
+                rerank_topk_kb,
+                rerank_status_chat,
+                rerank_status_kb,
+            ],
+        )
 
         # Researcher lookup events
         lookup_btn.click(

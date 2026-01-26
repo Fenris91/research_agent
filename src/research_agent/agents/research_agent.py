@@ -22,7 +22,7 @@ from ..models.llm_utils import (
     get_ollama_pipeline,
     check_vram,
     VRAMConstraintError,
-    OllamaUnavailableError
+    OllamaUnavailableError,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 class ResearchState(TypedDict):
     """State passed between agent nodes."""
+
     messages: Annotated[List[Dict], operator.add]
     current_query: str
     query_type: str  # "literature_review", "factual", "analysis", "general"
@@ -46,6 +47,7 @@ class ResearchState(TypedDict):
 @dataclass
 class AgentConfig:
     """Configuration for the research agent."""
+
     max_local_results: int = 5
     max_external_results: int = 10
     min_local_results_to_skip_external: int = 3
@@ -70,7 +72,7 @@ class ResearchAgent:
         config: Optional[AgentConfig] = None,
         use_ollama: bool = False,
         ollama_model: str = "mistral",
-        ollama_base_url: str = "http://localhost:11434"
+        ollama_base_url: str = "http://localhost:11434",
     ):
         """
         Initialize the research agent.
@@ -88,7 +90,9 @@ class ResearchAgent:
         if use_ollama:
             # Try Ollama first
             try:
-                self.model = get_ollama_pipeline(model_name=ollama_model, base_url=ollama_base_url)
+                self.model = get_ollama_pipeline(
+                    model_name=ollama_model, base_url=ollama_base_url
+                )
                 self._load_model_on_demand = False
                 print(f"Using Ollama model: {ollama_model}")
             except OllamaUnavailableError as e:
@@ -176,7 +180,9 @@ class ResearchAgent:
         try:
             if self.use_ollama:
                 # Use Ollama
-                return self.model.generate(prompt, max_tokens=max_tokens, temperature=0.7)
+                return self.model.generate(
+                    prompt, max_tokens=max_tokens, temperature=0.7
+                )
             else:
                 # Use HuggingFace model
                 # Pre-alloc check
@@ -194,7 +200,7 @@ class ResearchAgent:
                         top_p=0.95,
                         temperature=0.7,
                         eos_token_id=self.tokenizer.eos_token_id,
-                        pad_token_id=self.tokenizer.eos_token_id
+                        pad_token_id=self.tokenizer.eos_token_id,
                     )
 
                 # Post-alloc check
@@ -202,7 +208,9 @@ class ResearchAgent:
 
                 # Decode only the generated tokens (exclude input)
                 generated_tokens = outputs[0][input_length:]
-                response = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+                response = self.tokenizer.decode(
+                    generated_tokens, skip_special_tokens=True
+                )
                 return response
 
         except torch.OutOfMemoryError as e:
@@ -231,9 +239,7 @@ class ResearchAgent:
 
             # Small batched generation
             outputs = self.model.generate(
-                inputs["input_ids"],
-                max_new_tokens=128,
-                temperature=0.5
+                inputs["input_ids"], max_new_tokens=128, temperature=0.5
             )
 
             return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -290,37 +296,49 @@ class ResearchAgent:
         """Offer to ingest new papers."""
         return state
 
-    async def _run_async(self, user_query: str) -> Dict[str, Any]:
+    async def _run_async(
+        self, user_query: str, search_filters: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Internal async implementation of run."""
         result = {
             "query": user_query,
-            "answer": ""
+            "answer": "",
         }
+
+        if search_filters:
+            result["search_filters"] = search_filters
 
         # Check if model is loaded (for Ollama, tokenizer is None)
         if self.model and (self.tokenizer or self.use_ollama):
             # Use the loaded model
             result["answer"] = self.infer(user_query, max_tokens=1024)
         else:
-            result["answer"] = "Fallback mode: Model not available. Query received but processing requires model loading."
+            result["answer"] = (
+                "Fallback mode: Model not available. Query received but processing requires model loading."
+            )
             result["status"] = "deferred"
 
         return result
 
-    def run(self, user_query: str) -> Dict[str, Any]:
+    def run(
+        self, user_query: str, search_filters: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Run the research agent (synchronous wrapper)."""
         try:
-            return asyncio.run(self._run_async(user_query))
+            return asyncio.run(self._run_async(user_query, search_filters))
         except RuntimeError as e:
             # Handle case where event loop already exists
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # If loop is already running, create a task
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return loop.run_in_executor(pool, asyncio.run, self._run_async(user_query))
+                    return loop.run_in_executor(
+                        pool, asyncio.run, self._run_async(user_query, search_filters)
+                    )
             else:
-                return asyncio.run(self._run_async(user_query))
+                return asyncio.run(self._run_async(user_query, search_filters))
 
     async def ingest_paper(self, paper_data: Dict) -> bool:
         """Ingest a new paper into the vector store."""
@@ -336,7 +354,7 @@ def create_research_agent(
     config: Optional[AgentConfig] = None,
     use_ollama: bool = False,
     ollama_model: str = "mistral",
-    ollama_base_url: str = "http://localhost:11434"
+    ollama_base_url: str = "http://localhost:11434",
 ) -> ResearchAgent:
     """Factory function to create a ResearchAgent instance.
 
@@ -354,5 +372,5 @@ def create_research_agent(
         config=config,
         use_ollama=use_ollama,
         ollama_model=ollama_model,
-        ollama_base_url=ollama_base_url
+        ollama_base_url=ollama_base_url,
     )

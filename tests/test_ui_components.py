@@ -127,9 +127,11 @@ class TestExploreCitations:
 
         result = await explore_citations("", "both", 20)
 
+        assert len(result) == 6  # Now returns 6 values including network plot
         assert result[0] == "Please enter a paper ID or title."
         assert result[1] is None
         assert result[2] is None
+        assert result[5] is None  # network plot
 
     @pytest.mark.asyncio
     async def test_explore_citations_whitespace_input(self):
@@ -138,6 +140,7 @@ class TestExploreCitations:
 
         result = await explore_citations("   ", "both", 20)
 
+        assert len(result) == 6
         assert result[0] == "Please enter a paper ID or title."
 
     @pytest.mark.asyncio
@@ -241,3 +244,98 @@ class TestOutputFormatting:
         assert "500" in summary
         assert "5" in summary  # citing count
         assert "3" in summary  # cited count
+
+
+# ============================================
+# Network Visualization Tests
+# ============================================
+
+
+class TestNetworkVisualization:
+    """Tests for the network visualization rendering."""
+
+    def test_render_network_graph_returns_figure(self):
+        """Test that _render_network_graph returns a matplotlib figure."""
+        from research_agent.ui.components.citation_explorer import _render_network_graph
+        from research_agent.tools.citation_explorer import (
+            CitationPaper,
+            CitationNetwork,
+        )
+        import matplotlib.pyplot as plt
+
+        network = CitationNetwork(
+            seed_paper=CitationPaper(
+                paper_id="seed_001",
+                title="Test Seed Paper",
+                year=2020,
+                citation_count=500,
+            ),
+            citing_papers=[
+                CitationPaper(paper_id=f"citing_{i}", title=f"Citing Paper {i}")
+                for i in range(3)
+            ],
+            cited_papers=[
+                CitationPaper(paper_id=f"cited_{i}", title=f"Cited Paper {i}")
+                for i in range(2)
+            ],
+            highly_connected=[],
+        )
+
+        fig = _render_network_graph(network)
+
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_render_network_graph_empty_network(self):
+        """Test _render_network_graph with no citations."""
+        from research_agent.ui.components.citation_explorer import _render_network_graph
+        from research_agent.tools.citation_explorer import (
+            CitationPaper,
+            CitationNetwork,
+        )
+        import matplotlib.pyplot as plt
+
+        network = CitationNetwork(
+            seed_paper=CitationPaper(
+                paper_id="seed_001",
+                title="Lonely Paper",
+                year=2020,
+                citation_count=0,
+            ),
+            citing_papers=[],
+            cited_papers=[],
+            highly_connected=[],
+        )
+
+        fig = _render_network_graph(network)
+
+        # Should still return a figure (with "no relationships" message)
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_render_network_graph_none_input(self):
+        """Test _render_network_graph with None input."""
+        from research_agent.ui.components.citation_explorer import _render_network_graph
+
+        result = _render_network_graph(None)
+
+        assert result is None
+
+    def test_truncate_title(self):
+        """Test title truncation helper."""
+        from research_agent.ui.components.citation_explorer import _truncate_title
+
+        # Short title - no truncation
+        assert _truncate_title("Short Title", 30) == "Short Title"
+
+        # Long title - truncated with ellipsis
+        long_title = "This is a very long title that should be truncated"
+        result = _truncate_title(long_title, 20)
+        assert len(result) == 20
+        assert result.endswith("...")
+
+        # None/empty input
+        assert _truncate_title(None) == "Unknown"
+        assert _truncate_title("") == "Unknown"

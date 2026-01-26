@@ -2,7 +2,7 @@
 
 Cross-reference task list for Claude, OpenCode, and VSCode.
 
-**Last Updated**: January 26, 2026
+**Last Updated**: January 27, 2026
 
 ---
 
@@ -18,12 +18,12 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
   - [x] web_search.py - Migrated
   - [x] researcher_lookup.py - Migrated
 
-- [ ] **PDF Processing** - Basic pipeline working, needs validation
-  - Validate PDF text/structure extraction on real PDFs (validated on sample PDFs in Downloads)
-  - Refine metadata extraction (title, authors, DOI)
-  - Tune chunking for embeddings
-  - Added first-page title/author heuristics and text normalization
-  - Added validation summary (title/authors/doi flags, chunk stats) and stronger DOI pattern
+- [x] **PDF Processing** - Pipeline working and validated
+  - Validated on real PDFs (Perspectives.pdf, konigsberg_graph_theory_naval.pdf)
+  - Title/author extraction working (heuristics for first-page analysis)
+  - DOI detection from content
+  - Validation summary with flags (title/authors/doi/abstract/refs)
+  - Chunking with configurable size/overlap
 
 - [x] **Knowledge Base Management** - Upload/delete papers in UI
   - Process document uploads into vector store
@@ -45,8 +45,8 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 - [ ] **Data Analysis Tools** - Pandas/visualization integration
 - [ ] **Export/Citation Management** - Zotero/BibTeX export
-- [ ] **Search Filters in UI** - Filter by year, field, citation count
-- [ ] **Network Visualization** - Citation graph visualization (placeholder exists)
+- [x] **Search Filters in UI** - Filter by year, field, citation count (Chat + KB tabs)
+- [x] **Network Visualization** - Citation graph using networkx/matplotlib
 
 ### Low Priority
 
@@ -57,6 +57,11 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 ---
 
 ## Completed
+
+### January 27, 2026
+- [x] **Search Filters in UI** - Year range and min citations filters in Chat and KB tabs
+- [x] **Network Visualization** - Citation graph rendering with networkx/matplotlib
+- [x] **PDF Processing Validation** - Validated on real academic PDFs (Perspectives.pdf, etc.)
 
 ### January 26, 2026
 - [x] **Citation Explorer Code Fixes**
@@ -106,17 +111,13 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 ## Next Steps (Recommended Order)
 
-1. **PDF Processing**
-   - Implement document processor
-   - Add to knowledge base workflow
-   - Test with real PDFs
+1. **Data Analysis Tools**
+   - Pandas integration for CSV/Excel analysis
+   - Basic visualization generation
 
-2. **Knowledge Base Management**
-   - Refresh stats/browse list and delete flows in UI
-
-3. **Network Visualization**
-   - Implement citation graph rendering
-   - Use existing `build_network_data()` output
+2. **Export/Citation Management**
+   - BibTeX export from knowledge base
+   - Optional Zotero integration
 
 ---
 
