@@ -57,36 +57,57 @@ def create_app(agent=None):
             with gr.Row():
                 clear = gr.Button("Clear Chat")
 
-            with gr.Accordion("Settings", open=False):
-                gr.Markdown("### LLM Model")
-                with gr.Row():
-                    model_dropdown = gr.Dropdown(
-                        choices=["Loading..."],
-                        value="Loading...",
-                        label="Select Model",
-                        scale=3,
-                        interactive=True,
-                    )
-                    refresh_models_btn = gr.Button("🔄", scale=1, min_width=50)
-
-                current_model_display = gr.Textbox(
-                    label="Current Model",
-                    interactive=False,
-                    placeholder="No model loaded",
+        with gr.Accordion("Settings", open=False):
+            gr.Markdown("### LLM Model")
+            with gr.Row():
+                model_dropdown = gr.Dropdown(
+                    choices=["Loading..."],
+                    value="Loading...",
+                    label="Select Model",
+                    scale=3,
+                    interactive=True,
                 )
+                refresh_models_btn = gr.Button("🔄", scale=1, min_width=50)
 
-                gr.Markdown("### Search Settings")
-                search_depth = gr.Slider(
+            current_model_display = gr.Textbox(
+                label="Current Model",
+                interactive=False,
+                placeholder="No model loaded",
+            )
+
+            gr.Markdown("### Search Settings")
+            search_depth = gr.Slider(
+                minimum=1,
+                maximum=20,
+                value=5,
+                step=1,
+                label="Max external results per source",
+            )
+            auto_ingest = gr.Checkbox(
+                label="Automatically add high-quality sources to knowledge base",
+                value=False,
+            )
+
+            gr.Markdown("### Reranker (Retrieval)")
+            with gr.Row():
+                reranker_enable_chat = gr.Checkbox(
+                    label="Enable reranker (BGE)",
+                    value=None,
+                    info="Improves ranking of retrieved chunks",
+                )
+                rerank_topk_chat = gr.Slider(
                     minimum=1,
-                    maximum=20,
-                    value=5,
+                    maximum=50,
+                    value=10,
                     step=1,
-                    label="Max external results per source",
+                    label="Rerank top-k",
+                    info="How many results to rerank",
                 )
-                auto_ingest = gr.Checkbox(
-                    label="Automatically add high-quality sources to knowledge base",
-                    value=False,
-                )
+            rerank_status_chat = gr.Textbox(
+                label="Reranker Status",
+                interactive=False,
+                placeholder="Using config defaults",
+            )
 
         with gr.Tab("Knowledge Base"):
             gr.Markdown("## Your Research Library")
@@ -133,6 +154,25 @@ def create_app(agent=None):
                 interactive=False,
                 placeholder="Enter a paper ID to delete",
             )
+
+            with gr.Accordion("Retrieval Settings", open=False):
+                gr.Markdown("Reranker settings (shared with Chat)")
+                with gr.Row():
+                    reranker_enable_kb = gr.Checkbox(
+                        label="Enable reranker (BGE)", value=None
+                    )
+                    rerank_topk_kb = gr.Slider(
+                        minimum=1,
+                        maximum=50,
+                        value=10,
+                        step=1,
+                        label="Rerank top-k",
+                    )
+                rerank_status_kb = gr.Textbox(
+                    label="Reranker Status",
+                    interactive=False,
+                    placeholder="Using config defaults",
+                )
 
         with gr.Tab("Researcher Lookup"):
             gr.Markdown("""
@@ -310,6 +350,10 @@ def create_app(agent=None):
         rerank_top_k = None
         _config_cache = None
 
+        # Shared reranker settings
+        reranker_enabled = None
+        rerank_top_k = None
+
         def _load_config():
             nonlocal _config_cache
             if _config_cache is not None:
@@ -331,12 +375,34 @@ def create_app(agent=None):
             return _config_cache
 
         def _get_kb_resources():
-            nonlocal vector_store, embedder, processor, reranker, rerank_top_k
+            nonlocal \
+                vector_store, \
+                embedder, \
+                processor, \
+                reranker, \
+                rerank_top_k, \
+                reranker_enabled
 
             if vector_store is None:
                 from research_agent.db.vector_store import ResearchVectorStore
 
                 cfg = _load_config()
+
+                if reranker_enabled is None:
+                    reranker_enabled_default = (
+                        cfg.get("embedding", {})
+                        .get("reranker", {})
+                        .get("enabled", False)
+                    )
+                    reranker_enabled = bool(reranker_enabled_default)
+
+                if rerank_top_k is None:
+                    rerank_top_k_cfg = (
+                        cfg.get("retrieval", {}).get("rerank_top_k")
+                        if isinstance(cfg, dict)
+                        else None
+                    )
+                    rerank_top_k = rerank_top_k_cfg
 
                 if reranker is None:
                     try:
@@ -344,12 +410,8 @@ def create_app(agent=None):
                             load_reranker_from_config,
                         )
 
-                        reranker = load_reranker_from_config(cfg)
-                        rerank_top_k = (
-                            cfg.get("retrieval", {}).get("rerank_top_k")
-                            if isinstance(cfg, dict)
-                            else None
-                        )
+                        candidate = load_reranker_from_config(cfg)
+                        reranker = candidate if reranker_enabled else None
                     except Exception as e:  # pragma: no cover - optional
                         logger.warning(f"Reranker unavailable: {e}")
                         reranker = None
@@ -372,6 +434,43 @@ def create_app(agent=None):
                 processor = DocumentProcessor()
 
             return vector_store, embedder, processor
+
+        def _set_reranker_settings(enabled: bool, top_k: int | None):
+            """Update reranker settings and propagate to vector store."""
+            nonlocal reranker_enabled, rerank_top_k, reranker, vector_store
+
+            reranker_enabled = bool(enabled)
+            rerank_top_k = int(top_k) if top_k else None
+
+            if reranker_enabled and reranker is None:
+                cfg = _load_config()
+                try:
+                    from research_agent.models.reranker import load_reranker_from_config
+
+                    reranker = load_reranker_from_config(cfg)
+                except Exception as e:  # pragma: no cover - optional
+                    logger.warning(f"Reranker unavailable: {e}")
+                    reranker = None
+                    rerank_top_k = None
+
+            if vector_store is not None:
+                vector_store.reranker = reranker if reranker_enabled else None
+                vector_store.rerank_top_k = rerank_top_k
+
+            status = (
+                f"Reranker enabled (top_k={rerank_top_k or 'all'})"
+                if reranker_enabled and reranker is not None
+                else "Reranker disabled"
+            )
+
+            return (
+                gr.update(value=reranker_enabled),
+                gr.update(value=rerank_top_k or 10),
+                gr.update(value=reranker_enabled),
+                gr.update(value=rerank_top_k or 10),
+                status,
+                status,
+            )
 
         def _format_papers_table(papers):
             if not papers:
