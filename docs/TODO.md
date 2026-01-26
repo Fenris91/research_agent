@@ -8,15 +8,15 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 ## In Progress
 
-- [ ] **Package Migration** - Moving modules from `src/` to `src/research_agent/`
+- [x] **Package Migration** - Moving modules from `src/` to `src/research_agent/`
   - [x] citation_explorer.py - Fixed indentation, removed duplicates, tested
   - [x] academic_search.py - Working
-  - [ ] vector_store.py - Needs migration
-  - [ ] embeddings.py - Needs migration
-  - [ ] llm_utils.py - Needs migration
-  - [ ] research_agent.py - Needs migration
-  - [ ] web_search.py - Needs migration
-  - [ ] researcher_lookup.py - Needs migration
+  - [x] vector_store.py - Migrated
+  - [x] embeddings.py - Migrated
+  - [x] llm_utils.py - Migrated
+  - [x] research_agent.py - Migrated
+  - [x] web_search.py - Migrated
+  - [x] researcher_lookup.py - Migrated
 
 - [ ] **PDF Processing** - Document processor scaffolded but not functional
   - Parse PDF text and structure

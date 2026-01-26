@@ -1,3 +1,11 @@
+"""
+LLM Utilities for Research Agent
+
+Provides LLM integration with multiple backends:
+- Ollama (local, recommended)
+- HuggingFace Transformers (fallback)
+"""
+
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import logging
@@ -21,12 +29,12 @@ def get_vram_info():
     """Get detailed VRAM information"""
     if not torch.cuda.is_available():
         return {"available": 0, "total": 0, "device": None}
-    
+
     total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
     allocated_gb = torch.cuda.memory_allocated() / 1024**3
     reserved_gb = torch.cuda.memory_reserved() / 1024**3
     available_gb = total_gb - reserved_gb
-    
+
     return {
         "total": total_gb,
         "allocated": allocated_gb,
@@ -39,16 +47,16 @@ def get_vram_info():
 def check_vram(threshold_gb=28):  # Leave 4GB headroom
     """Check VRAM and provide detailed diagnostics"""
     vram_info = get_vram_info()
-    
+
     if not torch.cuda.is_available():
         logger.warning("CUDA not available - will use CPU")
         return
-    
+
     logger.info(f"GPU: {vram_info['device']}")
     logger.info(f"Total VRAM: {vram_info['total']:.2f}GB")
     logger.info(f"Available VRAM: {vram_info['available']:.2f}GB")
     logger.info(f"Allocated VRAM: {vram_info['allocated']:.2f}GB")
-    
+
     if vram_info['allocated'] > threshold_gb:
         raise VRAMConstraintError(
             f"VRAM usage {vram_info['allocated']:.2f}GB exceeds threshold {threshold_gb}GB"
@@ -58,10 +66,10 @@ def check_vram(threshold_gb=28):  # Leave 4GB headroom
 def get_qlora_pipeline():
     """Return quantized Qwen2.5 LLM with memory optimizations"""
     vram_info = get_vram_info()
-    
+
     logger.info(f"Attempting to load Qwen2.5-32B model...")
     logger.info(f"GPU: {vram_info.get('device', 'None')}, Total VRAM: {vram_info.get('total', 0):.2f}GB")
-    
+
     try:
         model = AutoModelForCausalLM.from_pretrained(
             "Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4",
@@ -70,11 +78,11 @@ def get_qlora_pipeline():
             trust_remote_code=True
         )
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4")
-        logger.info("✓ Successfully loaded Qwen2.5-32B model")
+        logger.info("Successfully loaded Qwen2.5-32B model")
         return model, tokenizer
     except (OSError, RuntimeError) as e:
         logger.warning(f"Primary model failed ({type(e).__name__}): {str(e)}")
-        
+
         # First fallback: 8-bit quantization
         try:
             logger.info("Attempting 8-bit quantization fallback...")
@@ -86,11 +94,11 @@ def get_qlora_pipeline():
                 trust_remote_code=True
             )
             tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4")
-            logger.info("✓ Successfully loaded Qwen2.5-32B with 8-bit quantization")
+            logger.info("Successfully loaded Qwen2.5-32B with 8-bit quantization")
             return model, tokenizer
         except (OSError, RuntimeError) as e:
             logger.warning(f"8-bit quantization failed ({type(e).__name__}): {str(e)}")
-            
+
             # Second fallback: CPU offloading with 4-bit
             try:
                 logger.info("Attempting 4-bit CPU offloading fallback...")
@@ -102,11 +110,11 @@ def get_qlora_pipeline():
                     trust_remote_code=True
                 )
                 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4")
-                logger.info("✓ Successfully loaded Qwen2.5-32B with 4-bit + CPU offload")
+                logger.info("Successfully loaded Qwen2.5-32B with 4-bit + CPU offload")
                 return model, tokenizer
             except (OSError, RuntimeError) as e:
                 logger.warning(f"4-bit CPU offload failed ({type(e).__name__}): {str(e)}")
-                
+
                 # Third fallback: Use Mistral 7B (public, good quality)
                 try:
                     logger.info("Attempting Mistral 7B-Instruct fallback...")
@@ -117,11 +125,11 @@ def get_qlora_pipeline():
                         trust_remote_code=True
                     )
                     tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.1")
-                    logger.info("✓ Successfully loaded Mistral 7B model")
+                    logger.info("Successfully loaded Mistral 7B model")
                     return model, tokenizer
                 except (OSError, RuntimeError) as e:
                     logger.warning(f"Mistral 7B failed ({type(e).__name__}): {str(e)}")
-                    
+
                     # Fourth fallback: Use lightweight model
                     try:
                         logger.info("Loading lightweight fallback model (TinyLlama)...")
@@ -132,7 +140,7 @@ def get_qlora_pipeline():
                             trust_remote_code=True
                         )
                         tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-                        logger.info("✓ Successfully loaded TinyLlama fallback model")
+                        logger.info("Successfully loaded TinyLlama fallback model")
                         return model, tokenizer
                     except (OSError, RuntimeError) as e:
                         logger.error(f"Lightweight fallback also failed ({type(e).__name__}): {str(e)}")
@@ -201,13 +209,13 @@ class OllamaModel:
         except Exception:
             pass
         return "mistral"  # Default fallback
-    
+
     def _check_availability(self):
         """Check if Ollama server is running"""
         try:
             response = requests.get(f"{self.base_url}/api/tags", timeout=2)
             if response.status_code == 200:
-                logger.info(f"✓ Ollama server available at {self.base_url}")
+                logger.info(f"Ollama server available at {self.base_url}")
                 models = response.json().get("models", [])
                 model_names = [m.get("name") for m in models]
                 logger.info(f"Available models: {model_names}")
@@ -218,7 +226,7 @@ class OllamaModel:
                 f"Cannot connect to Ollama at {self.base_url}. "
                 f"Make sure Ollama is running with: ollama serve"
             ) from e
-    
+
     def generate(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> str:
         """
         Generate text using Ollama.
@@ -270,14 +278,14 @@ class OllamaModel:
 def get_ollama_pipeline(model_name: str = "mistral", base_url: str = "http://localhost:11434") -> OllamaModel:
     """
     Get an Ollama model pipeline.
-    
+
     Args:
         model_name: Ollama model to use
         base_url: Ollama server URL
-        
+
     Returns:
         OllamaModel instance
-        
+
     Raises:
         OllamaUnavailableError: If Ollama is not available
     """

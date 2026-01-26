@@ -9,7 +9,7 @@ Supports multiple collections:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Union
 
@@ -134,11 +134,11 @@ class ResearchVectorStore:
             logger.warning(f"No chunks to add for paper {paper_id}")
             return
 
-        # Add timestamp
+        # Add timestamp - use timezone-aware datetime
         base_metadata = {
             **metadata,
             "paper_id": paper_id,
-            "added_at": datetime.utcnow().isoformat()
+            "added_at": datetime.now(timezone.utc).isoformat()
         }
 
         # Sanitize metadata
@@ -181,7 +181,7 @@ class ResearchVectorStore:
         note_metadata = {
             **metadata,
             "note_id": note_id,
-            "added_at": datetime.utcnow().isoformat()
+            "added_at": datetime.now(timezone.utc).isoformat()
         }
 
         # Sanitize metadata
@@ -223,7 +223,7 @@ class ResearchVectorStore:
         base_metadata = {
             **metadata,
             "source_id": source_id,
-            "added_at": datetime.utcnow().isoformat()
+            "added_at": datetime.now(timezone.utc).isoformat()
         }
 
         # Sanitize metadata

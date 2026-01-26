@@ -6,13 +6,12 @@ Load embedding models for semantic search:
 - HuggingFace models
 """
 
-from typing import List, Optional, Union
+from typing import List
 import numpy as np
 
 
 def load_embedding_model(
-    model_name: str = "BAAI/bge-large-en-v1.5",
-    device: str = "cuda"
+    model_name: str = "BAAI/bge-large-en-v1.5", device: str = "cuda"
 ):
     """
     Load embedding model for semantic search.
@@ -53,7 +52,7 @@ def load_embedding_model_from_config(config: dict):
     embedding_config = config.get("embedding", {})
     return load_embedding_model(
         model_name=embedding_config.get("name", "BAAI/bge-large-en-v1.5"),
-        device=embedding_config.get("device", "cuda")
+        device=embedding_config.get("device", "cuda"),
     )
 
 
@@ -78,27 +77,24 @@ class EmbeddingModel:
         self.model = model
         self.model_name = model_name
         self.dimension = model.get_sentence_embedding_dimension()
-    
+
     def embed(self, text: str) -> List[float]:
         """Embed a single text."""
         embedding = self.model.encode(text, convert_to_numpy=True)
         return embedding.tolist()
-    
+
     def embed_batch(
-        self,
-        texts: List[str],
-        batch_size: int = 32,
-        show_progress: bool = True
+        self, texts: List[str], batch_size: int = 32, show_progress: bool = True
     ) -> List[List[float]]:
         """Embed multiple texts efficiently."""
         embeddings = self.model.encode(
             texts,
             batch_size=batch_size,
             show_progress_bar=show_progress,
-            convert_to_numpy=True
+            convert_to_numpy=True,
         )
         return embeddings.tolist()
-    
+
     def embed_query(self, query: str) -> List[float]:
         """
         Embed a search query.
@@ -111,12 +107,8 @@ class EmbeddingModel:
             query = f"Represent this sentence for searching relevant passages: {query}"
 
         return self.embed(query)
-    
-    def similarity(
-        self,
-        embedding1: List[float],
-        embedding2: List[float]
-    ) -> float:
+
+    def similarity(self, embedding1: List[float], embedding2: List[float]) -> float:
         """Calculate cosine similarity between two embeddings."""
         a = np.array(embedding1)
         b = np.array(embedding2)
@@ -126,18 +118,18 @@ class EmbeddingModel:
 if __name__ == "__main__":
     # Quick test
     print("Testing embedding model...")
-    
+
     embedder = load_embedding_model()
-    
+
     # Test embedding
     text = "Urban gentrification and displacement in post-industrial cities"
     vec = embedder.embed(text)
-    
+
     print(f"✓ Embedded text to {len(vec)} dimensions")
-    
+
     # Test similarity
     query = "housing displacement in cities"
     query_vec = embedder.embed_query(query)
-    
+
     sim = embedder.similarity(vec, query_vec)
     print(f"✓ Similarity between text and query: {sim:.3f}")

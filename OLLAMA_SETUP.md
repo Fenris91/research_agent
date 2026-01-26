@@ -60,13 +60,13 @@ export USE_OLLAMA=true
 export OLLAMA_MODEL=mistral
 export OLLAMA_BASE_URL=http://localhost:11434
 
-python src/ui/app.py
+python -m research_agent.ui.app
 ```
 
 ### Option 2: Programmatic
 
 ```python
-from src.agents.research_agent import ResearchAgent
+from research_agent.agents.research_agent import ResearchAgent
 
 # Use Ollama
 agent = ResearchAgent(
@@ -83,7 +83,7 @@ print(result)
 
 ```bash
 python -c '
-from src.agents.research_agent import ResearchAgent
+from research_agent.agents.research_agent import ResearchAgent
 agent = ResearchAgent(use_ollama=True, ollama_model="mistral")
 result = agent.run("Your question here")
 print(result["answer"])
@@ -216,4 +216,4 @@ agent = ResearchAgent(
 
 - Read [SETUP.md](docs/SETUP.md) for general setup
 - Check [PLAN.md](docs/PLAN.md) for architecture overview
-- Run the UI: `python src/ui/app.py`
+- Run the UI: `python -m research_agent.ui.app`

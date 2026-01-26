@@ -39,7 +39,7 @@ conda activate research_agent
 pip install -r requirements.txt
 
 # 4. Run the UI
-python -m src.ui.app
+python -m research_agent.ui.app
 ```
 
 ## Usage Examples
@@ -48,7 +48,7 @@ python -m src.ui.app
 
 ```python
 import asyncio
-from src.agents import create_research_agent
+from research_agent.agents import create_research_agent
 
 async def main():
     # Create agent with all components
@@ -71,7 +71,7 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from src.tools import AcademicSearchTools
+from research_agent.tools import AcademicSearchTools
 
 async def search():
     search = AcademicSearchTools()
@@ -95,7 +95,7 @@ asyncio.run(search())
 
 ```python
 import asyncio
-from src.tools import ResearcherLookup
+from research_agent.tools import ResearcherLookup
 
 async def lookup():
     lookup = ResearcherLookup()
@@ -116,19 +116,19 @@ asyncio.run(lookup())
 
 ```bash
 # Lookup researchers from command line
-python -m src.scripts.lookup_researchers --names "David Harvey, Doreen Massey"
+python -m research_agent.scripts.lookup_researchers --names "David Harvey, Doreen Massey"
 
 # From a file
-python -m src.scripts.lookup_researchers --file data/researchers.txt
+python -m research_agent.scripts.lookup_researchers --file data/researchers.txt
 
 # Output as JSON
-python -m src.scripts.lookup_researchers --names "Anna Tsing" --json
+python -m research_agent.scripts.lookup_researchers --names "Anna Tsing" --json
 ```
 
 ### Vector Store
 
 ```python
-from src.db import ResearchVectorStore, EmbeddingModel
+from research_agent.db import ResearchVectorStore, EmbeddingModel
 
 # Initialize
 store = ResearchVectorStore("./data/chroma_db")
@@ -158,21 +158,22 @@ print(store.get_stats())
 ```
 research_agent/
 ├── src/
-│   ├── agents/           # LangGraph research agent
-│   │   └── research_agent.py
-│   ├── tools/            # Search and lookup tools
-│   │   ├── academic_search.py    # Semantic Scholar + OpenAlex
-│   │   ├── web_search.py         # DuckDuckGo, Tavily, Serper
-│   │   ├── researcher_lookup.py  # Author profile lookup
-│   │   └── researcher_file_parser.py
-│   ├── db/               # Vector store
-│   │   ├── vector_store.py       # ChromaDB wrapper
-│   │   └── embeddings.py         # Sentence transformers
-│   ├── processors/       # Document processing (planned)
-│   ├── scripts/          # CLI tools
-│   │   └── lookup_researchers.py
-│   └── ui/               # Gradio interface
-│       └── app.py
+│   └── research_agent/
+│       ├── agents/           # LangGraph research agent
+│       │   └── research_agent.py
+│       ├── tools/            # Search and lookup tools
+│       │   ├── academic_search.py    # Semantic Scholar + OpenAlex
+│       │   ├── web_search.py         # DuckDuckGo, Tavily, Serper
+│       │   ├── researcher_lookup.py  # Author profile lookup
+│       │   └── researcher_file_parser.py
+│       ├── db/               # Vector store
+│       │   ├── vector_store.py       # ChromaDB wrapper
+│       │   └── embeddings.py         # Sentence transformers
+│       ├── processors/       # Document processing (planned)
+│       ├── scripts/          # CLI tools
+│       │   └── lookup_researchers.py
+│       └── ui/               # Gradio interface
+│           └── app.py
 ├── configs/
 │   └── config.yaml       # Configuration
 ├── data/                 # Local data (gitignored)

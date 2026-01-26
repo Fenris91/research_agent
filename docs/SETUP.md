@@ -15,7 +15,7 @@
 **Start the Gradio UI:**
 ```bash
 cd /home/afro/projects/research_agent
-python src/ui/app.py
+python -m research_agent.ui.app
 ```
 
 The app will:
@@ -26,7 +26,7 @@ The app will:
 
 **Test via command line:**
 ```bash
-python -c 'from src.agents.research_agent import ResearchAgent; agent = ResearchAgent(); result = agent.run("What is participatory action research?"); print(result)'
+python -c 'from research_agent.agents.research_agent import ResearchAgent; agent = ResearchAgent(); result = agent.run("What is participatory action research?"); print(result)'
 ```
 
 ---
@@ -108,14 +108,15 @@ research_agent/
 ├── docs/
 │   └── PLAN.md          # Your implementation plan goes here
 ├── src/
-│   ├── __init__.py
-│   ├── main.py
-│   ├── agents/
-│   ├── db/
-│   ├── models/
-│   ├── processors/
-│   ├── tools/
-│   └── ui/
+│   └── research_agent/
+│       ├── __init__.py
+│       ├── main.py
+│       ├── agents/
+│       ├── db/
+│       ├── models/
+│       ├── processors/
+│       ├── tools/
+│       └── ui/
 └── tests/
     └── __init__.py
 ```
@@ -203,7 +204,7 @@ This will:
 
 ```bash
 # Run the setup check
-python -m src.main --mode check
+python -m research_agent.main --mode check
 ```
 
 This will verify:
@@ -252,13 +253,13 @@ conda activate research_agent
 source venv/bin/activate
 
 # Run the UI
-python -m src.main --mode ui
+python -m research_agent.main --mode ui
 
 # Run setup check
-python -m src.main --mode check
+python -m research_agent.main --mode check
 
 # Run CLI mode
-python -m src.main --mode cli
+python -m research_agent.main --mode cli
 
 # Check GPU memory
 nvidia-smi

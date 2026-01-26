@@ -15,42 +15,42 @@ This document outlines a concrete implementation plan for building an autonomous
 
 | Component | Status | File(s) |
 |-----------|--------|---------|
-| **Academic Paper Search** | Done | `src/tools/academic_search.py` |
+| **Academic Paper Search** | Done | `src/research_agent/tools/academic_search.py` |
 | - Semantic Scholar API | Done | Search with citation data, DOI, fields |
 | - OpenAlex API | Done | Broad coverage, abstract reconstruction |
 | - Unpaywall (OA finder) | Done | Find open access PDFs |
 | - Deduplication | Done | DOI + title matching |
-| **Web Search** | Done | `src/tools/web_search.py` |
+| **Web Search** | Done | `src/research_agent/tools/web_search.py` |
 | - DuckDuckGo (free) | Done | No API key required |
 | - Tavily (paid) | Done | AI-optimized search |
 | - Serper (paid) | Done | Google results |
-| **Researcher Lookup** | Done | `src/tools/researcher_lookup.py` |
+| **Researcher Lookup** | Done | `src/research_agent/tools/researcher_lookup.py` |
 | - OpenAlex Authors | Done | Works, citations, affiliations |
 | - Semantic Scholar Authors | Done | H-index, paper count |
 | - Web Search | Done | Academic profiles, news |
-| - CLI Script | Done | `src/scripts/lookup_researchers.py` |
-| **Vector Store** | Done | `src/db/vector_store.py` |
+| - CLI Script | Done | `src/research_agent/scripts/lookup_researchers.py` |
+| **Vector Store** | Done | `src/research_agent/db/vector_store.py` |
 | - ChromaDB integration | Done | Persistent storage |
 | - Multiple collections | Done | papers, notes, web_sources |
 | - CRUD operations | Done | Add, search, delete, list |
-| **Embedding Model** | Done | `src/db/embeddings.py` |
+| **Embedding Model** | Done | `src/research_agent/db/embeddings.py` |
 | - Sentence Transformers | Done | BGE models supported |
 | - Query/document encoding | Done | Optimized for retrieval |
-| **Research Agent** | Done | `src/agents/research_agent.py` |
+| **Research Agent** | Done | `src/research_agent/agents/research_agent.py` |
 | - LangGraph workflow | Done | 5-node state machine |
 | - Query classification | Done | literature_review, factual, etc. |
 | - Local KB search | Done | Vector store integration |
 | - External search | Done | Academic + web APIs |
 | - Response synthesis | Done | Structured output (no LLM) |
 | - Ingestion candidates | Done | Score and rank papers |
-| **LLM Integration** | Done | `src/models/llm_utils.py` |
+| **LLM Integration** | Done | `src/research_agent/models/llm_utils.py` |
 | - Ollama integration | Done | Primary backend, local inference |
 | - qwen3:32b support | Done | Default model with thinking mode |
 | - mistral-small3.2 support | Done | Fast fallback option |
 | - Model switching | Done | Switch models at runtime |
 | - HuggingFace fallback | Done | Qwen2.5-32B GPTQ if no Ollama |
 | - VRAM diagnostics | Done | Real-time GPU memory monitoring |
-| **Gradio UI** | Done | `src/ui/app.py` |
+| **Gradio UI** | Done | `src/research_agent/ui/app.py` |
 | - Basic structure | Done | Tabs for chat, KB, researcher |
 | - Researcher Lookup tab | Done | Functional |
 | - Chat integration | Done | Agent fully wired and working |
@@ -94,10 +94,10 @@ This document outlines a concrete implementation plan for building an autonomous
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Package Migration** | In Progress | Moving from `src/` to `src/research_agent/` |
+| **Package Migration** | Done | Moved from `src/` to `src/research_agent/` |
 | - citation_explorer.py | Done | Fixed and tested |
 | - academic_search.py | Done | Working |
-| - Other modules | Pending | vector_store, embeddings, llm_utils, etc. |
+| - Other modules | Done | vector_store, embeddings, llm_utils, etc. |
 | PDF Processing | Pending | Document processor scaffolded |
 
 ### Not Started

@@ -1,19 +1,31 @@
+"""
+Research Agent
+
+Autonomous research assistant for social sciences using LangGraph workflow.
+Supports multiple LLM backends (Ollama, HuggingFace).
+"""
+
 import torch
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Callable, Any
 
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TypedDict, Annotated, List, Optional, Dict, Any, Callable
+from typing import TypedDict, Annotated
 import operator
 
 from langgraph.graph import StateGraph, END
 
-from ..models.llm_utils import get_qlora_pipeline, check_vram, VRAMConstraintError
+from ..models.llm_utils import (
+    get_qlora_pipeline,
+    get_ollama_pipeline,
+    check_vram,
+    VRAMConstraintError,
+    OllamaUnavailableError
+)
 
 logger = logging.getLogger(__name__)
-
 
 
 class ResearchState(TypedDict):
@@ -62,7 +74,7 @@ class ResearchAgent:
     ):
         """
         Initialize the research agent.
-        
+
         Args:
             use_ollama: If True, use Ollama instead of HuggingFace models
             ollama_model: Ollama model name (e.g., "mistral", "llama2", "neural-chat")
@@ -72,16 +84,15 @@ class ResearchAgent:
         self.tokenizer = None
         self._load_model_on_demand = True
         self.use_ollama = use_ollama
-        
+
         if use_ollama:
             # Try Ollama first
             try:
-                from ..models.llm_utils import get_ollama_pipeline, OllamaUnavailableError
                 self.model = get_ollama_pipeline(model_name=ollama_model, base_url=ollama_base_url)
                 self._load_model_on_demand = False
-                print(f"✓ Using Ollama model: {ollama_model}")
+                print(f"Using Ollama model: {ollama_model}")
             except OllamaUnavailableError as e:
-                print(f"⚠️ Ollama unavailable: {str(e)}")
+                print(f"Ollama unavailable: {str(e)}")
                 print("Falling back to HuggingFace models...")
                 try:
                     self.model, self.tokenizer = get_qlora_pipeline()
@@ -89,7 +100,7 @@ class ResearchAgent:
                     self._load_model_on_demand = False
                     self.use_ollama = False
                 except VRAMConstraintError as e:
-                    print(f"⚠️ Model loading deferred due to VRAM constraints: {str(e)}")
+                    print(f"Model loading deferred due to VRAM constraints: {str(e)}")
                     self._load_model_on_demand = True
         else:
             # Try HuggingFace models
@@ -98,7 +109,7 @@ class ResearchAgent:
                 self._test_vram_on_initialization()
                 self._load_model_on_demand = False
             except VRAMConstraintError as e:
-                print(f"⚠️ Model loading deferred due to VRAM constraints: {str(e)}")
+                print(f"Model loading deferred due to VRAM constraints: {str(e)}")
                 self._load_model_on_demand = True
 
         self.vector_store = vector_store
@@ -155,7 +166,7 @@ class ResearchAgent:
         try:
             check_vram()
         except VRAMConstraintError as e:
-            print(f"⚠️ Initial VRAM warning: {str(e)}")
+            print(f"Initial VRAM warning: {str(e)}")
 
     def infer(self, prompt: str, max_tokens=512):
         """
@@ -170,10 +181,10 @@ class ResearchAgent:
                 # Use HuggingFace model
                 # Pre-alloc check
                 check_vram()
-                
+
                 inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda")
                 input_length = inputs["input_ids"].shape[1]
-                
+
                 with torch.no_grad():
                     outputs = self.model.generate(
                         inputs["input_ids"],
@@ -185,26 +196,26 @@ class ResearchAgent:
                         eos_token_id=self.tokenizer.eos_token_id,
                         pad_token_id=self.tokenizer.eos_token_id
                     )
-                    
+
                 # Post-alloc check
                 check_vram()
-                
+
                 # Decode only the generated tokens (exclude input)
                 generated_tokens = outputs[0][input_length:]
                 response = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
                 return response
-            
+
         except torch.OutOfMemoryError as e:
             # Implement exponential backoff strategy
             max_tokens = max(32, max_tokens // 2)
             print(f"Reducing max_tokens to {max_tokens} due to VRAM constraints")
             return self.infer(prompt, max_tokens)  # Recurse with smaller output
-            
+
         except VRAMConstraintError as e:
             # Fallback to CPU for critical operations
             print(f"Switching to CPU for critical operation: {e}")
             return self._cpu_inference_fallback(prompt)
-            
+
         except Exception as e:
             # General failure fallback
             return f"Error: {str(e)}. Try simplifying your query or reducing output length."
@@ -217,37 +228,37 @@ class ResearchAgent:
             # Move model to CPU
             self.model.to("cpu")
             inputs = self.tokenizer(prompt, return_tensors="pt")
-            
+
             # Small batched generation
             outputs = self.model.generate(
                 inputs["input_ids"],
                 max_new_tokens=128,
                 temperature=0.5
             )
-            
+
             return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            
+
         except Exception as e:
             return f"Critical failure: {str(e)}. Cannot perform operations in current configuration."
 
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph workflow graph."""
         workflow = StateGraph(ResearchState)
-        
+
         # Add nodes
         workflow.add_node("understand_query", self._understand_query)
         workflow.add_node("search_local", self._search_local)
         workflow.add_node("search_external", self._search_external)
         workflow.add_node("synthesize", self._synthesize)
         workflow.add_node("offer_ingestion", self._offer_ingestion)
-        
+
         # Add edges
         workflow.set_entry_point("understand_query")
         workflow.add_edge("understand_query", "search_local")
         workflow.add_edge("search_local", "synthesize")
         workflow.add_edge("synthesize", "offer_ingestion")
         workflow.add_edge("offer_ingestion", END)
-        
+
         return workflow.compile()
 
     # Existing methods preserved from previous content...
@@ -285,7 +296,7 @@ class ResearchAgent:
             "query": user_query,
             "answer": ""
         }
-        
+
         # Check if model is loaded (for Ollama, tokenizer is None)
         if self.model and (self.tokenizer or self.use_ollama):
             # Use the loaded model
@@ -293,7 +304,7 @@ class ResearchAgent:
         else:
             result["answer"] = "Fallback mode: Model not available. Query received but processing requires model loading."
             result["status"] = "deferred"
-        
+
         return result
 
     def run(self, user_query: str) -> Dict[str, Any]:
