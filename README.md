@@ -7,13 +7,17 @@ An autonomous research assistant for social sciences (social anthropology, geogr
 ### Implemented
 - **Academic Paper Search**: Search Semantic Scholar and OpenAlex APIs
 - **Web Search**: Free DuckDuckGo search (no API key required)
-- **Researcher Lookup**: Fetch citation data, h-index, and web presence for researchers
+- **Researcher Lookup**: Fetch citation data, h-index, web presence, and top papers for researchers
+- **Researcher-Citation Integration**: Look up researchers and explore their citation networks
+  - Fetches researcher's top papers automatically
+  - Stores profiles in a registry for cross-tab access
+  - Explore citation networks for any researcher's papers
 - **Vector Store**: ChromaDB-based knowledge base with semantic search
 - **Research Agent**: LangGraph-based orchestration for query understanding, search, and synthesis
-- **Gradio UI**: Web interface with chat, knowledge base, and researcher lookup tabs
+- **Gradio UI**: Web interface with chat, knowledge base, researcher lookup, and citation explorer tabs
 - **PDF Ingestion**: Extract and chunk academic PDFs
 - **LLM Integration**: Local LLM for response synthesis
-- **Citation Explorer**: Follow citation chains
+- **Citation Explorer**: Follow citation chains, explore author networks
 - **Data Analysis**: Statistical analysis and visualization
 
 ### Planned

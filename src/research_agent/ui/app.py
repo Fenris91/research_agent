@@ -264,7 +264,12 @@ def create_app(agent=None):
                     use_semantic_scholar = gr.Checkbox(
                         label="Semantic Scholar", value=True
                     )
-                    use_web_search = gr.Checkbox(label="Web Search", value=True)
+                    use_web_search = gr.Checkbox(label="Web Search", value=False)
+                    fetch_papers = gr.Checkbox(
+                        label="Fetch Papers (for Citation Explorer)",
+                        value=False,
+                        info="Slower but enables citation network exploration"
+                    )
 
             with gr.Row():
                 lookup_btn = gr.Button("Lookup Researchers", variant="primary", scale=2)
@@ -749,12 +754,13 @@ def create_app(agent=None):
 
             return "\n".join(lines)
 
-        def lookup_researchers(names_text, use_oa, use_s2, use_web):
-            """Look up researcher profiles."""
+        def lookup_researchers(names_text, use_oa, use_s2, use_web, should_fetch_papers):
+            """Look up researcher profiles, optionally with papers."""
             from research_agent.tools.researcher_file_parser import (
                 parse_researchers_text,
             )
             from research_agent.tools.researcher_lookup import ResearcherLookup
+            from research_agent.tools.researcher_registry import get_researcher_registry
 
             names = parse_researchers_text(names_text)
 
@@ -773,11 +779,29 @@ def create_app(agent=None):
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                profiles = loop.run_until_complete(lookup.lookup_batch(names))
+
+                async def lookup_all():
+                    profiles = []
+                    for name in names:
+                        profile = await lookup.lookup_researcher(
+                            name,
+                            fetch_papers=should_fetch_papers,
+                            papers_limit=10 if should_fetch_papers else 0
+                        )
+                        profiles.append(profile)
+                    return profiles
+
+                profiles = loop.run_until_complete(lookup_all())
                 loop.run_until_complete(lookup.close())
             except Exception as e:
                 logger.error(f"Lookup error: {e}")
+                import traceback
+                traceback.print_exc()
                 return (f"Error during lookup: {str(e)}", [], [], None)
+
+            # Store in registry for cross-tab access (Citation Explorer)
+            registry = get_researcher_registry()
+            registry.add_batch(profiles)
 
             # Format results for table
             table_data = []
@@ -798,7 +822,12 @@ def create_app(agent=None):
                 if p.web_results:
                     web_results[p.name] = p.web_results
 
-            status = f"Found {len(profiles)} researcher profiles"
+            # Build status message
+            total_papers = sum(len(p.top_papers) for p in profiles)
+            if should_fetch_papers and total_papers > 0:
+                status = f"Found {len(profiles)} profiles with {total_papers} papers. Go to Citation Explorer to explore networks."
+            else:
+                status = f"Found {len(profiles)} researcher profiles. Enable 'Fetch Papers' for citation exploration."
 
             # Store full profiles for export
             full_results = [p.to_dict() for p in profiles]
@@ -1469,6 +1498,7 @@ def create_app(agent=None):
                 use_openalex,
                 use_semantic_scholar,
                 use_web_search,
+                fetch_papers,
             ],
             outputs=[
                 lookup_status,

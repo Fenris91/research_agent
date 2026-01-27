@@ -275,6 +275,81 @@ class OllamaModel:
             raise
 
 
+class OpenAICompatibleModel:
+    """Wrapper for OpenAI or OpenAI-compatible API endpoints."""
+
+    def __init__(
+        self,
+        model_name: str,
+        base_url: str,
+        api_key: str | None,
+        fallback_models: list[str] | None = None,
+        timeout: int = 120,
+    ):
+        self.model_name = model_name
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.timeout = timeout
+        self._fallback_models = fallback_models or ([] if model_name is None else [model_name])
+
+    def switch_model(self, model_name: str):
+        self.model_name = model_name
+        logger.info(f"Switched to model: {model_name}")
+
+    def list_available_models(self) -> list:
+        if not self.api_key:
+            logger.warning("OpenAI API key not set; using fallback model list")
+            return self._fallback_models
+
+        try:
+            response = requests.get(
+                f"{self.base_url}/models",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                models = [m.get("id") for m in data.get("data", []) if m.get("id")]
+                return models or self._fallback_models
+            logger.warning("Model listing failed: %s", response.status_code)
+        except Exception as e:
+            logger.warning("Model listing failed: %s", e)
+
+        return self._fallback_models
+
+    def generate(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> str:
+        if not self.api_key:
+            return "Error: OpenAI API key is not set."
+
+        payload = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=self.timeout,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                choices = data.get("choices") or []
+                message = choices[0].get("message", {}) if choices else {}
+                return message.get("content", "")
+            logger.error("OpenAI API error: %s %s", response.status_code, response.text)
+            return f"Error: OpenAI API returned {response.status_code}"
+        except Exception as e:
+            logger.error("OpenAI generation failed: %s", e)
+            return f"Error: OpenAI request failed: {e}"
+
+
 def get_ollama_pipeline(model_name: str = "mistral", base_url: str = "http://localhost:11434") -> OllamaModel:
     """
     Get an Ollama model pipeline.

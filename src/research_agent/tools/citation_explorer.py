@@ -7,13 +7,17 @@ This module provides functionality to:
 - Find highly connected papers in a citation network
 - Build citation graphs for visualization
 - Suggest related papers based on citation overlap
+- Explore citation networks for researchers (across their papers)
 """
 
-from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
+from dataclasses import dataclass, field
 import logging
 
 from research_agent.tools.academic_search import AcademicSearchTools, retry_with_backoff
+
+if TYPE_CHECKING:
+    from research_agent.tools.researcher_lookup import ResearcherProfile, AuthorPaper
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,33 @@ class CitationNetwork:
     citing_papers: List[CitationPaper]
     cited_papers: List[CitationPaper]
     highly_connected: List[CitationPaper]
+
+
+@dataclass
+class AuthorNetwork:
+    """Represents an author's citation network across their papers."""
+
+    author_name: str
+    author_papers: List[CitationPaper]
+    papers_citing_author: List[CitationPaper]  # Papers that cite any of author's work
+    papers_cited_by_author: List[CitationPaper]  # Papers cited by author's work
+    highly_connected: List[CitationPaper]  # Papers that appear multiple times
+    collaborators: List[str] = field(default_factory=list)  # Co-authors
+
+    @property
+    def total_citations_received(self) -> int:
+        """Total citations across all author papers."""
+        return sum(p.citation_count or 0 for p in self.author_papers)
+
+    @property
+    def unique_citing_papers(self) -> int:
+        """Number of unique papers citing author's work."""
+        return len(self.papers_citing_author)
+
+    @property
+    def unique_references(self) -> int:
+        """Number of unique papers cited by author."""
+        return len(self.papers_cited_by_author)
 
 
 class CitationExplorer:
@@ -258,6 +289,165 @@ class CitationExplorer:
                 "citing_count": len(network.citing_papers),
                 "cited_count": len(network.cited_papers),
                 "highly_connected_count": len(network.highly_connected),
+            },
+        }
+
+    async def explore_author_network(
+        self,
+        profile: "ResearcherProfile",
+        papers_limit: int = 5,
+        citations_per_paper: int = 10,
+    ) -> AuthorNetwork:
+        """
+        Explore citation network for a researcher across their papers.
+
+        Args:
+            profile: ResearcherProfile with top_papers
+            papers_limit: Maximum number of author papers to analyze
+            citations_per_paper: Maximum citations to fetch per paper
+
+        Returns:
+            AuthorNetwork with aggregated citation data
+        """
+        from research_agent.tools.researcher_lookup import AuthorPaper
+
+        # Convert AuthorPaper to CitationPaper for author's own papers
+        author_papers = []
+        for paper in profile.top_papers[:papers_limit]:
+            author_papers.append(
+                CitationPaper(
+                    paper_id=paper.paper_id,
+                    title=paper.title,
+                    year=paper.year,
+                    authors=None,
+                    citation_count=paper.citation_count,
+                    abstract=paper.abstract,
+                    venue=paper.venue,
+                    url=None,
+                )
+            )
+
+        # Collect citing and cited papers across all author papers
+        all_citing: Dict[str, CitationPaper] = {}
+        all_cited: Dict[str, CitationPaper] = {}
+        citation_counts: Dict[str, int] = {}  # Track how often papers appear
+
+        for paper in author_papers:
+            if not paper.paper_id:
+                continue
+
+            try:
+                # Get citations for this paper
+                citing = await self._get_citing_papers(
+                    paper.paper_id, limit=citations_per_paper
+                )
+                for p in citing:
+                    if p.paper_id not in all_citing:
+                        all_citing[p.paper_id] = p
+                    citation_counts[p.paper_id] = citation_counts.get(p.paper_id, 0) + 1
+
+                # Get references for this paper
+                cited = await self._get_cited_papers(
+                    paper.paper_id, limit=citations_per_paper
+                )
+                for p in cited:
+                    if p.paper_id not in all_cited:
+                        all_cited[p.paper_id] = p
+                    citation_counts[p.paper_id] = citation_counts.get(p.paper_id, 0) + 1
+
+            except Exception as e:
+                logger.warning(f"Error fetching citations for {paper.paper_id}: {e}")
+                continue
+
+        # Find highly connected papers (appear in multiple contexts)
+        highly_connected = []
+        for paper_id, count in citation_counts.items():
+            if count >= 2:
+                paper = all_citing.get(paper_id) or all_cited.get(paper_id)
+                if paper:
+                    highly_connected.append(paper)
+
+        # Sort by connection count (papers that appear most often)
+        highly_connected.sort(
+            key=lambda p: citation_counts.get(p.paper_id, 0), reverse=True
+        )
+
+        return AuthorNetwork(
+            author_name=profile.name,
+            author_papers=author_papers,
+            papers_citing_author=list(all_citing.values()),
+            papers_cited_by_author=list(all_cited.values()),
+            highly_connected=highly_connected[:20],
+            collaborators=[],  # Could be populated from author data
+        )
+
+    def build_author_network_data(self, network: AuthorNetwork) -> Dict[str, Any]:
+        """
+        Build network data for author visualization.
+
+        Args:
+            network: AuthorNetwork to visualize
+
+        Returns:
+            Dictionary with nodes and edges for network visualization
+        """
+        nodes = []
+        edges = []
+
+        # Add author's papers as central nodes
+        for i, paper in enumerate(network.author_papers[:10]):
+            node_id = f"author_{i}"
+            nodes.append(
+                {
+                    "id": node_id,
+                    "label": paper.title[:40] + "..." if len(paper.title) > 40 else paper.title,
+                    "type": "author_paper",
+                    "year": paper.year,
+                    "citation_count": paper.citation_count,
+                }
+            )
+
+        # Add citing papers
+        for i, paper in enumerate(network.papers_citing_author[:15]):
+            citing_id = f"citing_{i}"
+            nodes.append(
+                {
+                    "id": citing_id,
+                    "label": paper.title[:30] + "..." if len(paper.title) > 30 else paper.title,
+                    "type": "citing",
+                    "year": paper.year,
+                    "citation_count": paper.citation_count,
+                }
+            )
+            # Connect to first author paper (simplified)
+            if network.author_papers:
+                edges.append({"from": citing_id, "to": "author_0", "type": "cites"})
+
+        # Add cited papers
+        for i, paper in enumerate(network.papers_cited_by_author[:15]):
+            cited_id = f"cited_{i}"
+            nodes.append(
+                {
+                    "id": cited_id,
+                    "label": paper.title[:30] + "..." if len(paper.title) > 30 else paper.title,
+                    "type": "cited",
+                    "year": paper.year,
+                    "citation_count": paper.citation_count,
+                }
+            )
+            # Connect from first author paper (simplified)
+            if network.author_papers:
+                edges.append({"from": "author_0", "to": cited_id, "type": "cites"})
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "stats": {
+                "author_papers": len(network.author_papers),
+                "total_citing": len(network.papers_citing_author),
+                "total_cited": len(network.papers_cited_by_author),
+                "highly_connected": len(network.highly_connected),
+                "total_citations": network.total_citations_received,
             },
         }
 

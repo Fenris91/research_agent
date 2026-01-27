@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 from research_agent.tools.academic_search import AcademicSearchTools
-from research_agent.tools.citation_explorer import CitationExplorer, CitationNetwork
+from research_agent.tools.citation_explorer import CitationExplorer, CitationNetwork, AuthorNetwork
+from research_agent.tools.researcher_registry import get_researcher_registry
 
 
 def render_citation_explorer():
@@ -13,8 +14,40 @@ def render_citation_explorer():
     with gr.Column():
         gr.Markdown("## 🧬 Citation Network Explorer")
         gr.Markdown(
-            "Explore citation relationships and discover influential papers in academic networks."
+            "Explore citation relationships for papers or researchers from your lookup history."
         )
+
+        # Researcher selection section
+        with gr.Accordion("👤 Explore by Researcher", open=True):
+            gr.Markdown(
+                "_Select a researcher from your lookup history to explore their citation network._"
+            )
+            with gr.Row():
+                researcher_dropdown = gr.Dropdown(
+                    choices=[],
+                    label="Select Researcher",
+                    interactive=True,
+                    scale=3,
+                )
+                refresh_researchers_btn = gr.Button("🔄 Refresh", scale=1, min_width=100)
+
+            researcher_papers_table = gr.Dataframe(
+                headers=["Title", "Year", "Citations", "Paper ID"],
+                datatype=["str", "number", "number", "str"],
+                interactive=True,  # Allow selection/copying
+                wrap=True,
+                column_widths=["50%", "10%", "10%", "30%"],
+                label="Researcher's Top Papers (click to copy Paper ID)",
+                visible=True,
+            )
+
+            explore_researcher_btn = gr.Button(
+                "🔍 Explore Researcher's Citation Network",
+                variant="primary",
+            )
+
+        gr.Markdown("---")
+        gr.Markdown("### Or explore a specific paper:")
 
         with gr.Row():
             with gr.Column(scale=2):
@@ -56,28 +89,36 @@ def render_citation_explorer():
                 citing_output = gr.DataFrame(
                     headers=["Title", "Year", "Citations", "Paper ID"],
                     datatype=["str", "number", "number", "str"],
-                    interactive=False,
+                    interactive=True,  # Allow selection/copying
+                    wrap=True,
+                    column_widths=["50%", "10%", "10%", "30%"],
                 )
 
             with gr.TabItem("📚 Papers Cited by This"):
                 cited_output = gr.DataFrame(
                     headers=["Title", "Year", "Citations", "Paper ID"],
                     datatype=["str", "number", "number", "str"],
-                    interactive=False,
+                    interactive=True,  # Allow selection/copying
+                    wrap=True,
+                    column_widths=["50%", "10%", "10%", "30%"],
                 )
 
             with gr.TabItem("⭐ Highly Connected Papers"):
                 connected_output = gr.DataFrame(
                     headers=["Title", "Year", "Citations", "Paper ID"],
                     datatype=["str", "number", "number", "str"],
-                    interactive=False,
+                    interactive=True,
+                    wrap=True,
+                    column_widths=["50%", "10%", "10%", "30%"],
                 )
 
             with gr.TabItem("🔗 Related Papers"):
                 related_output = gr.DataFrame(
                     headers=["Title", "Year", "Citations", "Paper ID"],
                     datatype=["str", "number", "number", "str"],
-                    interactive=False,
+                    interactive=True,
+                    wrap=True,
+                    column_widths=["50%", "10%", "10%", "30%"],
                 )
 
         # Network visualization
@@ -110,6 +151,31 @@ def render_citation_explorer():
             ],
         )
 
+        # Researcher exploration events
+        refresh_researchers_btn.click(
+            fn=refresh_researcher_dropdown,
+            outputs=[researcher_dropdown],
+        )
+
+        researcher_dropdown.change(
+            fn=on_researcher_selected,
+            inputs=[researcher_dropdown],
+            outputs=[researcher_papers_table],
+        )
+
+        explore_researcher_btn.click(
+            fn=explore_researcher_network,
+            inputs=[researcher_dropdown, depth],
+            outputs=[
+                summary_output,
+                citing_output,
+                cited_output,
+                connected_output,
+                related_output,
+                network_plot,
+            ],
+        )
+
     return {
         "paper_input": paper_input,
         "direction": direction,
@@ -121,6 +187,9 @@ def render_citation_explorer():
         "connected_output": connected_output,
         "related_output": related_output,
         "network_plot": network_plot,
+        "researcher_dropdown": researcher_dropdown,
+        "researcher_papers_table": researcher_papers_table,
+        "refresh_researchers_btn": refresh_researchers_btn,
     }
 
 
@@ -133,16 +202,38 @@ async def explore_citations(paper_input: str, direction: str, depth: int):
         search_tools = AcademicSearchTools()
         explorer = CitationExplorer(search_tools)
 
-        # If it's not a DOI/paper ID format, try to search by title
-        if not paper_input.startswith("10.") and len(paper_input) < 20:
+        paper_input = paper_input.strip()
+        paper_id = None
+
+        # Check if it looks like a known paper ID format
+        is_doi = paper_input.startswith("10.")
+        is_s2_id = len(paper_input) == 40 and paper_input.isalnum()  # S2 IDs are 40-char hex
+        is_openalex_id = paper_input.startswith("W") and paper_input[1:].isdigit()
+
+        if is_doi or is_s2_id:
+            # Use directly as Semantic Scholar paper ID
+            paper_id = paper_input
+        elif is_openalex_id:
+            # OpenAlex ID - need to search by it or convert
+            # Try searching Semantic Scholar by the OpenAlex work
             papers = await search_tools.search_semantic_scholar(paper_input, limit=1)
             if papers:
                 paper_id = papers[0].id
             else:
+                # OpenAlex IDs don't work directly with S2, search by title would be needed
                 await search_tools.close()
-                return f"No papers found for: {paper_input}", None, None, None, None, None
+                return f"OpenAlex ID '{paper_input}' not found in Semantic Scholar. Try searching by paper title instead.", None, None, None, None, None
         else:
-            paper_id = paper_input
+            # Treat as title search
+            papers = await search_tools.search_semantic_scholar(paper_input, limit=5)
+            if papers:
+                # Try to find best match
+                paper_id = papers[0].id
+                # Show what we found
+                found_title = papers[0].title[:50] + "..." if len(papers[0].title) > 50 else papers[0].title
+            else:
+                await search_tools.close()
+                return f"No papers found for: '{paper_input}'. Try a different search term.", None, None, None, None, None
 
         network = await explorer.get_citations(paper_id, direction, depth)
 
@@ -294,9 +385,223 @@ def _truncate_title(title: str, max_len: int = 30) -> str:
     return title[: max_len - 3] + "..."
 
 
+def refresh_researcher_dropdown():
+    """Refresh the researcher dropdown with current registry contents."""
+    import gradio as gr
+
+    registry = get_researcher_registry()
+    researchers = registry.list_all()  # Get all researchers, not just those with papers
+
+    if not researchers:
+        return gr.update(choices=[], value=None)
+
+    choices = []
+    for r in researchers:
+        papers_count = len(r.top_papers)
+        if papers_count > 0:
+            label = f"{r.name} ({papers_count} papers, {r.citations_count:,} citations)"
+        else:
+            label = f"{r.name} ({r.citations_count:,} citations) - no papers fetched"
+        choices.append((label, r.name))
+
+    return gr.update(
+        choices=choices,
+        value=choices[0][1] if choices else None,
+    )
+
+
+def on_researcher_selected(researcher_name: str):
+    """Handle researcher selection - show their papers."""
+    if not researcher_name:
+        return None
+
+    registry = get_researcher_registry()
+    profile = registry.get(researcher_name)
+
+    if not profile or not profile.top_papers:
+        return None
+
+    # Format papers for dataframe
+    data = []
+    for paper in profile.top_papers:
+        data.append([
+            paper.title or "Unknown",
+            paper.year or "Unknown",
+            paper.citation_count or 0,
+            paper.paper_id,
+        ])
+
+    return data
+
+
+async def explore_researcher_network(researcher_name: str, depth: int):
+    """Explore citation network for a researcher."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    if not researcher_name:
+        return "Please select a researcher first.", None, None, None, None, None
+
+    registry = get_researcher_registry()
+    profile = registry.get(researcher_name)
+
+    if not profile:
+        return f"Researcher '{researcher_name}' not found in registry.", None, None, None, None, None
+
+    if not profile.top_papers:
+        return f"No papers found for {researcher_name}. Go back to Researcher Lookup and enable 'Fetch Papers' checkbox, then look them up again.", None, None, None, None, None
+
+    try:
+        logger.info(f"Exploring network for {researcher_name} with {len(profile.top_papers)} papers")
+        search_tools = AcademicSearchTools()
+        explorer = CitationExplorer(search_tools)
+
+        # Explore author network - limit to 3 papers for speed
+        network = await explorer.explore_author_network(
+            profile,
+            papers_limit=min(3, len(profile.top_papers)),
+            citations_per_paper=min(depth // 2, 10),  # Cap at 10 for speed
+        )
+
+        logger.info(f"Got network: {len(network.papers_citing_author)} citing, {len(network.papers_cited_by_author)} cited")
+
+        # Build summary
+        summary = f"""## 👤 {network.author_name}'s Citation Network
+
+**Author's Papers Analyzed:** {len(network.author_papers)}
+**Total Citations Received:** {network.total_citations_received:,}
+
+**Network Statistics:**
+- 📄 Papers citing their work: {network.unique_citing_papers}
+- 📚 Papers they cite: {network.unique_references}
+- ⭐ Highly connected papers: {len(network.highly_connected)}
+
+### Top Papers by {network.author_name}:
+"""
+        for i, paper in enumerate(network.author_papers[:5], 1):
+            citations = paper.citation_count or 0
+            summary += f"{i}. **{paper.title}** ({paper.year or 'N/A'}) - {citations:,} citations\n"
+
+        # Format dataframes
+        citing_df = _papers_to_dataframe(network.papers_citing_author[:depth])
+        cited_df = _papers_to_dataframe(network.papers_cited_by_author[:depth])
+        connected_df = _papers_to_dataframe(network.highly_connected)
+
+        # Skip suggest_related for speed - it makes many additional API calls
+        related_df = None
+
+        # Generate network visualization
+        network_fig = _render_author_network_graph(network)
+
+        await search_tools.close()
+
+        return summary, citing_df, cited_df, connected_df, related_df, network_fig
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        error_msg = f"Error exploring researcher network: {str(e)}"
+        return error_msg, None, None, None, None, None
+
+
+def _render_author_network_graph(network: AuthorNetwork):
+    """Render an author's citation network as a matplotlib figure."""
+    if not network:
+        return None
+
+    G = nx.DiGraph()
+
+    # Add author's papers as central cluster
+    for i, paper in enumerate(network.author_papers[:8]):
+        node_id = f"author_{i}"
+        label = _truncate_title(paper.title, 25)
+        G.add_node(node_id, label=label, node_type="author_paper")
+
+    # Add citing papers
+    for i, paper in enumerate(network.papers_citing_author[:12]):
+        node_id = f"citing_{i}"
+        label = _truncate_title(paper.title, 20)
+        G.add_node(node_id, label=label, node_type="citing")
+        # Connect to first author paper
+        if network.author_papers:
+            G.add_edge(node_id, "author_0")
+
+    # Add cited papers
+    for i, paper in enumerate(network.papers_cited_by_author[:12]):
+        node_id = f"cited_{i}"
+        label = _truncate_title(paper.title, 20)
+        G.add_node(node_id, label=label, node_type="cited")
+        # Connect from first author paper
+        if network.author_papers:
+            G.add_edge("author_0", node_id)
+
+    if len(G.nodes()) <= 1:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.text(
+            0.5, 0.5,
+            f"No citation data found for {network.author_name}",
+            ha="center", va="center", fontsize=14,
+        )
+        ax.axis("off")
+        return fig
+
+    # Layout
+    pos = nx.spring_layout(G, k=2.5, iterations=50, seed=42)
+
+    # Color map by node type
+    node_colors = []
+    node_sizes = []
+    for node in G.nodes():
+        node_type = G.nodes[node].get("node_type", "other")
+        if node_type == "author_paper":
+            node_colors.append("#FF6B6B")  # Red for author's papers
+            node_sizes.append(700)
+        elif node_type == "citing":
+            node_colors.append("#4ECDC4")  # Teal for citing
+            node_sizes.append(350)
+        else:  # cited
+            node_colors.append("#45B7D1")  # Blue for cited
+            node_sizes.append(350)
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(14, 10))
+
+    # Draw edges
+    nx.draw_networkx_edges(
+        G, pos, ax=ax, edge_color="#CCCCCC", arrows=True, arrowsize=12, alpha=0.6
+    )
+
+    # Draw nodes
+    nx.draw_networkx_nodes(
+        G, pos, ax=ax, node_color=node_colors, node_size=node_sizes, alpha=0.9
+    )
+
+    # Draw labels
+    labels = {node: G.nodes[node].get("label", node) for node in G.nodes()}
+    nx.draw_networkx_labels(G, pos, labels, ax=ax, font_size=6)
+
+    # Legend
+    legend_elements = [
+        plt.scatter([], [], c="#FF6B6B", s=100, label=f"{network.author_name}'s Papers"),
+        plt.scatter([], [], c="#4ECDC4", s=60, label="Papers Citing Their Work"),
+        plt.scatter([], [], c="#45B7D1", s=60, label="Papers They Cite"),
+    ]
+    ax.legend(handles=legend_elements, loc="upper left", fontsize=9)
+
+    ax.set_title(f"Citation Network for {network.author_name}", fontsize=14, fontweight="bold")
+    ax.axis("off")
+    plt.tight_layout()
+
+    return fig
+
+
 __all__ = [
     "render_citation_explorer",
     "explore_citations",
+    "explore_researcher_network",
+    "refresh_researcher_dropdown",
+    "on_researcher_selected",
     "_papers_to_dataframe",
     "_render_network_graph",
+    "_render_author_network_graph",
 ]

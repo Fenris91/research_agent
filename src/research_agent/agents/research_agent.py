@@ -20,6 +20,7 @@ from langgraph.graph import StateGraph, END
 from ..models.llm_utils import (
     get_qlora_pipeline,
     get_ollama_pipeline,
+    OpenAICompatibleModel,
     check_vram,
     VRAMConstraintError,
     OllamaUnavailableError,
@@ -72,8 +73,16 @@ class ResearchAgent:
         llm_generate: Optional[Callable] = None,
         config: Optional[AgentConfig] = None,
         use_ollama: bool = False,
+        provider: Optional[str] = None,
         ollama_model: str = "mistral",
         ollama_base_url: str = "http://localhost:11434",
+        openai_model: str = "gpt-4o-mini",
+        openai_base_url: str = "https://api.openai.com/v1",
+        openai_api_key: Optional[str] = None,
+        openai_models: Optional[List[str]] = None,
+        openai_compat_base_url: str = "http://localhost:8082/v1",
+        openai_compat_api_key: Optional[str] = None,
+        openai_compat_models: Optional[List[str]] = None,
     ):
         """
         Initialize the research agent.
@@ -87,8 +96,41 @@ class ResearchAgent:
         self.tokenizer = None
         self._load_model_on_demand = True
         self.use_ollama = use_ollama
+        self.provider = provider or ("ollama" if use_ollama else "huggingface")
+        self._openai_fallback_models = openai_models or []
+        self._openai_compat_fallback_models = openai_compat_models or []
+        self._ollama_base_url = ollama_base_url
+        self._openai_base_url = openai_base_url
+        self._openai_api_key = openai_api_key
+        self._openai_compat_base_url = openai_compat_base_url
+        self._openai_compat_api_key = openai_compat_api_key
+        self._ollama_default_model = ollama_model
 
-        if use_ollama:
+        if self.provider in {"openai", "openai_compatible"}:
+            base_url = (
+                self._openai_compat_base_url
+                if self.provider == "openai_compatible"
+                else self._openai_base_url
+            )
+            api_key = (
+                self._openai_compat_api_key
+                if self.provider == "openai_compatible"
+                else self._openai_api_key
+            )
+            fallback_models = (
+                self._openai_compat_fallback_models
+                if self.provider == "openai_compatible"
+                else self._openai_fallback_models
+            )
+            self.model = OpenAICompatibleModel(
+                model_name=openai_model,
+                base_url=base_url,
+                api_key=api_key,
+                fallback_models=fallback_models or [openai_model],
+            )
+            self._load_model_on_demand = False
+            self.use_ollama = False
+        elif use_ollama:
             # Try Ollama first
             try:
                 self.model = get_ollama_pipeline(
@@ -138,8 +180,12 @@ class ResearchAgent:
         Returns:
             True if successful, False otherwise
         """
-        if not self.use_ollama or self.model is None:
-            logger.warning("Cannot switch model: not using Ollama")
+        if self.model is None or self.provider not in {
+            "ollama",
+            "openai",
+            "openai_compatible",
+        }:
+            logger.warning("Cannot switch model: provider does not support switching")
             return False
 
         try:
@@ -152,17 +198,106 @@ class ResearchAgent:
 
     def get_current_model(self) -> str:
         """Get the name of the currently active model."""
-        if self.use_ollama and self.model:
+        if self.model and self.provider in {"ollama", "openai", "openai_compatible"}:
             return self.model.model_name
         elif self.tokenizer:
             return self.tokenizer.name_or_path
         return "unknown"
 
     def list_available_models(self) -> list:
-        """List available Ollama models."""
-        if self.use_ollama and self.model:
-            return self.model.list_available_models()
+        """List available models for the active provider."""
+        if self.model and hasattr(self.model, "list_available_models"):
+            try:
+                return self.model.list_available_models()
+            except Exception as e:
+                logger.warning("Model listing failed: %s", e)
+        if self.tokenizer:
+            return [self.tokenizer.name_or_path]
         return []
+
+    def switch_provider(self, provider: str) -> bool:
+        """Switch the LLM provider and reinitialize the model wrapper."""
+        if provider not in {"ollama", "openai", "openai_compatible", "huggingface"}:
+            logger.warning("Unknown provider: %s", provider)
+            return False
+
+        prev_provider = self.provider
+        prev_use_ollama = self.use_ollama
+        prev_model = self.model
+        prev_tokenizer = self.tokenizer
+        prev_load_on_demand = self._load_model_on_demand
+
+        try:
+            if provider == "ollama":
+                model_name = self._ollama_default_model
+                self.model = get_ollama_pipeline(
+                    model_name=model_name,
+                    base_url=self._ollama_base_url,
+                )
+                self.tokenizer = None
+                self.provider = provider
+                self.use_ollama = True
+                self._load_model_on_demand = False
+                return True
+
+            if provider in {"openai", "openai_compatible"}:
+                base_url = (
+                    self._openai_compat_base_url
+                    if provider == "openai_compatible"
+                    else self._openai_base_url
+                )
+                api_key = (
+                    self._openai_compat_api_key
+                    if provider == "openai_compatible"
+                    else self._openai_api_key
+                )
+                fallback_models = (
+                    self._openai_compat_fallback_models
+                    if provider == "openai_compatible"
+                    else self._openai_fallback_models
+                )
+
+                if provider == "openai" and not api_key:
+                    logger.warning("OpenAI API key not set; cannot switch provider")
+                    return False
+
+                model_name = fallback_models[0] if fallback_models else "gpt-4o-mini"
+
+                self.model = OpenAICompatibleModel(
+                    model_name=model_name,
+                    base_url=base_url,
+                    api_key=api_key,
+                    fallback_models=fallback_models or [model_name],
+                )
+                self.tokenizer = None
+                self.provider = provider
+                self.use_ollama = False
+                self._load_model_on_demand = False
+                return True
+
+            # HuggingFace
+            try:
+                self.model, self.tokenizer = get_qlora_pipeline()
+                self._test_vram_on_initialization()
+                self.provider = provider
+                self.use_ollama = False
+                self._load_model_on_demand = False
+                return True
+            except VRAMConstraintError as e:
+                logger.error("HuggingFace load failed: %s", e)
+                return False
+
+        except Exception as e:
+            logger.error("Provider switch failed: %s", e)
+            return False
+
+        finally:
+            if self.provider != provider:
+                self.provider = prev_provider
+                self.use_ollama = prev_use_ollama
+                self.model = prev_model
+                self.tokenizer = prev_tokenizer
+                self._load_model_on_demand = prev_load_on_demand
 
     def _test_vram_on_initialization(self):
         """
@@ -179,7 +314,7 @@ class ResearchAgent:
         Supports both HuggingFace and Ollama models.
         """
         try:
-            if self.use_ollama:
+            if self.provider in {"ollama", "openai", "openai_compatible"}:
                 # Use Ollama
                 return self.model.generate(
                     prompt, max_tokens=max_tokens, temperature=0.7
@@ -318,11 +453,33 @@ Respond with ONLY the category name, nothing else."""
             else:
                 # Fallback: simple keyword heuristics
                 query_lower = query.lower()
-                if any(kw in query_lower for kw in ["review", "overview", "state of", "literature", "key papers", "seminal"]):
+                if any(
+                    kw in query_lower
+                    for kw in [
+                        "review",
+                        "overview",
+                        "state of",
+                        "literature",
+                        "key papers",
+                        "seminal",
+                    ]
+                ):
                     query_type = "literature_review"
-                elif any(kw in query_lower for kw in ["what is", "who is", "when did", "define", "how many"]):
+                elif any(
+                    kw in query_lower
+                    for kw in ["what is", "who is", "when did", "define", "how many"]
+                ):
                     query_type = "factual"
-                elif any(kw in query_lower for kw in ["compare", "analyze", "evaluate", "difference", "relationship"]):
+                elif any(
+                    kw in query_lower
+                    for kw in [
+                        "compare",
+                        "analyze",
+                        "evaluate",
+                        "difference",
+                        "relationship",
+                    ]
+                ):
                     query_type = "analysis"
                 else:
                     query_type = "general"
@@ -336,7 +493,8 @@ Respond with ONLY the category name, nothing else."""
         return {
             **state,
             "query_type": query_type,
-            "should_search_external": query_type in ["literature_review", "factual", "analysis"],
+            "should_search_external": query_type
+            in ["literature_review", "factual", "analysis"],
         }
 
     async def _search_local(self, state: ResearchState) -> Dict:
@@ -345,7 +503,9 @@ Respond with ONLY the category name, nothing else."""
         local_results = []
 
         if not self.vector_store or not self.embedder:
-            logger.warning("Vector store or embedder not configured, skipping local search")
+            logger.warning(
+                "Vector store or embedder not configured, skipping local search"
+            )
             return {**state, "local_results": [], "should_search_external": True}
 
         try:
@@ -384,25 +544,37 @@ Respond with ONLY the category name, nothing else."""
 
             # Format results
             for i, doc in enumerate(results.get("documents", [])):
-                metadata = results.get("metadatas", [{}])[i] if results.get("metadatas") else {}
-                distance = results.get("distances", [1.0])[i] if results.get("distances") else 1.0
+                metadata = (
+                    results.get("metadatas", [{}])[i]
+                    if results.get("metadatas")
+                    else {}
+                )
+                distance = (
+                    results.get("distances", [1.0])[i]
+                    if results.get("distances")
+                    else 1.0
+                )
 
-                local_results.append({
-                    "content": doc,
-                    "title": metadata.get("title", "Unknown"),
-                    "authors": metadata.get("authors", ""),
-                    "year": metadata.get("year"),
-                    "paper_id": metadata.get("paper_id", ""),
-                    "source": "local_kb",
-                    "relevance_score": 1 - distance,  # Convert distance to similarity
-                })
+                local_results.append(
+                    {
+                        "content": doc,
+                        "title": metadata.get("title", "Unknown"),
+                        "authors": metadata.get("authors", ""),
+                        "year": metadata.get("year"),
+                        "paper_id": metadata.get("paper_id", ""),
+                        "source": "local_kb",
+                        "relevance_score": 1
+                        - distance,  # Convert distance to similarity
+                    }
+                )
 
             logger.info(f"Found {len(local_results)} local results")
 
             # Decide if we need external search
-            should_search_external = (
-                len(local_results) < self.config.min_local_results_to_skip_external
-                or state.get("should_search_external", True)
+            should_search_external = len(
+                local_results
+            ) < self.config.min_local_results_to_skip_external or state.get(
+                "should_search_external", True
             )
 
         except Exception as e:
@@ -438,17 +610,21 @@ Respond with ONLY the category name, nothing else."""
                     citation_count = paper.citations or 0
                     if min_citations and citation_count < min_citations:
                         continue
-                    external_results.append({
-                        "content": paper.abstract or "",
-                        "title": paper.title,
-                        "authors": ", ".join(paper.authors) if paper.authors else "",
-                        "year": paper.year,
-                        "paper_id": paper.id,
-                        "doi": paper.doi,
-                        "citation_count": citation_count,
-                        "url": paper.url,
-                        "source": "semantic_scholar",
-                    })
+                    external_results.append(
+                        {
+                            "content": paper.abstract or "",
+                            "title": paper.title,
+                            "authors": ", ".join(paper.authors)
+                            if paper.authors
+                            else "",
+                            "year": paper.year,
+                            "paper_id": paper.id,
+                            "doi": paper.doi,
+                            "citation_count": citation_count,
+                            "url": paper.url,
+                            "source": "semantic_scholar",
+                        }
+                    )
 
                 # Search OpenAlex
                 openalex_papers = await self.academic_search.search_openalex(
@@ -457,22 +633,28 @@ Respond with ONLY the category name, nothing else."""
 
                 for paper in openalex_papers:
                     # Avoid duplicates by DOI
-                    if paper.doi and any(r.get("doi") == paper.doi for r in external_results):
+                    if paper.doi and any(
+                        r.get("doi") == paper.doi for r in external_results
+                    ):
                         continue
                     citation_count = paper.citations or 0
                     if min_citations and citation_count < min_citations:
                         continue
-                    external_results.append({
-                        "content": paper.abstract or "",
-                        "title": paper.title,
-                        "authors": ", ".join(paper.authors) if paper.authors else "",
-                        "year": paper.year,
-                        "paper_id": paper.id,
-                        "doi": paper.doi,
-                        "citation_count": citation_count,
-                        "url": paper.url,
-                        "source": "openalex",
-                    })
+                    external_results.append(
+                        {
+                            "content": paper.abstract or "",
+                            "title": paper.title,
+                            "authors": ", ".join(paper.authors)
+                            if paper.authors
+                            else "",
+                            "year": paper.year,
+                            "paper_id": paper.id,
+                            "doi": paper.doi,
+                            "citation_count": citation_count,
+                            "url": paper.url,
+                            "source": "openalex",
+                        }
+                    )
 
                 logger.info(f"Found {len(external_results)} academic results")
 
@@ -486,15 +668,29 @@ Respond with ONLY the category name, nothing else."""
                 try:
                     web_results = await self.web_search.search(query, max_results=5)
                     for result in web_results:
-                        title = result.get("title") if isinstance(result, dict) else getattr(result, "title", "")
-                        url = result.get("url") if isinstance(result, dict) else getattr(result, "url", "")
-                        content = result.get("snippet") if isinstance(result, dict) else getattr(result, "content", "")
-                        external_results.append({
-                            "content": content or "",
-                            "title": title or "",
-                            "url": url or "",
-                            "source": "web",
-                        })
+                        title = (
+                            result.get("title")
+                            if isinstance(result, dict)
+                            else getattr(result, "title", "")
+                        )
+                        url = (
+                            result.get("url")
+                            if isinstance(result, dict)
+                            else getattr(result, "url", "")
+                        )
+                        content = (
+                            result.get("snippet")
+                            if isinstance(result, dict)
+                            else getattr(result, "content", "")
+                        )
+                        external_results.append(
+                            {
+                                "content": content or "",
+                                "title": title or "",
+                                "url": url or "",
+                                "source": "web",
+                            }
+                        )
                     logger.info(f"Added {len(web_results)} web results")
                 except Exception as e:
                     logger.error(f"Web search error: {e}")
@@ -548,7 +744,9 @@ Respond with ONLY the category name, nothing else."""
 
         return {**state, "final_answer": answer}
 
-    def _build_synthesis_prompt(self, query: str, query_type: str, results: List[Dict]) -> str:
+    def _build_synthesis_prompt(
+        self, query: str, query_type: str, results: List[Dict]
+    ) -> str:
         """Build a prompt for synthesizing results based on query type."""
 
         # Format sources
@@ -676,9 +874,14 @@ Response:"""
                 year_from = search_filters.get("year_from", 1900)
                 year_to = search_filters.get("year_to", 2030)
                 self.config.year_range = (year_from, year_to)
-            if "min_citations" in search_filters and search_filters.get("min_citations") is not None:
+            if (
+                "min_citations" in search_filters
+                and search_filters.get("min_citations") is not None
+            ):
                 try:
-                    self.config.min_citations = int(search_filters.get("min_citations") or 0)
+                    self.config.min_citations = int(
+                        search_filters.get("min_citations") or 0
+                    )
                 except (TypeError, ValueError):
                     self.config.min_citations = 0
 
@@ -717,9 +920,15 @@ Response:"""
             result["external_sources"] = len(final_state.get("external_results", []))
 
             # Include source references
-            all_sources = final_state.get("local_results", []) + final_state.get("external_results", [])
+            all_sources = final_state.get("local_results", []) + final_state.get(
+                "external_results", []
+            )
             result["sources"] = [
-                {"title": s.get("title"), "source": s.get("source"), "year": s.get("year")}
+                {
+                    "title": s.get("title"),
+                    "source": s.get("source"),
+                    "year": s.get("year"),
+                }
                 for s in all_sources[:10]
             ]
 
@@ -772,8 +981,16 @@ def create_research_agent(
     llm_generate: Optional[Callable] = None,
     config: Optional[AgentConfig] = None,
     use_ollama: bool = False,
+    provider: Optional[str] = None,
     ollama_model: str = "mistral",
     ollama_base_url: str = "http://localhost:11434",
+    openai_model: str = "gpt-4o-mini",
+    openai_base_url: str = "https://api.openai.com/v1",
+    openai_api_key: Optional[str] = None,
+    openai_models: Optional[List[str]] = None,
+    openai_compat_base_url: str = "http://localhost:8082/v1",
+    openai_compat_api_key: Optional[str] = None,
+    openai_compat_models: Optional[List[str]] = None,
 ) -> ResearchAgent:
     """Factory function to create a ResearchAgent instance.
 
@@ -790,6 +1007,14 @@ def create_research_agent(
         llm_generate=llm_generate,
         config=config,
         use_ollama=use_ollama,
+        provider=provider,
         ollama_model=ollama_model,
         ollama_base_url=ollama_base_url,
+        openai_model=openai_model,
+        openai_base_url=openai_base_url,
+        openai_api_key=openai_api_key,
+        openai_models=openai_models,
+        openai_compat_base_url=openai_compat_base_url,
+        openai_compat_api_key=openai_compat_api_key,
+        openai_compat_models=openai_compat_models,
     )

@@ -26,6 +26,32 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class AuthorPaper:
+    """A paper authored by a researcher."""
+    paper_id: str
+    title: str
+    year: Optional[int] = None
+    citation_count: Optional[int] = None
+    venue: Optional[str] = None
+    doi: Optional[str] = None
+    abstract: Optional[str] = None
+    source: str = "unknown"  # "openalex" or "semantic_scholar"
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
+        return {
+            "paper_id": self.paper_id,
+            "title": self.title,
+            "year": self.year,
+            "citation_count": self.citation_count,
+            "venue": self.venue,
+            "doi": self.doi,
+            "abstract": self.abstract,
+            "source": self.source,
+        }
+
+
+@dataclass
 class ResearcherProfile:
     """Standardized researcher profile from multiple sources."""
     name: str
@@ -38,6 +64,7 @@ class ResearcherProfile:
     h_index: Optional[int] = None
     fields: List[str] = field(default_factory=list)
     recent_works: List[dict] = field(default_factory=list)
+    top_papers: List[AuthorPaper] = field(default_factory=list)
     web_results: List[dict] = field(default_factory=list)
     lookup_timestamp: str = ""
 
@@ -57,7 +84,13 @@ class ResearcherProfile:
         # Remove private fields
         data.pop('_openalex_data', None)
         data.pop('_semantic_scholar_data', None)
+        # Convert AuthorPaper objects to dicts
+        data['top_papers'] = [p.to_dict() if hasattr(p, 'to_dict') else p for p in self.top_papers]
         return data
+
+    def get_paper_ids(self) -> List[str]:
+        """Get list of paper IDs for citation exploration."""
+        return [p.paper_id for p in self.top_papers if p.paper_id]
 
     def to_summary_row(self) -> dict:
         """Convert to summary row for CSV export."""
@@ -256,6 +289,168 @@ class ResearcherLookup:
             logger.error(f"Semantic Scholar API error for {name}: {e}")
             return None
 
+    async def fetch_author_papers_openalex(
+        self, openalex_id: str, limit: int = 10
+    ) -> List[AuthorPaper]:
+        """
+        Fetch author's papers from OpenAlex.
+
+        Args:
+            openalex_id: OpenAlex author ID (e.g., "A1234567890")
+            limit: Maximum number of papers to fetch
+
+        Returns:
+            List of AuthorPaper objects
+        """
+        # Check cache first
+        cache_key = make_cache_key("openalex_papers", openalex_id, str(limit))
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Cache hit for OpenAlex papers: {openalex_id}")
+            return cached if cached != "__none__" else []
+
+        client = await self._get_client()
+
+        # OpenAlex works endpoint filtered by author
+        # Sort by citation count to get most impactful papers
+        params = {
+            "filter": f"author.id:{openalex_id}",
+            "sort": "cited_by_count:desc",
+            "per_page": limit,
+        }
+
+        if self.email:
+            params["mailto"] = self.email
+
+        try:
+            response = await client.get(
+                "https://api.openalex.org/works", params=params
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            papers = []
+            for work in data.get("results", []):
+                # Safely extract venue from nested structure
+                venue = None
+                primary_loc = work.get("primary_location")
+                if primary_loc and isinstance(primary_loc, dict):
+                    source = primary_loc.get("source")
+                    if source and isinstance(source, dict):
+                        venue = source.get("display_name")
+
+                # Safely extract DOI
+                doi_raw = work.get("doi")
+                doi = doi_raw.replace("https://doi.org/", "") if doi_raw else None
+
+                paper = AuthorPaper(
+                    paper_id=work.get("id", "").replace("https://openalex.org/", ""),
+                    title=work.get("title") or "Unknown",
+                    year=work.get("publication_year"),
+                    citation_count=work.get("cited_by_count", 0),
+                    venue=venue,
+                    doi=doi,
+                    abstract=self._reconstruct_abstract(work.get("abstract_inverted_index")),
+                    source="openalex",
+                )
+                papers.append(paper)
+
+            logger.info(f"OpenAlex found {len(papers)} papers for author {openalex_id}")
+            self._cache.set(cache_key, papers)
+            return papers
+
+        except httpx.HTTPError as e:
+            logger.error(f"OpenAlex papers API error for {openalex_id}: {e}")
+            return []
+
+    def _reconstruct_abstract(self, inverted_index: Optional[dict]) -> Optional[str]:
+        """Reconstruct abstract from OpenAlex inverted index format."""
+        if not inverted_index:
+            return None
+
+        try:
+            # Create list of (position, word) tuples
+            words = []
+            for word, positions in inverted_index.items():
+                for pos in positions:
+                    words.append((pos, word))
+
+            # Sort by position and join
+            words.sort(key=lambda x: x[0])
+            return " ".join(word for _, word in words)
+        except Exception:
+            return None
+
+    async def fetch_author_papers_semantic_scholar(
+        self, author_id: str, limit: int = 10
+    ) -> List[AuthorPaper]:
+        """
+        Fetch author's papers from Semantic Scholar.
+
+        Args:
+            author_id: Semantic Scholar author ID
+            limit: Maximum number of papers to fetch
+
+        Returns:
+            List of AuthorPaper objects
+        """
+        # Check cache first
+        cache_key = make_cache_key("s2_papers", author_id, str(limit))
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Cache hit for S2 papers: {author_id}")
+            return cached if cached != "__none__" else []
+
+        # Wait for rate limit
+        await self._s2_rate_limiter.wait_if_needed()
+
+        client = await self._get_client()
+
+        try:
+            response = await retry_with_backoff(
+                lambda: client.get(
+                    f"https://api.semanticscholar.org/graph/v1/author/{author_id}/papers",
+                    params={
+                        "fields": "paperId,title,year,citationCount,venue,externalIds,abstract",
+                        "limit": limit,
+                    },
+                ),
+                max_retries=3,
+                base_delay=2.0,
+                retry_on=(429, 503, 504),
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            papers = []
+            for paper_data in data.get("data", []):
+                external_ids = paper_data.get("externalIds") or {}
+                paper = AuthorPaper(
+                    paper_id=paper_data.get("paperId", ""),
+                    title=paper_data.get("title", "Unknown"),
+                    year=paper_data.get("year"),
+                    citation_count=paper_data.get("citationCount", 0),
+                    venue=paper_data.get("venue"),
+                    doi=external_ids.get("DOI"),
+                    abstract=paper_data.get("abstract"),
+                    source="semantic_scholar",
+                )
+                papers.append(paper)
+
+            # Sort by citation count
+            papers.sort(key=lambda p: p.citation_count or 0, reverse=True)
+
+            logger.info(
+                f"S2 found {len(papers)} papers for author {author_id} "
+                f"({self._s2_rate_limiter.calls_remaining} calls remaining)"
+            )
+            self._cache.set(cache_key, papers)
+            return papers
+
+        except httpx.HTTPError as e:
+            logger.error(f"Semantic Scholar papers API error for {author_id}: {e}")
+            return []
+
     async def search_web(self, name: str, max_results: int = 5) -> List[dict]:
         """
         Search web for researcher using DuckDuckGo.
@@ -313,12 +508,16 @@ class ResearcherLookup:
             logger.error(f"Web search error for {name}: {e}")
             return []
 
-    async def lookup_researcher(self, name: str) -> ResearcherProfile:
+    async def lookup_researcher(
+        self, name: str, fetch_papers: bool = True, papers_limit: int = 10
+    ) -> ResearcherProfile:
         """
         Lookup researcher from all configured sources.
 
         Args:
             name: Researcher name to lookup
+            fetch_papers: Whether to fetch the researcher's papers
+            papers_limit: Maximum number of papers to fetch per source
 
         Returns:
             ResearcherProfile with combined data
@@ -354,7 +553,50 @@ class ResearcherLookup:
             elif source == "web" and result:
                 profile.web_results = result
 
+        # Fetch papers if requested and we have author IDs
+        if fetch_papers:
+            await self._fetch_and_merge_papers(profile, papers_limit)
+
         return profile
+
+    async def _fetch_and_merge_papers(
+        self, profile: ResearcherProfile, limit: int = 10
+    ) -> None:
+        """
+        Fetch papers for a researcher and merge into profile.
+
+        Prefers Semantic Scholar (has paper IDs usable in citation explorer),
+        falls back to OpenAlex.
+        """
+        papers = []
+
+        # Try Semantic Scholar first (better for citation exploration)
+        if profile.semantic_scholar_id:
+            papers = await self.fetch_author_papers_semantic_scholar(
+                profile.semantic_scholar_id, limit=limit
+            )
+
+        # Supplement with OpenAlex if needed
+        if len(papers) < limit and profile.openalex_id:
+            oa_papers = await self.fetch_author_papers_openalex(
+                profile.openalex_id, limit=limit
+            )
+
+            # Deduplicate by DOI or title
+            existing_dois = {p.doi for p in papers if p.doi}
+            existing_titles = {(p.title or "").lower() for p in papers}
+
+            for paper in oa_papers:
+                if paper.doi and paper.doi in existing_dois:
+                    continue
+                if (paper.title or "").lower() in existing_titles:
+                    continue
+                papers.append(paper)
+
+        # Sort by citation count and limit
+        papers.sort(key=lambda p: p.citation_count or 0, reverse=True)
+        profile.top_papers = papers[:limit]
+        logger.info(f"Fetched {len(profile.top_papers)} papers for {profile.name}")
 
     def _merge_openalex_data(self, profile: ResearcherProfile, data: dict):
         """Merge OpenAlex author data into profile."""
