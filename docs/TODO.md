@@ -59,6 +59,12 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 ## Completed
 
 ### January 27, 2026
+- [x] **LangGraph Workflow Implementation** - All 5 nodes now functional:
+  - `_understand_query()` - Query classification (literature_review, factual, analysis, general)
+  - `_search_local()` - Vector store search with filters and reranker
+  - `_search_external()` - Semantic Scholar, OpenAlex, web search
+  - `_synthesize()` - Build prompts and generate structured responses
+  - `_offer_ingestion()` - Suggest high-quality papers for KB
 - [x] **Search Filters in UI** - Year range and min citations filters in Chat and KB tabs
 - [x] **Network Visualization** - Citation graph rendering with networkx/matplotlib
 - [x] **PDF Processing Validation** - Validated on real academic PDFs (Perspectives.pdf, etc.)
