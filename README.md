@@ -11,12 +11,15 @@ An autonomous research assistant for social sciences (social anthropology, geogr
 - **Vector Store**: ChromaDB-based knowledge base with semantic search
 - **Research Agent**: LangGraph-based orchestration for query understanding, search, and synthesis
 - **Gradio UI**: Web interface with chat, knowledge base, and researcher lookup tabs
-
-### Planned
 - **PDF Ingestion**: Extract and chunk academic PDFs
 - **LLM Integration**: Local LLM for response synthesis
 - **Citation Explorer**: Follow citation chains
 - **Data Analysis**: Statistical analysis and visualization
+
+### Planned
+- **Evaluation Suite**: Test retrieval and synthesis quality
+- **Collaborative Features**: Share knowledge bases
+- **Fine-tuning**: Domain-specific model training
 
 ## Requirements
 

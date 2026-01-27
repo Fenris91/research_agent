@@ -10,12 +10,17 @@ Fetch researcher profiles from multiple free/open APIs:
 import asyncio
 import json
 import logging
+import random
+import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
 import httpx
+
+from research_agent.tools.academic_search import RateLimiter, retry_with_backoff
+from research_agent.utils.cache import TTLCache, make_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +94,8 @@ class ResearcherLookup:
         request_delay: float = 1.0,
         use_openalex: bool = True,
         use_semantic_scholar: bool = True,
-        use_web_search: bool = True
+        use_web_search: bool = True,
+        s2_rate_limiter: Optional[RateLimiter] = None
     ):
         """
         Initialize researcher lookup.
@@ -100,6 +106,7 @@ class ResearcherLookup:
             use_openalex: Enable OpenAlex lookup
             use_semantic_scholar: Enable Semantic Scholar lookup
             use_web_search: Enable web search
+            s2_rate_limiter: Optional shared rate limiter for Semantic Scholar
         """
         self.email = email
         self.request_delay = request_delay
@@ -109,6 +116,16 @@ class ResearcherLookup:
 
         # HTTP client (initialized lazily)
         self._client: Optional[httpx.AsyncClient] = None
+
+        # Rate limiter for Semantic Scholar (100 req/5min free tier)
+        # Can be shared with AcademicSearchTools if passed in
+        self._s2_rate_limiter = s2_rate_limiter or RateLimiter(
+            max_calls=95,  # Slightly under 100 to be safe
+            window_seconds=300
+        )
+
+        # Response cache (longer TTL for researcher data - 24 hours)
+        self._cache = TTLCache(default_ttl=86400, max_size=500)
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
@@ -141,6 +158,13 @@ class ResearcherLookup:
         Returns:
             Best matching author data or None
         """
+        # Check cache first
+        cache_key = make_cache_key("openalex_author", name.lower().strip())
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Cache hit for OpenAlex author: {name}")
+            return cached if cached != "__none__" else None
+
         client = await self._get_client()
 
         params = {
@@ -159,12 +183,15 @@ class ResearcherLookup:
             results = data.get("results", [])
             if not results:
                 logger.info(f"No OpenAlex results for: {name}")
+                self._cache.set(cache_key, "__none__")
                 return None
 
             # Pick best match by citation count (assume more cited = more likely correct person)
             best = max(results, key=lambda x: x.get("cited_by_count", 0))
             logger.info(f"OpenAlex found: {best.get('display_name')} ({best.get('cited_by_count', 0)} citations)")
 
+            # Cache the result
+            self._cache.set(cache_key, best)
             return best
 
         except httpx.HTTPError as e:
@@ -183,6 +210,16 @@ class ResearcherLookup:
         Returns:
             Best matching author data or None
         """
+        # Check cache first
+        cache_key = make_cache_key("s2_author", name.lower().strip())
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Cache hit for S2 author: {name}")
+            return cached if cached != "__none__" else None
+
+        # Wait for rate limit if needed
+        await self._s2_rate_limiter.wait_if_needed()
+
         client = await self._get_client()
 
         params = {
@@ -192,19 +229,27 @@ class ResearcherLookup:
         }
 
         try:
-            response = await client.get(self.SEMANTIC_SCHOLAR_AUTHOR_URL, params=params)
+            response = await retry_with_backoff(
+                lambda: client.get(self.SEMANTIC_SCHOLAR_AUTHOR_URL, params=params),
+                max_retries=3,
+                base_delay=2.0,
+                retry_on=(429, 503, 504)
+            )
             response.raise_for_status()
             data = response.json()
 
             results = data.get("data", [])
             if not results:
                 logger.info(f"No Semantic Scholar results for: {name}")
+                self._cache.set(cache_key, "__none__")
                 return None
 
             # Pick best match by citation count
             best = max(results, key=lambda x: x.get("citationCount", 0) or 0)
-            logger.info(f"S2 found: {best.get('name')} ({best.get('citationCount', 0)} citations)")
+            logger.info(f"S2 found: {best.get('name')} ({best.get('citationCount', 0)} citations, {self._s2_rate_limiter.calls_remaining} calls remaining)")
 
+            # Cache the result
+            self._cache.set(cache_key, best)
             return best
 
         except httpx.HTTPError as e:

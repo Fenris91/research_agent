@@ -6,16 +6,163 @@ Unified interface for searching academic databases:
 - OpenAlex (fully open, great for social sciences)
 - Unpaywall (finds open access PDFs)
 - CrossRef (DOI metadata)
+
+Features:
+- Rate limiting with exponential backoff
+- Response caching to reduce API calls
 """
 
 import asyncio
 import logging
+import random
+import time
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Callable
+from functools import wraps
 
 import httpx
 
+from research_agent.utils.cache import TTLCache, make_cache_key
+
 logger = logging.getLogger(__name__)
+
+
+class RateLimiter:
+    """
+    Token bucket rate limiter for API calls.
+
+    Tracks calls within a sliding window and enforces rate limits.
+    """
+
+    def __init__(self, max_calls: int = 100, window_seconds: int = 300):
+        """
+        Initialize rate limiter.
+
+        Args:
+            max_calls: Maximum calls allowed in the window (default: 100)
+            window_seconds: Time window in seconds (default: 300 = 5 minutes)
+        """
+        self.max_calls = max_calls
+        self.window_seconds = window_seconds
+        self._calls: List[float] = []
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> float:
+        """
+        Acquire permission to make a call.
+
+        Returns:
+            Wait time in seconds (0 if no wait needed)
+        """
+        async with self._lock:
+            now = time.time()
+
+            # Remove calls outside the window
+            self._calls = [t for t in self._calls if now - t < self.window_seconds]
+
+            if len(self._calls) >= self.max_calls:
+                # Calculate wait time until oldest call expires
+                oldest = min(self._calls)
+                wait_time = self.window_seconds - (now - oldest) + 0.1
+                return max(wait_time, 0)
+
+            # Record this call
+            self._calls.append(now)
+            return 0
+
+    async def wait_if_needed(self):
+        """Wait if rate limit would be exceeded."""
+        wait_time = await self.acquire()
+        if wait_time > 0:
+            logger.info(f"Rate limit reached, waiting {wait_time:.1f}s")
+            await asyncio.sleep(wait_time)
+            # Re-acquire after waiting
+            await self.acquire()
+
+    @property
+    def calls_remaining(self) -> int:
+        """Get number of calls remaining in current window."""
+        now = time.time()
+        recent_calls = [t for t in self._calls if now - t < self.window_seconds]
+        return max(0, self.max_calls - len(recent_calls))
+
+
+async def retry_with_backoff(
+    func: Callable,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    exponential_base: float = 2.0,
+    jitter: bool = True,
+    retry_on: tuple = (429, 503, 504)
+):
+    """
+    Execute an async function with exponential backoff retry.
+
+    Args:
+        func: Async function to execute (should return httpx.Response)
+        max_retries: Maximum number of retry attempts
+        base_delay: Initial delay in seconds
+        max_delay: Maximum delay in seconds
+        exponential_base: Base for exponential backoff
+        jitter: Add random jitter to prevent thundering herd
+        retry_on: HTTP status codes to retry on
+
+    Returns:
+        The response from the function
+
+    Raises:
+        httpx.HTTPError: If all retries fail
+    """
+    last_exception = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = await func()
+
+            # Check if we should retry based on status code
+            if response.status_code in retry_on:
+                if attempt < max_retries:
+                    delay = min(base_delay * (exponential_base ** attempt), max_delay)
+                    if jitter:
+                        delay = delay * (0.5 + random.random())
+
+                    # Check for Retry-After header
+                    retry_after = response.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = max(delay, float(retry_after))
+                        except ValueError:
+                            pass
+
+                    logger.warning(
+                        f"Request failed with {response.status_code}, "
+                        f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    response.raise_for_status()
+
+            return response
+
+        except httpx.HTTPError as e:
+            last_exception = e
+            if attempt < max_retries:
+                delay = min(base_delay * (exponential_base ** attempt), max_delay)
+                if jitter:
+                    delay = delay * (0.5 + random.random())
+                logger.warning(
+                    f"Request error: {e}, retrying in {delay:.1f}s "
+                    f"(attempt {attempt + 1}/{max_retries})"
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise
+
+    if last_exception:
+        raise last_exception
+    raise RuntimeError("Unexpected retry loop exit")
 
 
 @dataclass
@@ -66,7 +213,11 @@ class AcademicSearchTools:
         self,
         config: Optional[dict] = None,
         email: Optional[str] = None,
-        request_delay: float = 0.3
+        request_delay: float = 0.3,
+        s2_rate_limit: int = 95,  # Slightly under 100 to be safe
+        s2_rate_window: int = 300,  # 5 minutes
+        cache_ttl: int = 3600,  # 1 hour default cache TTL
+        cache_enabled: bool = True
     ):
         """
         Initialize academic search tools.
@@ -75,11 +226,25 @@ class AcademicSearchTools:
             config: Optional configuration dict
             email: Email for Unpaywall/OpenAlex polite pool
             request_delay: Delay between requests in seconds
+            s2_rate_limit: Semantic Scholar rate limit (calls per window)
+            s2_rate_window: Semantic Scholar rate window in seconds
+            cache_ttl: Cache time-to-live in seconds (default: 1 hour)
+            cache_enabled: Enable response caching (default: True)
         """
         self.config = config or {}
         self.email = email
         self.request_delay = request_delay
         self._client: Optional[httpx.AsyncClient] = None
+
+        # Rate limiter for Semantic Scholar (100 req/5min free tier)
+        self._s2_rate_limiter = RateLimiter(
+            max_calls=s2_rate_limit,
+            window_seconds=s2_rate_window
+        )
+
+        # Response cache
+        self.cache_enabled = cache_enabled
+        self._cache = TTLCache(default_ttl=cache_ttl, max_size=2000) if cache_enabled else None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
@@ -98,6 +263,18 @@ class AcademicSearchTools:
         if self._client:
             await self._client.aclose()
             self._client = None
+
+    def get_cache_stats(self) -> Dict:
+        """Get cache statistics."""
+        if self._cache:
+            return self._cache.stats
+        return {"enabled": False}
+
+    def clear_cache(self):
+        """Clear the response cache."""
+        if self._cache:
+            self._cache.clear()
+            logger.info("API response cache cleared")
 
     async def search_semantic_scholar(
         self,
@@ -121,6 +298,24 @@ class AcademicSearchTools:
         Returns:
             List of Paper objects
         """
+        # Check cache first
+        cache_key = make_cache_key(
+            "s2_search",
+            query,
+            limit=limit,
+            year_range=year_range,
+            fields=fields_of_study
+        )
+
+        if self._cache:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.info(f"Cache hit for Semantic Scholar search: {query}")
+                return cached
+
+        # Wait for rate limit if needed
+        await self._s2_rate_limiter.wait_if_needed()
+
         client = await self._get_client()
 
         # Build query parameters
@@ -139,9 +334,15 @@ class AcademicSearchTools:
             params["fieldsOfStudy"] = ",".join(fields_of_study)
 
         try:
-            response = await client.get(
-                f"{self.SEMANTIC_SCHOLAR_API}/paper/search",
-                params=params
+            # Use retry with exponential backoff
+            response = await retry_with_backoff(
+                lambda: client.get(
+                    f"{self.SEMANTIC_SCHOLAR_API}/paper/search",
+                    params=params
+                ),
+                max_retries=3,
+                base_delay=2.0,
+                retry_on=(429, 503, 504)
             )
             response.raise_for_status()
             data = response.json()
@@ -175,7 +376,11 @@ class AcademicSearchTools:
                 )
                 papers.append(paper)
 
-            logger.info(f"Semantic Scholar found {len(papers)} papers for: {query}")
+            # Cache the results
+            if self._cache:
+                self._cache.set(cache_key, papers)
+
+            logger.info(f"Semantic Scholar found {len(papers)} papers for: {query} ({self._s2_rate_limiter.calls_remaining} calls remaining)")
             return papers
 
         except httpx.HTTPError as e:
@@ -204,6 +409,21 @@ class AcademicSearchTools:
         Returns:
             List of Paper objects
         """
+        # Check cache first
+        cache_key = make_cache_key(
+            "openalex_search",
+            query,
+            limit=limit,
+            from_year=from_year,
+            to_year=to_year
+        )
+
+        if self._cache:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.info(f"Cache hit for OpenAlex search: {query}")
+                return cached
+
         client = await self._get_client()
 
         # Build query parameters
@@ -283,6 +503,10 @@ class AcademicSearchTools:
                 )
                 papers.append(paper)
 
+            # Cache the results
+            if self._cache:
+                self._cache.set(cache_key, papers)
+
             logger.info(f"OpenAlex found {len(papers)} papers for: {query}")
             return papers
 
@@ -327,10 +551,18 @@ class AcademicSearchTools:
             logger.warning("Email required for Unpaywall API")
             return None
 
-        client = await self._get_client()
-
         # Clean DOI
         doi = doi.replace("https://doi.org/", "")
+
+        # Check cache first (longer TTL for OA URLs - 24 hours)
+        cache_key = make_cache_key("unpaywall", doi)
+        if self._cache:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit for Unpaywall: {doi}")
+                return cached if cached != "__none__" else None
+
+        client = await self._get_client()
 
         try:
             response = await client.get(
@@ -342,8 +574,14 @@ class AcademicSearchTools:
                 data = response.json()
                 best_oa = data.get("best_oa_location")
                 if best_oa:
-                    return best_oa.get("url_for_pdf") or best_oa.get("url")
+                    url = best_oa.get("url_for_pdf") or best_oa.get("url")
+                    if self._cache:
+                        self._cache.set(cache_key, url, ttl=86400)  # 24 hour cache
+                    return url
 
+            # Cache negative result too
+            if self._cache:
+                self._cache.set(cache_key, "__none__", ttl=86400)
             return None
 
         except httpx.HTTPError as e:
@@ -361,15 +599,32 @@ class AcademicSearchTools:
         Returns:
             Paper object with full details
         """
+        # Check cache first (longer TTL for paper details - 6 hours)
+        cache_key = make_cache_key("paper_details", paper_id, source=source)
+        if self._cache:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit for paper details: {paper_id}")
+                return cached
+
         client = await self._get_client()
+        paper = None
 
         if source == "semantic_scholar":
+            # Wait for rate limit if needed
+            await self._s2_rate_limiter.wait_if_needed()
+
             try:
-                response = await client.get(
-                    f"{self.SEMANTIC_SCHOLAR_API}/paper/{paper_id}",
-                    params={
-                        "fields": "paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,venue,openAccessPdf,externalIds,references,citations"
-                    }
+                response = await retry_with_backoff(
+                    lambda: client.get(
+                        f"{self.SEMANTIC_SCHOLAR_API}/paper/{paper_id}",
+                        params={
+                            "fields": "paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,venue,openAccessPdf,externalIds,references,citations"
+                        }
+                    ),
+                    max_retries=3,
+                    base_delay=2.0,
+                    retry_on=(429, 503, 504)
                 )
                 response.raise_for_status()
                 item = response.json()
@@ -383,7 +638,7 @@ class AcademicSearchTools:
                 if item.get("openAccessPdf"):
                     oa_url = item["openAccessPdf"].get("url")
 
-                return Paper(
+                paper = Paper(
                     id=item.get("paperId", ""),
                     title=item.get("title", ""),
                     abstract=item.get("abstract"),
@@ -419,7 +674,7 @@ class AcademicSearchTools:
                 if oa_info.get("oa_url"):
                     oa_url = oa_info["oa_url"]
 
-                return Paper(
+                paper = Paper(
                     id=item.get("id", "").replace("https://openalex.org/", ""),
                     title=item.get("title", ""),
                     abstract=abstract,
@@ -438,7 +693,11 @@ class AcademicSearchTools:
                 logger.error(f"Error fetching paper details: {e}")
                 return None
 
-        return None
+        # Cache the result
+        if paper and self._cache:
+            self._cache.set(cache_key, paper, ttl=21600)  # 6 hour cache
+
+        return paper
 
     async def search_all(
         self,

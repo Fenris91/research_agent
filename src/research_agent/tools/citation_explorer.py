@@ -11,8 +11,11 @@ This module provides functionality to:
 
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
+import logging
 
-from research_agent.tools.academic_search import AcademicSearchTools
+from research_agent.tools.academic_search import AcademicSearchTools, retry_with_backoff
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -261,13 +264,21 @@ class CitationExplorer:
     async def _get_paper_details(self, paper_id: str) -> CitationPaper:
         """Get detailed information about a paper."""
         try:
-            # Use semantic scholar API endpoint
+            # Wait for rate limit if needed
+            await self.search._s2_rate_limiter.wait_if_needed()
+
+            # Use semantic scholar API endpoint with retry
             client = await self.search._get_client()
-            response = await client.get(
-                f"{self.search.SEMANTIC_SCHOLAR_API}/paper/{paper_id}",
-                params={
-                    "fields": "paperId,title,year,authors,citationCount,abstract,venue,externalIds"
-                },
+            response = await retry_with_backoff(
+                lambda: client.get(
+                    f"{self.search.SEMANTIC_SCHOLAR_API}/paper/{paper_id}",
+                    params={
+                        "fields": "paperId,title,year,authors,citationCount,abstract,venue,externalIds"
+                    },
+                ),
+                max_retries=3,
+                base_delay=2.0,
+                retry_on=(429, 503, 504)
             )
             response.raise_for_status()
             s2_data = response.json()
@@ -283,7 +294,7 @@ class CitationExplorer:
                 url=None,
             )
         except Exception as e:
-            print(f"Error getting paper details: {e}")
+            logger.warning(f"Error getting paper details for {paper_id}: {e}")
             # Return basic info
             return CitationPaper(
                 paper_id=paper_id,
@@ -301,13 +312,21 @@ class CitationExplorer:
     ) -> List[CitationPaper]:
         """Get papers that cite the given paper."""
         try:
+            # Wait for rate limit if needed
+            await self.search._s2_rate_limiter.wait_if_needed()
+
             client = await self.search._get_client()
-            response = await client.get(
-                f"{self.search.SEMANTIC_SCHOLAR_API}/paper/{paper_id}/citations",
-                params={
-                    "fields": "citingPaper.paperId,citingPaper.title,citingPaper.year,citingPaper.citationCount",
-                    "limit": limit,
-                },
+            response = await retry_with_backoff(
+                lambda: client.get(
+                    f"{self.search.SEMANTIC_SCHOLAR_API}/paper/{paper_id}/citations",
+                    params={
+                        "fields": "citingPaper.paperId,citingPaper.title,citingPaper.year,citingPaper.citationCount",
+                        "limit": limit,
+                    },
+                ),
+                max_retries=3,
+                base_delay=2.0,
+                retry_on=(429, 503, 504)
             )
             response.raise_for_status()
             data = response.json()
@@ -330,19 +349,27 @@ class CitationExplorer:
 
             return citing_papers
         except Exception as e:
-            print(f"Error getting citing papers: {e}")
+            logger.warning(f"Error getting citing papers for {paper_id}: {e}")
             return []
 
     async def _get_cited_papers(self, paper_id: str, limit: int) -> List[CitationPaper]:
         """Get papers cited by the given paper."""
         try:
+            # Wait for rate limit if needed
+            await self.search._s2_rate_limiter.wait_if_needed()
+
             client = await self.search._get_client()
-            response = await client.get(
-                f"{self.search.SEMANTIC_SCHOLAR_API}/paper/{paper_id}/references",
-                params={
-                    "fields": "citedPaper.paperId,citedPaper.title,citedPaper.year,citedPaper.citationCount",
-                    "limit": limit,
-                },
+            response = await retry_with_backoff(
+                lambda: client.get(
+                    f"{self.search.SEMANTIC_SCHOLAR_API}/paper/{paper_id}/references",
+                    params={
+                        "fields": "citedPaper.paperId,citedPaper.title,citedPaper.year,citedPaper.citationCount",
+                        "limit": limit,
+                    },
+                ),
+                max_retries=3,
+                base_delay=2.0,
+                retry_on=(429, 503, 504)
             )
             response.raise_for_status()
             data = response.json()
@@ -365,5 +392,5 @@ class CitationExplorer:
 
             return cited_papers
         except Exception as e:
-            print(f"Error getting cited papers: {e}")
+            logger.warning(f"Error getting cited papers for {paper_id}: {e}")
             return []

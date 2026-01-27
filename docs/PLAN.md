@@ -99,16 +99,20 @@ This document outlines a concrete implementation plan for building an autonomous
 | - citation_explorer.py | Done | Fixed and tested |
 | - academic_search.py | Done | Working |
 | - Other modules | Done | vector_store, embeddings, llm_utils, etc. |
-| PDF Processing | Pending | Document processor scaffolded |
+| **PDF Processing** | Done | Document processor validated on real PDFs |
+| **Data Analysis Tools** | Done | Full suite with plots, pivot tables, time series |
+| **Reranker** | Done | BGE reranker integrated in vector store |
+| **Export/Citation Management** | Done | BibTeX export from KB |
+| **Search Filters** | Done | Year range + min citations in UI |
+| **Network Visualization** | Done | Citation graph with networkx/matplotlib |
 
 ### Not Started
 
 | Component | Notes |
 |-----------|-------|
-| Data Analysis Tools | Pandas/visualization integration |
-| Reranker | BGE reranker for better retrieval |
 | Fine-tuning | Domain-specific model training |
-| Export/Citation Management | Zotero/BibTeX export |
+| Evaluation Suite | Test retrieval and synthesis quality |
+| Collaborative Features | Share knowledge bases |
 
 ---
 

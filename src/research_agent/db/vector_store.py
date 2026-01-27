@@ -255,6 +255,36 @@ class ResearchVectorStore:
 
         logger.info(f"Added web source {source_id} with {len(chunks)} chunks")
 
+    def add_document(
+        self,
+        collection: str,
+        document_id: str,
+        content: str,
+        embedding: Optional[List[float]],
+        metadata: Dict[str, Any],
+    ) -> None:
+        """
+        Add a single document to a collection.
+
+        Args:
+            collection: "papers", "notes", or "web_sources"
+            document_id: Unique document ID
+            content: Document text
+            embedding: Embedding vector (required when no embedding function)
+            metadata: Document metadata
+        """
+        if embedding is None:
+            raise ValueError("Embedding required to add document")
+
+        coll = self._get_collection(collection)
+        sanitized = self._sanitize_metadata(metadata)
+        coll.add(
+            ids=[document_id],
+            embeddings=cast(Any, [embedding]),
+            documents=[content],
+            metadatas=cast(Any, [sanitized]),
+        )  # type: ignore[arg-type]
+
     def search(
         self,
         query_embedding: List[float],
@@ -314,6 +344,43 @@ class ResearchVectorStore:
             }
 
         return flat
+
+    def search_by_metadata(
+        self,
+        collection: str,
+        filter_dict: Dict[str, Any],
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch documents by metadata filter.
+
+        Args:
+            collection: "papers", "notes", or "web_sources"
+            filter_dict: Metadata filter dict
+            limit: Maximum results to return
+
+        Returns:
+            List of dicts with id, document, metadata
+        """
+        coll = self._get_collection(collection)
+        results = cast(
+            Dict[str, Any],
+            coll.get(where=filter_dict, limit=limit, include=["documents", "metadatas"]),
+        )
+        ids = results.get("ids") or []
+        documents = results.get("documents") or []
+        metadatas = results.get("metadatas") or []
+
+        output = []
+        for i, doc_id in enumerate(ids):
+            output.append(
+                {
+                    "id": doc_id,
+                    "document": documents[i] if i < len(documents) else None,
+                    "metadata": metadatas[i] if i < len(metadatas) else {},
+                }
+            )
+        return output
 
     def search_all(
         self,

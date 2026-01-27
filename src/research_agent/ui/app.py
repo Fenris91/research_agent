@@ -502,11 +502,10 @@ def create_app(agent=None):
                     reranker_enabled = bool(reranker_enabled_default)
 
                 if rerank_top_k is None:
-                    rerank_top_k_cfg = (
-                        cfg.get("retrieval", {}).get("rerank_top_k")
-                        if isinstance(cfg, dict)
-                        else None
-                    )
+                    retrieval_cfg = cfg.get("retrieval", {}) if isinstance(cfg, dict) else {}
+                    rerank_top_k_cfg = retrieval_cfg.get("rerank_top_k")
+                    if rerank_top_k_cfg is None:
+                        rerank_top_k_cfg = retrieval_cfg.get("top_k")
                     rerank_top_k = rerank_top_k_cfg
 
                 if reranker is None:

@@ -3,6 +3,7 @@
 Cross-reference task list for Claude, OpenCode, and VSCode.
 
 **Last Updated**: January 27, 2026
+**Last Verified**: January 27, 2026
 
 ---
 
@@ -35,19 +36,6 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 ## Not Started
 
-### High Priority
-
-- [x] **Complete Package Migration** - Finish moving all modules to `research_agent` package
-- [x] **Wire Citation Explorer to UI** - Add tab or section for exploring citations (Gradio tab + handlers wired)
-- [x] **Reranker** - Add BGE reranker for better retrieval quality (helper, vector store wiring, and tests added)
-
-### Medium Priority
-
-- [x] **Data Analysis Tools** - Full suite with column selector, plot types, time series, pivot tables
-- [x] **Export/Citation Management** - BibTeX export from KB
-- [x] **Search Filters in UI** - Filter by year, field, citation count (Chat + KB tabs)
-- [x] **Network Visualization** - Citation graph using networkx/matplotlib
-
 ### Low Priority
 
 - [ ] **Fine-tuning** - Domain-specific model training
@@ -59,6 +47,21 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 ## Completed
 
 ### January 27, 2026
+- [x] **API Response Caching** - Reduces API calls and rate limit issues:
+  - New `utils/cache.py` module with `TTLCache` and `PersistentCache`
+  - Thread-safe in-memory caching with automatic cleanup
+  - Configurable TTL: searches (1hr), paper details (6hr), OA URLs (24hr)
+  - Negative result caching to avoid repeated failed lookups
+  - Cache stats available via `get_cache_stats()`
+- [x] **Semantic Scholar Rate Limiting** - Proper rate limit handling:
+  - `RateLimiter` class: sliding window token bucket (95 calls/5min)
+  - `retry_with_backoff()`: exponential backoff with jitter for 429/503/504
+  - Applied to academic_search.py, citation_explorer.py, researcher_lookup.py
+- [x] **Ingestion Manager Phase 6** - All methods now implemented:
+  - `_assess_relevance()` - LLM-based relevance scoring
+  - `check_duplicate()` - KB duplicate detection by DOI, paper_id, and title similarity
+  - `process_decision()` - User decision handling (all/none/numbers)
+  - `_ingest_source()` - Source ingestion to vector store
 - [x] **LangGraph Workflow Implementation** - All 5 nodes now functional:
   - `_understand_query()` - Query classification (literature_review, factual, analysis, general)
   - `_search_local()` - Vector store search with filters and reranker
@@ -115,9 +118,16 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 ## Bugs / Tech Debt
 
 - [x] Fix `datetime.utcnow()` deprecation warning in vector_store.py (already uses timezone-aware datetime)
-- [ ] Add proper error handling for Semantic Scholar rate limits
-- [ ] Consider caching for API responses
-- [ ] Install pytest-timeout plugin for test timeouts
+- [x] Add proper error handling for Semantic Scholar rate limits
+  - Added `RateLimiter` class with sliding window token bucket
+  - Added `retry_with_backoff()` with exponential backoff + jitter
+  - Applied to: academic_search.py, citation_explorer.py, researcher_lookup.py
+- [x] Add caching for API responses
+  - Created `utils/cache.py` with `TTLCache` and `PersistentCache` classes
+  - In-memory caching with configurable TTL (no external dependencies)
+  - Cache searches (1hr), paper details (6hr), OA URLs (24hr), researcher data (24hr)
+  - Applied to: academic_search.py, researcher_lookup.py
+- [x] Install pytest-timeout plugin for test timeouts
 - [x] Fix test imports from `src.*` to `research_agent.*`
 
 ---
@@ -127,10 +137,6 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 1. **Evaluation Suite**
    - Test retrieval quality
    - Benchmark embedding + reranker performance
-
-2. **API Response Caching**
-   - Cache Semantic Scholar / OpenAlex responses
-   - Reduce rate limit issues
 
 ---
 

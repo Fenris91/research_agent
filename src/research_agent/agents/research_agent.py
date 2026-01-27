@@ -55,6 +55,7 @@ class AgentConfig:
     auto_ingest_threshold: float = 0.85
     include_web_search: bool = True
     year_range: Optional[tuple] = None
+    min_citations: int = 0
 
 
 class ResearchAgent:
@@ -349,7 +350,17 @@ Respond with ONLY the category name, nothing else."""
 
         try:
             # Generate query embedding
-            query_embedding = self.embedder.encode(query)
+            if hasattr(self.embedder, "embed_query"):
+                query_embedding = self.embedder.embed_query(query)
+            elif hasattr(self.embedder, "embed"):
+                query_embedding = self.embedder.embed(query)
+            elif hasattr(self.embedder, "encode"):
+                query_embedding = self.embedder.encode(query)
+            else:
+                raise ValueError("Embedder does not support query embedding")
+
+            if hasattr(query_embedding, "tolist"):
+                query_embedding = query_embedding.tolist()
 
             # Build filters from config
             filter_dict = None
@@ -364,7 +375,7 @@ Respond with ONLY the category name, nothing else."""
 
             # Search vector store
             results = self.vector_store.search(
-                query_embedding=query_embedding.tolist(),
+                query_embedding=query_embedding,
                 collection="papers",
                 n_results=self.config.max_local_results,
                 filter_dict=filter_dict,
@@ -408,6 +419,7 @@ Respond with ONLY the category name, nothing else."""
         """Search external academic databases and web sources."""
         query = state.get("current_query", "")
         external_results = []
+        min_citations = max(0, int(self.config.min_citations or 0))
 
         # Skip if we have enough local results and shouldn't search external
         if not state.get("should_search_external", True):
@@ -423,6 +435,9 @@ Respond with ONLY the category name, nothing else."""
                 )
 
                 for paper in papers:
+                    citation_count = paper.citations or 0
+                    if min_citations and citation_count < min_citations:
+                        continue
                     external_results.append({
                         "content": paper.abstract or "",
                         "title": paper.title,
@@ -430,7 +445,7 @@ Respond with ONLY the category name, nothing else."""
                         "year": paper.year,
                         "paper_id": paper.id,
                         "doi": paper.doi,
-                        "citation_count": paper.citation_count,
+                        "citation_count": citation_count,
                         "url": paper.url,
                         "source": "semantic_scholar",
                     })
@@ -444,6 +459,9 @@ Respond with ONLY the category name, nothing else."""
                     # Avoid duplicates by DOI
                     if paper.doi and any(r.get("doi") == paper.doi for r in external_results):
                         continue
+                    citation_count = paper.citations or 0
+                    if min_citations and citation_count < min_citations:
+                        continue
                     external_results.append({
                         "content": paper.abstract or "",
                         "title": paper.title,
@@ -451,7 +469,7 @@ Respond with ONLY the category name, nothing else."""
                         "year": paper.year,
                         "paper_id": paper.id,
                         "doi": paper.doi,
-                        "citation_count": paper.citation_count,
+                        "citation_count": citation_count,
                         "url": paper.url,
                         "source": "openalex",
                     })
@@ -468,10 +486,13 @@ Respond with ONLY the category name, nothing else."""
                 try:
                     web_results = await self.web_search.search(query, max_results=5)
                     for result in web_results:
+                        title = result.get("title") if isinstance(result, dict) else getattr(result, "title", "")
+                        url = result.get("url") if isinstance(result, dict) else getattr(result, "url", "")
+                        content = result.get("snippet") if isinstance(result, dict) else getattr(result, "content", "")
                         external_results.append({
-                            "content": result.get("snippet", ""),
-                            "title": result.get("title", ""),
-                            "url": result.get("url", ""),
+                            "content": content or "",
+                            "title": title or "",
+                            "url": url or "",
                             "source": "web",
                         })
                     logger.info(f"Added {len(web_results)} web results")
@@ -655,6 +676,11 @@ Response:"""
                 year_from = search_filters.get("year_from", 1900)
                 year_to = search_filters.get("year_to", 2030)
                 self.config.year_range = (year_from, year_to)
+            if "min_citations" in search_filters and search_filters.get("min_citations") is not None:
+                try:
+                    self.config.min_citations = int(search_filters.get("min_citations") or 0)
+                except (TypeError, ValueError):
+                    self.config.min_citations = 0
 
         # Initialize state
         initial_state: ResearchState = {
@@ -726,9 +752,10 @@ Response:"""
                 import concurrent.futures
 
                 with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return loop.run_in_executor(
-                        pool, asyncio.run, self._run_async(user_query, search_filters)
+                    future = pool.submit(
+                        asyncio.run, self._run_async(user_query, search_filters)
                     )
+                    return future.result()
             else:
                 return asyncio.run(self._run_async(user_query, search_filters))
 
