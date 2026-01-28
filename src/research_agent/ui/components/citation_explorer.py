@@ -1,5 +1,7 @@
 """Gradio components for the Citation Explorer tab."""
 
+from pathlib import Path
+
 import gradio as gr
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -93,43 +95,57 @@ def render_citation_explorer():
         with gr.Tabs():
             with gr.TabItem("📄 Papers That Cite This"):
                 citing_output = gr.DataFrame(
-                    headers=["Title", "Year", "Citations", "Paper ID"],
-                    datatype=["str", "number", "number", "str"],
-                    interactive=True,  # Allow selection/copying
+                    headers=["Save", "Title", "Year", "Citations", "Paper ID"],
+                    datatype=["bool", "str", "number", "number", "str"],
+                    interactive=True,
                     wrap=True,
-                    column_widths=["50%", "10%", "10%", "30%"],
+                    column_widths=["5%", "45%", "10%", "10%", "30%"],
                 )
+                with gr.Row():
+                    citing_save_btn = gr.Button("Save checked to KB")
+                    citing_clear_btn = gr.Button("Clear checks")
 
             with gr.TabItem("📚 Papers Cited by This"):
                 cited_output = gr.DataFrame(
-                    headers=["Title", "Year", "Citations", "Paper ID"],
-                    datatype=["str", "number", "number", "str"],
-                    interactive=True,  # Allow selection/copying
+                    headers=["Save", "Title", "Year", "Citations", "Paper ID"],
+                    datatype=["bool", "str", "number", "number", "str"],
+                    interactive=True,
                     wrap=True,
-                    column_widths=["50%", "10%", "10%", "30%"],
+                    column_widths=["5%", "45%", "10%", "10%", "30%"],
                 )
+                with gr.Row():
+                    cited_save_btn = gr.Button("Save checked to KB")
+                    cited_clear_btn = gr.Button("Clear checks")
 
             with gr.TabItem("⭐ Highly Connected Papers"):
                 connected_output = gr.DataFrame(
-                    headers=["Title", "Year", "Citations", "Paper ID"],
-                    datatype=["str", "number", "number", "str"],
+                    headers=["Save", "Title", "Year", "Citations", "Paper ID"],
+                    datatype=["bool", "str", "number", "number", "str"],
                     interactive=True,
                     wrap=True,
-                    column_widths=["50%", "10%", "10%", "30%"],
+                    column_widths=["5%", "45%", "10%", "10%", "30%"],
                 )
+                with gr.Row():
+                    connected_save_btn = gr.Button("Save checked to KB")
+                    connected_clear_btn = gr.Button("Clear checks")
 
             with gr.TabItem("🔗 Related Papers"):
                 related_output = gr.DataFrame(
-                    headers=["Title", "Year", "Citations", "Paper ID"],
-                    datatype=["str", "number", "number", "str"],
+                    headers=["Save", "Title", "Year", "Citations", "Paper ID"],
+                    datatype=["bool", "str", "number", "number", "str"],
                     interactive=True,
                     wrap=True,
-                    column_widths=["50%", "10%", "10%", "30%"],
+                    column_widths=["5%", "45%", "10%", "10%", "30%"],
                 )
+                with gr.Row():
+                    related_save_btn = gr.Button("Save checked to KB")
+                    related_clear_btn = gr.Button("Clear checks")
 
         # Network visualization
         with gr.Accordion("🌐 Network Visualization", open=False):
             network_plot = gr.Plot(label="Citation Network Graph")
+
+        kb_save_status = gr.Markdown("")
 
         # Event handlers
         search_btn.click(
@@ -155,6 +171,32 @@ def render_citation_explorer():
                 related_output,
                 network_plot,
             ],
+        )
+
+        citing_clear_btn.click(
+            fn=_clear_checks, inputs=[citing_output], outputs=[citing_output]
+        )
+        cited_clear_btn.click(
+            fn=_clear_checks, inputs=[cited_output], outputs=[cited_output]
+        )
+        connected_clear_btn.click(
+            fn=_clear_checks, inputs=[connected_output], outputs=[connected_output]
+        )
+        related_clear_btn.click(
+            fn=_clear_checks, inputs=[related_output], outputs=[related_output]
+        )
+
+        citing_save_btn.click(
+            fn=save_selected_to_kb, inputs=[citing_output], outputs=[kb_save_status]
+        )
+        cited_save_btn.click(
+            fn=save_selected_to_kb, inputs=[cited_output], outputs=[kb_save_status]
+        )
+        connected_save_btn.click(
+            fn=save_selected_to_kb, inputs=[connected_output], outputs=[kb_save_status]
+        )
+        related_save_btn.click(
+            fn=save_selected_to_kb, inputs=[related_output], outputs=[kb_save_status]
         )
 
         # Researcher exploration events
@@ -193,6 +235,7 @@ def render_citation_explorer():
         "connected_output": connected_output,
         "related_output": related_output,
         "network_plot": network_plot,
+        "kb_save_status": kb_save_status,
         "researcher_dropdown": researcher_dropdown,
         "researcher_papers_table": researcher_papers_table,
         "refresh_researchers_btn": refresh_researchers_btn,
@@ -302,6 +345,168 @@ async def explore_citations(paper_input: str, direction: str, depth: int):
         return error_msg, None, None, None, None, None
 
 
+def _clear_checks(table_data):
+    if table_data is None:
+        return None
+
+    if hasattr(table_data, "values"):
+        rows = table_data.values.tolist()
+    else:
+        rows = list(table_data)
+
+    updated = []
+    for row in rows:
+        row_list = list(row)
+        if row_list:
+            row_list[0] = False
+        updated.append(row_list)
+
+    return updated
+
+
+def _load_config():
+    config_path = Path("configs/config.yaml")
+    if not config_path.exists():
+        return {}
+
+    try:
+        import yaml
+
+        with config_path.open("r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+
+def _get_kb_resources():
+    from research_agent.db.embeddings import get_embedder
+    from research_agent.db.vector_store import ResearchVectorStore
+
+    cfg = _load_config()
+    embed_cfg = cfg.get("embedding", {})
+    vec_cfg = cfg.get("vector_store", {})
+
+    embedder = get_embedder(
+        model_name=embed_cfg.get("name", "BAAI/bge-base-en-v1.5"),
+        device=embed_cfg.get("device"),
+    )
+    store = ResearchVectorStore(
+        persist_dir=vec_cfg.get("persist_directory", "./data/chroma_db")
+    )
+    return store, embedder
+
+
+async def save_selected_to_kb(table_data):
+    if table_data is None:
+        return "No table data available."
+
+    if hasattr(table_data, "values"):
+        rows = table_data.values.tolist()
+    else:
+        rows = list(table_data)
+
+    def _is_checked(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "1", "yes", "y"}
+        return False
+
+    selected = [row for row in rows if len(row) > 0 and _is_checked(row[0])]
+    if not selected:
+        return "Check one or more rows first."
+
+    store, embedder = _get_kb_resources()
+    search_tools = AcademicSearchTools()
+
+    added = 0
+    skipped = 0
+    errors = []
+
+    for row in selected:
+        paper_id = row[4] if len(row) > 4 else None
+        if not paper_id:
+            skipped += 1
+            continue
+
+        if store.get_paper(paper_id):
+            skipped += 1
+            continue
+
+        try:
+            paper = await search_tools.get_paper_details(
+                paper_id, source="semantic_scholar"
+            )
+            if paper:
+                title = paper.title or "Unknown"
+                abstract = paper.abstract or ""
+                venue = paper.venue or ""
+                authors = paper.authors or []
+                fields = paper.fields or []
+                citations = paper.citations
+                doi = paper.doi
+                source = paper.source
+            else:
+                title = row[1] or "Unknown"
+                abstract = ""
+                venue = ""
+                authors = []
+                fields = []
+                citations = row[3] if len(row) > 3 else None
+                doi = None
+                source = "semantic_scholar"
+
+            parts = [title]
+            if abstract:
+                parts.append(f"Abstract: {abstract}")
+            if venue:
+                parts.append(f"Venue: {venue}")
+            if fields:
+                parts.append(f"Fields: {', '.join(fields)}")
+            if doi:
+                parts.append(f"DOI: {doi}")
+
+            content = "\n".join(parts).strip()
+            if not content:
+                skipped += 1
+                continue
+
+            embeddings = embedder.embed_documents(
+                [content], batch_size=1, show_progress=False
+            )
+
+            metadata = {
+                "title": title,
+                "year": paper.year if paper else row[2],
+                "venue": venue,
+                "citations": citations,
+                "doi": doi,
+                "fields": fields,
+                "authors": authors,
+                "source": source,
+                "ingest_source": "citation_explorer",
+            }
+
+            store.add_paper(paper_id, [content], embeddings, metadata)
+            added += 1
+        except Exception as e:
+            errors.append(f"{paper_id}: {e}")
+
+    await search_tools.close()
+
+    status_parts = [f"Added {added} paper(s)"]
+    if skipped:
+        status_parts.append(f"Skipped {skipped} duplicate/invalid")
+    if errors:
+        status_parts.append("Errors: " + "; ".join(errors[:3]))
+        if len(errors) > 3:
+            status_parts.append(f"(+{len(errors) - 3} more)")
+
+    return ". ".join(status_parts)
+
+
 def _papers_to_dataframe(papers):
     """Convert list of CitationPaper objects to DataFrame-friendly rows."""
     if not papers:
@@ -311,6 +516,7 @@ def _papers_to_dataframe(papers):
     for paper in papers:
         data.append(
             [
+                False,
                 paper.title or "Unknown Title",
                 paper.year or "Unknown",
                 paper.citation_count or 0,

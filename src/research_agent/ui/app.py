@@ -203,10 +203,18 @@ def create_app(agent=None):
                 )
                 delete_paper_btn = gr.Button("Delete", variant="stop", scale=1)
 
+            with gr.Row():
+                reset_kb_btn = gr.Button("Reset KB", variant="stop", scale=1)
+
             delete_status = gr.Textbox(
                 label="Delete Status",
                 interactive=False,
                 placeholder="Enter a paper ID to delete",
+            )
+            reset_kb_status = gr.Textbox(
+                label="Reset Status",
+                interactive=False,
+                placeholder="Reset will remove all KB data",
             )
 
             gr.Markdown("### Export")
@@ -270,6 +278,13 @@ def create_app(agent=None):
                         value=False,
                         info="Slower but enables citation network exploration",
                     )
+                    fetch_papers_limit = gr.Slider(
+                        minimum=5,
+                        maximum=50,
+                        value=10,
+                        step=1,
+                        label="Max papers to fetch",
+                    )
 
             with gr.Row():
                 lookup_btn = gr.Button("Lookup Researchers", variant="primary", scale=2)
@@ -330,6 +345,25 @@ def create_app(agent=None):
                     "Load Papers",
                     variant="secondary",
                 )
+
+            gr.Markdown("### Ingest Papers to Knowledge Base")
+            with gr.Row():
+                ingest_papers_limit = gr.Slider(
+                    minimum=1,
+                    maximum=20,
+                    value=10,
+                    step=1,
+                    label="Max papers to ingest",
+                )
+                ingest_researcher_btn = gr.Button(
+                    "Ingest Top Papers",
+                    variant="primary",
+                )
+            ingest_researcher_status = gr.Textbox(
+                label="Ingestion Status",
+                interactive=False,
+                placeholder="Select a researcher and click Ingest",
+            )
 
             # State to store full results
             researcher_results_state = gr.State([])
@@ -723,6 +757,13 @@ def create_app(agent=None):
             stats, table = refresh_stats_and_table(year_from, year_to, min_citations)
             return status, stats, table
 
+        def reset_kb(year_from=None, year_to=None, min_citations=0):
+            """Reset the knowledge base."""
+            store, _, _ = _get_kb_resources()
+            store.reset()
+            stats, table = refresh_stats_and_table(year_from, year_to, min_citations)
+            return "Knowledge base reset.", stats, table
+
         def export_bibtex():
             """Export all papers in knowledge base to BibTeX format."""
             store, _, _ = _get_kb_resources()
@@ -789,7 +830,13 @@ def create_app(agent=None):
             return "\n".join(lines)
 
         def lookup_researchers(
-            names_text, use_oa, use_s2, use_web, should_fetch_papers, existing_results
+            names_text,
+            use_oa,
+            use_s2,
+            use_web,
+            should_fetch_papers,
+            papers_limit,
+            existing_results,
         ):
             """Look up researcher profiles, optionally with papers."""
             from research_agent.tools.researcher_file_parser import (
@@ -830,7 +877,9 @@ def create_app(agent=None):
                         profile = await lookup.lookup_researcher(
                             name,
                             fetch_papers=should_fetch_papers,
-                            papers_limit=10 if should_fetch_papers else 0,
+                            papers_limit=int(papers_limit)
+                            if should_fetch_papers
+                            else 0,
                         )
                         profiles.append(profile)
                     return profiles
@@ -1064,6 +1113,102 @@ def create_app(agent=None):
                 related_df,
                 network_fig,
             )
+
+        def ingest_researcher_papers(
+            researcher_name, max_papers, year_from=None, year_to=None, min_citations=0
+        ):
+            """Ingest a researcher's top papers into the KB."""
+            if not researcher_name:
+                stats, table = refresh_stats_and_table(
+                    year_from, year_to, min_citations
+                )
+                return "Select a researcher first.", stats, table
+
+            from research_agent.tools.researcher_registry import get_researcher_registry
+
+            registry = get_researcher_registry()
+            profile = registry.get(researcher_name)
+
+            if not profile or not profile.top_papers:
+                stats, table = refresh_stats_and_table(
+                    year_from, year_to, min_citations
+                )
+                return (
+                    "No papers loaded. Enable 'Fetch Papers' and run lookup again.",
+                    stats,
+                    table,
+                )
+
+            store, embedder_model, _ = _get_kb_resources()
+
+            added = 0
+            skipped = 0
+            errors = []
+
+            for paper in profile.top_papers[: int(max_papers)]:
+                try:
+                    paper_id = paper.doi or paper.paper_id
+                    if not paper_id:
+                        skipped += 1
+                        continue
+
+                    if store.get_paper(paper_id):
+                        skipped += 1
+                        continue
+
+                    title = paper.title or "Unknown"
+                    abstract = paper.abstract or ""
+                    venue = paper.venue or ""
+                    fields = paper.fields or []
+
+                    parts = [title]
+                    if abstract:
+                        parts.append(f"Abstract: {abstract}")
+                    if venue:
+                        parts.append(f"Venue: {venue}")
+                    if fields:
+                        parts.append(f"Fields: {', '.join(fields)}")
+                    if paper.doi:
+                        parts.append(f"DOI: {paper.doi}")
+
+                    content = "\n".join(parts).strip()
+                    if not content:
+                        skipped += 1
+                        continue
+
+                    embeddings = embedder_model.embed_documents(
+                        [content], batch_size=1, show_progress=False
+                    )
+
+                    metadata = {
+                        "title": title,
+                        "year": paper.year,
+                        "venue": venue,
+                        "citations": paper.citation_count,
+                        "doi": paper.doi,
+                        "fields": fields,
+                        "authors": "",
+                        "source": paper.source,
+                        "researcher": researcher_name,
+                        "ingest_source": "researcher_lookup",
+                    }
+
+                    store.add_paper(paper_id, [content], embeddings, metadata)
+                    added += 1
+                except Exception as e:
+                    errors.append(f"{paper.title}: {e}")
+
+            stats, table = refresh_stats_and_table(year_from, year_to, min_citations)
+
+            status_parts = [f"Added {added} paper(s)"]
+            if skipped:
+                status_parts.append(f"Skipped {skipped} duplicate/empty")
+            if errors:
+                status_parts.append("Errors: " + "; ".join(errors[:3]))
+                if len(errors) > 3:
+                    status_parts.append(f"(+{len(errors) - 3} more)")
+
+            return ". ".join(status_parts), stats, table
 
         def export_to_csv(results):
             """Export results to CSV."""
@@ -1671,6 +1816,12 @@ def create_app(agent=None):
             inputs=[delete_paper_id, year_from_kb, year_to_kb, min_citations_kb],
             outputs=[delete_status, kb_stats, papers_table],
         )
+
+        reset_kb_btn.click(
+            reset_kb,
+            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            outputs=[reset_kb_status, kb_stats, papers_table],
+        )
         export_bibtex_btn.click(
             export_bibtex,
             outputs=[export_status, bibtex_download],
@@ -1765,6 +1916,7 @@ def create_app(agent=None):
                 use_semantic_scholar,
                 use_web_search,
                 fetch_papers,
+                fetch_papers_limit,
                 researcher_results_state,
             ],
             outputs=[
@@ -1814,6 +1966,22 @@ def create_app(agent=None):
                 citation_ui["connected_output"],
                 citation_ui["related_output"],
                 citation_ui["network_plot"],
+            ],
+        )
+
+        ingest_researcher_btn.click(
+            ingest_researcher_papers,
+            inputs=[
+                researcher_select,
+                ingest_papers_limit,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+            ],
+            outputs=[
+                ingest_researcher_status,
+                kb_stats,
+                papers_table,
             ],
         )
 
