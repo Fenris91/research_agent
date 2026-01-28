@@ -498,7 +498,7 @@ Respond with ONLY the category name, nothing else."""
         }
 
     async def _search_local(self, state: ResearchState) -> Dict:
-        """Search local vector store for relevant documents."""
+        """Search local vector store for relevant documents across all collections."""
         query = state.get("current_query", "")
         local_results = []
 
@@ -522,7 +522,7 @@ Respond with ONLY the category name, nothing else."""
             if hasattr(query_embedding, "tolist"):
                 query_embedding = query_embedding.tolist()
 
-            # Build filters from config
+            # Build filters from config (only applies to papers with year metadata)
             filter_dict = None
             if self.config.year_range:
                 year_from, year_to = self.config.year_range
@@ -533,25 +533,50 @@ Respond with ONLY the category name, nothing else."""
                     ]
                 }
 
-            # Search vector store
-            results = self.vector_store.search(
+            # Search all collections: papers, notes, and web_sources
+            # Papers get year filter, others don't
+            paper_results = self.vector_store.search(
                 query_embedding=query_embedding,
                 collection="papers",
                 n_results=self.config.max_local_results,
                 filter_dict=filter_dict,
-                query_text=query,  # For reranker
+                query_text=query,
             )
 
-            # Format results
-            for i, doc in enumerate(results.get("documents", [])):
+            # Search notes collection (gracefully handle empty/incompatible collections)
+            try:
+                notes_results = self.vector_store.search(
+                    query_embedding=query_embedding,
+                    collection="notes",
+                    n_results=max(3, self.config.max_local_results // 2),
+                    query_text=query,
+                )
+            except Exception as e:
+                logger.debug(f"Notes search skipped: {e}")
+                notes_results = {"documents": [], "metadatas": [], "distances": []}
+
+            # Search web sources collection (gracefully handle empty/incompatible collections)
+            try:
+                web_results = self.vector_store.search(
+                    query_embedding=query_embedding,
+                    collection="web_sources",
+                    n_results=max(3, self.config.max_local_results // 2),
+                    query_text=query,
+                )
+            except Exception as e:
+                logger.debug(f"Web sources search skipped: {e}")
+                web_results = {"documents": [], "metadatas": [], "distances": []}
+
+            # Format paper results
+            for i, doc in enumerate(paper_results.get("documents", [])):
                 metadata = (
-                    results.get("metadatas", [{}])[i]
-                    if results.get("metadatas")
+                    paper_results.get("metadatas", [{}])[i]
+                    if paper_results.get("metadatas")
                     else {}
                 )
                 distance = (
-                    results.get("distances", [1.0])[i]
-                    if results.get("distances")
+                    paper_results.get("distances", [1.0])[i]
+                    if paper_results.get("distances")
                     else 1.0
                 )
 
@@ -563,12 +588,73 @@ Respond with ONLY the category name, nothing else."""
                         "year": metadata.get("year"),
                         "paper_id": metadata.get("paper_id", ""),
                         "source": "local_kb",
-                        "relevance_score": 1
-                        - distance,  # Convert distance to similarity
+                        "relevance_score": 1 - distance,
                     }
                 )
 
-            logger.info(f"Found {len(local_results)} local results")
+            # Format notes results
+            for i, doc in enumerate(notes_results.get("documents", [])):
+                metadata = (
+                    notes_results.get("metadatas", [{}])[i]
+                    if notes_results.get("metadatas")
+                    else {}
+                )
+                distance = (
+                    notes_results.get("distances", [1.0])[i]
+                    if notes_results.get("distances")
+                    else 1.0
+                )
+
+                local_results.append(
+                    {
+                        "content": doc,
+                        "title": metadata.get("title", "Research Note"),
+                        "authors": "User Note",
+                        "year": None,
+                        "paper_id": metadata.get("note_id", ""),
+                        "source": "local_note",
+                        "tags": metadata.get("tags", ""),
+                        "relevance_score": 1 - distance,
+                    }
+                )
+
+            # Format web source results
+            for i, doc in enumerate(web_results.get("documents", [])):
+                metadata = (
+                    web_results.get("metadatas", [{}])[i]
+                    if web_results.get("metadatas")
+                    else {}
+                )
+                distance = (
+                    web_results.get("distances", [1.0])[i]
+                    if web_results.get("distances")
+                    else 1.0
+                )
+
+                local_results.append(
+                    {
+                        "content": doc,
+                        "title": metadata.get("title", "Web Source"),
+                        "authors": "",
+                        "year": None,
+                        "paper_id": metadata.get("source_id", ""),
+                        "url": metadata.get("url", ""),
+                        "source": "local_web",
+                        "relevance_score": 1 - distance,
+                    }
+                )
+
+            # Sort all results by relevance score
+            local_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+
+            # Log breakdown
+            paper_count = len(paper_results.get("documents", []))
+            notes_count = len(notes_results.get("documents", []))
+            web_count = len(web_results.get("documents", []))
+            logger.info(
+                f"Found {len(local_results)} local results "
+                f"(papers: {paper_count}, notes: {notes_count}, web: {web_count})"
+            )
 
             # Decide if we need external search
             should_search_external = len(
@@ -749,6 +835,16 @@ Respond with ONLY the category name, nothing else."""
     ) -> str:
         """Build a prompt for synthesizing results based on query type."""
 
+        # Map source types to human-readable labels
+        source_labels = {
+            "local_kb": "Knowledge Base Paper",
+            "local_note": "User Research Note",
+            "local_web": "Saved Web Source",
+            "semantic_scholar": "Semantic Scholar",
+            "openalex": "OpenAlex",
+            "web": "Web Search",
+        }
+
         # Format sources
         sources_text = ""
         for i, result in enumerate(results[:10], 1):  # Limit to top 10
@@ -757,13 +853,20 @@ Respond with ONLY the category name, nothing else."""
             year = result.get("year", "")
             content = result.get("content", "")[:500]  # Truncate content
             source = result.get("source", "unknown")
+            source_label = source_labels.get(source, source)
+            tags = result.get("tags", "")
+            url = result.get("url", "")
 
             sources_text += f"\n[{i}] {title}"
-            if authors:
+            if authors and authors != "User Note":
                 sources_text += f" by {authors}"
             if year:
                 sources_text += f" ({year})"
-            sources_text += f" [Source: {source}]"
+            sources_text += f" [Source: {source_label}]"
+            if tags:
+                sources_text += f" [Tags: {tags}]"
+            if url:
+                sources_text += f"\n    URL: {url}"
             if content:
                 sources_text += f"\n    {content}...\n"
 
@@ -811,6 +914,16 @@ Response:"""
         if not results:
             return "No relevant results found for your query."
 
+        # Map source types to human-readable labels
+        source_labels = {
+            "local_kb": "Knowledge Base",
+            "local_note": "Research Note",
+            "local_web": "Saved Web Source",
+            "semantic_scholar": "Semantic Scholar",
+            "openalex": "OpenAlex",
+            "web": "Web Search",
+        }
+
         response = f"**Results for:** {query}\n\n"
 
         for i, result in enumerate(results[:10], 1):
@@ -818,14 +931,22 @@ Response:"""
             authors = result.get("authors", "")
             year = result.get("year", "")
             source = result.get("source", "")
+            source_label = source_labels.get(source, source)
             content = result.get("content", "")[:200]
+            tags = result.get("tags", "")
+            url = result.get("url", "")
 
             response += f"**[{i}] {title}**"
-            if authors:
+            if authors and authors != "User Note":
                 response += f"\n*{authors}*"
             if year:
                 response += f" ({year})"
-            response += f"\nSource: {source}\n"
+            response += f"\nSource: {source_label}"
+            if tags:
+                response += f" | Tags: {tags}"
+            response += "\n"
+            if url:
+                response += f"URL: {url}\n"
             if content:
                 response += f"{content}...\n"
             response += "\n"

@@ -57,9 +57,11 @@ model:
 # Embedding Model
 # ============================================
 embedding:
-  name: "BAAI/bge-large-en-v1.5"
+  # NOTE: Must match the dimension of existing embeddings in the vector store
+  # bge-base-en-v1.5 = 768 dims, bge-large-en-v1.5 = 1024 dims
+  name: "BAAI/bge-base-en-v1.5"
   device: "cuda"  # "cuda" or "cpu"
-  dimension: 1024
+  dimension: 768
   
   # Optional reranker for better retrieval
   reranker:
