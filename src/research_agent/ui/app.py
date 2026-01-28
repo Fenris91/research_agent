@@ -268,7 +268,7 @@ def create_app(agent=None):
                     fetch_papers = gr.Checkbox(
                         label="Fetch Papers (for Citation Explorer)",
                         value=False,
-                        info="Slower but enables citation network exploration"
+                        info="Slower but enables citation network exploration",
                     )
 
             with gr.Row():
@@ -306,13 +306,39 @@ def create_app(agent=None):
             csv_download = gr.File(label="Download CSV", visible=False)
             json_download = gr.File(label="Download JSON", visible=False)
 
+            gr.Markdown("### Explore Citations for Researcher")
+            with gr.Row():
+                researcher_select = gr.Dropdown(
+                    choices=[],
+                    label="Select researcher",
+                    interactive=True,
+                    value=None,
+                )
+                send_to_citations_btn = gr.Button(
+                    "Explore Citations",
+                    variant="secondary",
+                )
+
+            with gr.Row():
+                seed_paper_select = gr.Dropdown(
+                    choices=[],
+                    label="Seed paper (optional)",
+                    interactive=True,
+                    value=None,
+                )
+                load_papers_btn = gr.Button(
+                    "Load Papers",
+                    variant="secondary",
+                )
+
             # State to store full results
             researcher_results_state = gr.State([])
+            researcher_papers_state = gr.State({})
 
         with gr.Tab("Citation Explorer"):
             from research_agent.ui.components import render_citation_explorer
 
-            render_citation_explorer()
+            citation_ui = render_citation_explorer()
 
         with gr.Tab("Data Analysis"):
             gr.Markdown("## Analyze Your Data")
@@ -347,7 +373,13 @@ def create_app(agent=None):
 
                 with gr.Column(scale=1):
                     plot_type = gr.Radio(
-                        choices=["Histogram", "Box Plot", "Bar Chart", "Line Chart", "Scatter"],
+                        choices=[
+                            "Histogram",
+                            "Box Plot",
+                            "Bar Chart",
+                            "Line Chart",
+                            "Scatter",
+                        ],
                         label="Plot Type",
                         value="Histogram",
                     )
@@ -507,7 +539,9 @@ def create_app(agent=None):
                     reranker_enabled = bool(reranker_enabled_default)
 
                 if rerank_top_k is None:
-                    retrieval_cfg = cfg.get("retrieval", {}) if isinstance(cfg, dict) else {}
+                    retrieval_cfg = (
+                        cfg.get("retrieval", {}) if isinstance(cfg, dict) else {}
+                    )
                     rerank_top_k_cfg = retrieval_cfg.get("rerank_top_k")
                     if rerank_top_k_cfg is None:
                         rerank_top_k_cfg = retrieval_cfg.get("top_k")
@@ -735,26 +769,28 @@ def create_app(agent=None):
 
             # Build BibTeX entry
             lines = [f"@article{{{cite_key},"]
-            lines.append(f'  title = {{{title}}},')
+            lines.append(f"  title = {{{title}}},")
 
             if authors:
                 # Convert "First Last, First Last" to "Last, First and Last, First"
                 author_list = [a.strip() for a in authors.split(",")]
                 bibtex_authors = " and ".join(author_list)
-                lines.append(f'  author = {{{bibtex_authors}}},')
+                lines.append(f"  author = {{{bibtex_authors}}},")
 
             if year:
                 lines.append(f"  year = {{{year}}},")
 
             # Add DOI if it looks like the paper_id is a DOI
             if paper_id.startswith("10."):
-                lines.append(f'  doi = {{{paper_id}}},')
+                lines.append(f"  doi = {{{paper_id}}},")
 
             lines.append("}")
 
             return "\n".join(lines)
 
-        def lookup_researchers(names_text, use_oa, use_s2, use_web, should_fetch_papers):
+        def lookup_researchers(
+            names_text, use_oa, use_s2, use_web, should_fetch_papers, existing_results
+        ):
             """Look up researcher profiles, optionally with papers."""
             from research_agent.tools.researcher_file_parser import (
                 parse_researchers_text,
@@ -765,7 +801,15 @@ def create_app(agent=None):
             names = parse_researchers_text(names_text)
 
             if not names:
-                return ("No valid names found", [], [], None)
+                return (
+                    "No valid names found",
+                    [],
+                    existing_results or [],
+                    None,
+                    gr.update(choices=[], value=None),
+                    gr.update(choices=[], value=None),
+                    {},
+                )
 
             # Create lookup instance
             lookup = ResearcherLookup(
@@ -786,7 +830,7 @@ def create_app(agent=None):
                         profile = await lookup.lookup_researcher(
                             name,
                             fetch_papers=should_fetch_papers,
-                            papers_limit=10 if should_fetch_papers else 0
+                            papers_limit=10 if should_fetch_papers else 0,
                         )
                         profiles.append(profile)
                     return profiles
@@ -796,52 +840,230 @@ def create_app(agent=None):
             except Exception as e:
                 logger.error(f"Lookup error: {e}")
                 import traceback
+
                 traceback.print_exc()
-                return (f"Error during lookup: {str(e)}", [], [], None)
+                return (
+                    f"Error during lookup: {str(e)}",
+                    [],
+                    existing_results or [],
+                    None,
+                    gr.update(choices=[], value=None),
+                    gr.update(choices=[], value=None),
+                    {},
+                )
 
             # Store in registry for cross-tab access (Citation Explorer)
             registry = get_researcher_registry()
             registry.add_batch(profiles)
 
-            # Format results for table
-            table_data = []
-            web_results = {}
+            incoming_results = [p.to_dict() for p in profiles]
+            combined = {r.get("name"): r for r in (existing_results or [])}
+            for r in incoming_results:
+                combined[r.get("name")] = r
 
-            for p in profiles:
-                table_data.append(
+            merged_results = list(combined.values())
+
+            merged_table = []
+            merged_web_results = {}
+            total_papers = 0
+            for r in merged_results:
+                merged_table.append(
                     [
-                        p.name,
-                        "; ".join(p.affiliations) if p.affiliations else "",
-                        p.works_count,
-                        f"{p.citations_count:,}",
-                        p.h_index if p.h_index else "",
-                        "; ".join(p.fields[:3]) if p.fields else "",
+                        r.get("name", ""),
+                        "; ".join(r.get("affiliations", [])),
+                        r.get("works_count", 0),
+                        f"{r.get('citations_count', 0):,}",
+                        r.get("h_index", ""),
+                        "; ".join((r.get("fields") or [])[:3]),
                     ]
                 )
+                total_papers += len(r.get("top_papers", []) or [])
+                if r.get("web_results"):
+                    merged_web_results[r["name"]] = r["web_results"]
 
-                if p.web_results:
-                    web_results[p.name] = p.web_results
-
-            # Build status message
-            total_papers = sum(len(p.top_papers) for p in profiles)
             if should_fetch_papers and total_papers > 0:
-                status = f"Found {len(profiles)} profiles with {total_papers} papers. Go to Citation Explorer to explore networks."
+                status = (
+                    f"Found {len(merged_results)} profiles with {total_papers} papers. "
+                    "Select a researcher to explore citation networks."
+                )
             else:
-                status = f"Found {len(profiles)} researcher profiles. Enable 'Fetch Papers' for citation exploration."
+                status = (
+                    f"Found {len(merged_results)} researcher profiles. "
+                    "Enable 'Fetch Papers' for better citation exploration."
+                )
 
-            # Store full profiles for export
-            full_results = [p.to_dict() for p in profiles]
+            researcher_names = [
+                r.get("name", "") for r in merged_results if r.get("name")
+            ]
+            dropdown_update = gr.update(
+                choices=researcher_names,
+                value=researcher_names[0] if researcher_names else None,
+            )
 
             return (
                 status,
-                table_data,
-                full_results,
-                web_results if web_results else None,
+                merged_table,
+                merged_results,
+                merged_web_results or None,
+                dropdown_update,
+                gr.update(choices=[], value=None),
+                {},
             )
 
         def clear_results():
             """Clear researcher lookup results."""
-            return "", [], [], None
+            return (
+                "",
+                [],
+                [],
+                None,
+                gr.update(choices=[], value=None),
+                gr.update(choices=[], value=None),
+                {},
+            )
+
+        def _rank_papers(papers):
+            def _sort_key(paper):
+                return (paper.get("year") or 0, paper.get("citation_count") or 0)
+
+            return sorted(papers, key=_sort_key, reverse=True)
+
+        async def load_researcher_papers(researcher_name):
+            """Load candidate papers for a researcher."""
+            if not researcher_name:
+                return gr.update(choices=[], value=None), {}
+
+            from research_agent.tools.researcher_registry import get_researcher_registry
+            from research_agent.tools.academic_search import AcademicSearchTools
+
+            registry = get_researcher_registry()
+            profile = registry.get(researcher_name)
+            papers = []
+
+            if profile and profile.top_papers:
+                papers = [
+                    p.to_dict() if hasattr(p, "to_dict") else p
+                    for p in profile.top_papers
+                ]
+            else:
+                search_tools = AcademicSearchTools()
+                try:
+                    results = await search_tools.search_semantic_scholar(
+                        researcher_name, limit=20
+                    )
+                    papers = [
+                        {
+                            "paper_id": p.id,
+                            "title": p.title,
+                            "year": p.year,
+                            "citation_count": p.citations,
+                        }
+                        for p in results
+                    ]
+                finally:
+                    await search_tools.close()
+
+            ranked = _rank_papers(papers)
+
+            choices = []
+            mapping = {}
+            for paper in ranked:
+                label = (
+                    f"{paper.get('title', 'Unknown')} ({paper.get('year') or 'n.d.'})"
+                    f" — {paper.get('citation_count') or 0} cites"
+                )
+                choices.append(label)
+                paper_id = paper.get("paper_id") or paper.get("id")
+                if paper_id:
+                    mapping[label] = paper_id
+
+            return (
+                gr.update(choices=choices, value=choices[0] if choices else None),
+                mapping,
+            )
+
+        async def explore_researcher_citations(
+            researcher_name, direction, depth, seed_label, seed_map
+        ):
+            """Resolve a researcher to a seed paper and explore citations."""
+            if not researcher_name:
+                return (
+                    "",
+                    "Select a researcher to explore.",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+
+            from research_agent.tools.researcher_registry import get_researcher_registry
+            from research_agent.tools.academic_search import AcademicSearchTools
+            from research_agent.ui.components.citation_explorer import explore_citations
+
+            registry = get_researcher_registry()
+            profile = registry.get(researcher_name)
+
+            seed_paper_id = None
+            if seed_label and seed_map and seed_label in seed_map:
+                seed_paper_id = seed_map[seed_label]
+            elif profile and profile.top_papers:
+                papers = [
+                    p.to_dict() if hasattr(p, "to_dict") else p
+                    for p in profile.top_papers
+                ]
+                ranked = _rank_papers(papers)
+                if ranked:
+                    seed_paper_id = ranked[0].get("paper_id")
+
+            if not seed_paper_id:
+                search_tools = AcademicSearchTools()
+                try:
+                    papers = await search_tools.search_semantic_scholar(
+                        researcher_name, limit=20
+                    )
+                    if not papers:
+                        return (
+                            "",
+                            f"No papers found for: {researcher_name}",
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+
+                    def _sort_key(paper):
+                        return (paper.year or 0, paper.citations or 0)
+
+                    candidates = sorted(papers, key=_sort_key, reverse=True)
+                    seed_paper_id = candidates[0].id
+                finally:
+                    await search_tools.close()
+
+            (
+                summary,
+                citing_df,
+                cited_df,
+                connected_df,
+                related_df,
+                network_fig,
+            ) = await explore_citations(seed_paper_id, direction, depth)
+
+            summary = (
+                summary.replace("**Mode:** Paper", "**Mode:** Researcher")
+                + f"\n\n**Researcher:** {researcher_name}"
+            )
+
+            return (
+                seed_paper_id,
+                summary,
+                citing_df,
+                cited_df,
+                connected_df,
+                related_df,
+                network_fig,
+            )
 
         def export_to_csv(results):
             """Export results to CSV."""
@@ -915,7 +1137,9 @@ def create_app(agent=None):
                 file_path = file_obj.name
 
             if file_path.endswith(".csv"):
-                df = pd.read_csv(file_path, parse_dates=True, infer_datetime_format=True)
+                df = pd.read_csv(
+                    file_path, parse_dates=True, infer_datetime_format=True
+                )
             else:
                 df = pd.read_excel(file_path, parse_dates=True)
 
@@ -924,6 +1148,7 @@ def create_app(agent=None):
                 if df[col].dtype == "object":
                     try:
                         import pandas as pd
+
                         parsed = pd.to_datetime(df[col], errors="coerce")
                         if parsed.notna().sum() > len(df) * 0.5:
                             df[col] = parsed
@@ -965,11 +1190,15 @@ def create_app(agent=None):
 
             return (
                 info,
-                gr.update(choices=cols, value=numeric_cols[:2] if numeric_cols else cols[:2]),
+                gr.update(
+                    choices=cols, value=numeric_cols[:2] if numeric_cols else cols[:2]
+                ),
                 gr.update(choices=["(None)"] + cols, value="(None)"),
             )
 
-        def analyze_data(file_obj, analysis_type, plot_type, columns, group_by, custom_query):
+        def analyze_data(
+            file_obj, analysis_type, plot_type, columns, group_by, custom_query
+        ):
             """Analyze uploaded CSV/Excel data."""
             import pandas as pd
             import matplotlib.pyplot as plt
@@ -1032,7 +1261,11 @@ def create_app(agent=None):
 
             # Use selected columns or all numeric
             if columns:
-                numeric_cols = [c for c in columns if c in df.select_dtypes(include=["number"]).columns]
+                numeric_cols = [
+                    c
+                    for c in columns
+                    if c in df.select_dtypes(include=["number"]).columns
+                ]
             else:
                 numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
 
@@ -1068,14 +1301,20 @@ def create_app(agent=None):
             elif plot_type == "Line Chart":
                 numeric_df.plot(ax=ax)
             elif plot_type == "Scatter" and len(numeric_cols) >= 2:
-                ax.scatter(numeric_df[numeric_cols[0]], numeric_df[numeric_cols[1]], alpha=0.6)
+                ax.scatter(
+                    numeric_df[numeric_cols[0]], numeric_df[numeric_cols[1]], alpha=0.6
+                )
                 ax.set_xlabel(numeric_cols[0])
                 ax.set_ylabel(numeric_cols[1])
             else:
                 ax.hist(numeric_df[col].dropna(), bins=20, edgecolor="black", alpha=0.7)
                 ax.set_ylabel("Frequency")
 
-            ax.set_title(f"Distribution of {col}" if plot_type == "Histogram" else f"Analysis of {', '.join(numeric_cols[:3])}")
+            ax.set_title(
+                f"Distribution of {col}"
+                if plot_type == "Histogram"
+                else f"Analysis of {', '.join(numeric_cols[:3])}"
+            )
             plt.tight_layout()
 
             return result, fig
@@ -1087,7 +1326,11 @@ def create_app(agent=None):
 
             # Use selected columns or all numeric
             if columns:
-                numeric_cols = [c for c in columns if c in df.select_dtypes(include=["number"]).columns]
+                numeric_cols = [
+                    c
+                    for c in columns
+                    if c in df.select_dtypes(include=["number"]).columns
+                ]
                 if len(numeric_cols) >= 2:
                     numeric_df = df[numeric_cols]
                 else:
@@ -1138,7 +1381,9 @@ def create_app(agent=None):
             if columns:
                 cat_cols = [c for c in columns if c in df.columns]
             else:
-                cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+                cat_cols = df.select_dtypes(
+                    include=["object", "category"]
+                ).columns.tolist()
 
             if not cat_cols:
                 cat_cols = [df.columns[0]]
@@ -1195,7 +1440,9 @@ def create_app(agent=None):
             value_col = value_cols[0]
 
             # Create pivot
-            pivot = df.groupby(group_by)[value_col].agg(["mean", "sum", "count"]).round(2)
+            pivot = (
+                df.groupby(group_by)[value_col].agg(["mean", "sum", "count"]).round(2)
+            )
             pivot = pivot.head(15)  # Limit rows
 
             result = f"### Pivot Table: {value_col} by {group_by}\n\n"
@@ -1234,7 +1481,10 @@ def create_app(agent=None):
             # Find date column
             date_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
             if not date_cols:
-                return "No date/time columns detected. Upload data with dates or ensure date format is recognized.", None
+                return (
+                    "No date/time columns detected. Upload data with dates or ensure date format is recognized.",
+                    None,
+                )
 
             date_col = date_cols[0]
 
@@ -1265,12 +1515,24 @@ def create_app(agent=None):
 
             for col in plot_cols:
                 if plot_type == "Line Chart" or plot_type == "Histogram":
-                    ax.plot(df_sorted[date_col], df_sorted[col], label=col, marker="." if len(df) < 50 else "")
+                    ax.plot(
+                        df_sorted[date_col],
+                        df_sorted[col],
+                        label=col,
+                        marker="." if len(df) < 50 else "",
+                    )
                 elif plot_type == "Scatter":
-                    ax.scatter(df_sorted[date_col], df_sorted[col], label=col, alpha=0.6)
+                    ax.scatter(
+                        df_sorted[date_col], df_sorted[col], label=col, alpha=0.6
+                    )
                 elif plot_type == "Bar Chart":
                     # Resample to fewer points for bar chart
-                    ax.bar(range(len(df_sorted)), df_sorted[col].values, label=col, alpha=0.7)
+                    ax.bar(
+                        range(len(df_sorted)),
+                        df_sorted[col].values,
+                        label=col,
+                        alpha=0.7,
+                    )
                 else:
                     ax.plot(df_sorted[date_col], df_sorted[col], label=col)
 
@@ -1308,7 +1570,11 @@ def create_app(agent=None):
                     result += df[col].describe().to_markdown()
                     return result, fig
 
-            elif "compare" in query_lower or "by" in query_lower or "group" in query_lower:
+            elif (
+                "compare" in query_lower
+                or "by" in query_lower
+                or "group" in query_lower
+            ):
                 # Try to find two columns to compare
                 cols = _find_columns_in_query(df, query, n=2)
                 if len(cols) >= 2:
@@ -1499,12 +1765,16 @@ def create_app(agent=None):
                 use_semantic_scholar,
                 use_web_search,
                 fetch_papers,
+                researcher_results_state,
             ],
             outputs=[
                 lookup_status,
                 results_table,
                 researcher_results_state,
                 web_results_output,
+                researcher_select,
+                seed_paper_select,
+                researcher_papers_state,
             ],
         )
 
@@ -1515,6 +1785,35 @@ def create_app(agent=None):
                 results_table,
                 researcher_results_state,
                 web_results_output,
+                researcher_select,
+                seed_paper_select,
+                researcher_papers_state,
+            ],
+        )
+
+        load_papers_btn.click(
+            load_researcher_papers,
+            inputs=[researcher_select],
+            outputs=[seed_paper_select, researcher_papers_state],
+        )
+
+        send_to_citations_btn.click(
+            explore_researcher_citations,
+            inputs=[
+                researcher_select,
+                citation_ui["direction"],
+                citation_ui["depth"],
+                seed_paper_select,
+                researcher_papers_state,
+            ],
+            outputs=[
+                citation_ui["paper_input"],
+                citation_ui["summary_output"],
+                citation_ui["citing_output"],
+                citation_ui["cited_output"],
+                citation_ui["connected_output"],
+                citation_ui["related_output"],
+                citation_ui["network_plot"],
             ],
         )
 
@@ -1534,7 +1833,14 @@ def create_app(agent=None):
         )
         analyze_btn.click(
             analyze_data,
-            inputs=[data_input, analysis_type, plot_type, column_select, group_by_col, custom_query],
+            inputs=[
+                data_input,
+                analysis_type,
+                plot_type,
+                column_select,
+                group_by_col,
+                custom_query,
+            ],
             outputs=[analysis_output, analysis_plot],
         )
         download_plot_btn.click(

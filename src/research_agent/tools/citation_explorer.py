@@ -14,6 +14,8 @@ from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
 from dataclasses import dataclass, field
 import logging
 
+import httpx
+
 from research_agent.tools.academic_search import AcademicSearchTools, retry_with_backoff
 
 if TYPE_CHECKING:
@@ -91,6 +93,7 @@ class CitationExplorer:
             academic_search: AcademicSearchTools instance
         """
         self.search = academic_search
+        self.rate_limited = False
 
     async def get_citations(
         self, paper_id: str, direction: str = "both", limit: int = 20
@@ -106,6 +109,10 @@ class CitationExplorer:
         Returns:
             CitationNetwork with citation relationships
         """
+        resolved_id = await self._resolve_to_s2_id(paper_id)
+        if resolved_id:
+            paper_id = resolved_id
+
         # Get seed paper details
         seed_paper = await self._get_paper_details(paper_id)
 
@@ -400,7 +407,9 @@ class CitationExplorer:
             nodes.append(
                 {
                     "id": node_id,
-                    "label": paper.title[:40] + "..." if len(paper.title) > 40 else paper.title,
+                    "label": paper.title[:40] + "..."
+                    if len(paper.title) > 40
+                    else paper.title,
                     "type": "author_paper",
                     "year": paper.year,
                     "citation_count": paper.citation_count,
@@ -413,7 +422,9 @@ class CitationExplorer:
             nodes.append(
                 {
                     "id": citing_id,
-                    "label": paper.title[:30] + "..." if len(paper.title) > 30 else paper.title,
+                    "label": paper.title[:30] + "..."
+                    if len(paper.title) > 30
+                    else paper.title,
                     "type": "citing",
                     "year": paper.year,
                     "citation_count": paper.citation_count,
@@ -429,7 +440,9 @@ class CitationExplorer:
             nodes.append(
                 {
                     "id": cited_id,
-                    "label": paper.title[:30] + "..." if len(paper.title) > 30 else paper.title,
+                    "label": paper.title[:30] + "..."
+                    if len(paper.title) > 30
+                    else paper.title,
                     "type": "cited",
                     "year": paper.year,
                     "citation_count": paper.citation_count,
@@ -468,7 +481,7 @@ class CitationExplorer:
                 ),
                 max_retries=3,
                 base_delay=2.0,
-                retry_on=(429, 503, 504)
+                retry_on=(429, 503, 504),
             )
             response.raise_for_status()
             s2_data = response.json()
@@ -502,6 +515,10 @@ class CitationExplorer:
     ) -> List[CitationPaper]:
         """Get papers that cite the given paper."""
         try:
+            resolved_id = await self._resolve_to_s2_id(paper_id)
+            if resolved_id:
+                paper_id = resolved_id
+
             # Wait for rate limit if needed
             await self.search._s2_rate_limiter.wait_if_needed()
 
@@ -516,13 +533,16 @@ class CitationExplorer:
                 ),
                 max_retries=3,
                 base_delay=2.0,
-                retry_on=(429, 503, 504)
+                retry_on=(429, 503, 504),
             )
             response.raise_for_status()
-            data = response.json()
+            data = response.json() or {}
 
             citing_papers = []
-            for citation_data in data.get("data", []):
+            items = data.get("data") or []
+            if not isinstance(items, list):
+                items = []
+            for citation_data in items:
                 citing_paper = citation_data.get("citingPaper", {})
                 if citing_paper and citing_paper.get("paperId"):
                     paper = CitationPaper(
@@ -538,6 +558,11 @@ class CitationExplorer:
                     citing_papers.append(paper)
 
             return citing_papers
+        except httpx.HTTPStatusError as e:
+            if e.response is not None and e.response.status_code == 429:
+                self.rate_limited = True
+            logger.warning(f"Error getting citing papers for {paper_id}: {e}")
+            return []
         except Exception as e:
             logger.warning(f"Error getting citing papers for {paper_id}: {e}")
             return []
@@ -545,6 +570,10 @@ class CitationExplorer:
     async def _get_cited_papers(self, paper_id: str, limit: int) -> List[CitationPaper]:
         """Get papers cited by the given paper."""
         try:
+            resolved_id = await self._resolve_to_s2_id(paper_id)
+            if resolved_id:
+                paper_id = resolved_id
+
             # Wait for rate limit if needed
             await self.search._s2_rate_limiter.wait_if_needed()
 
@@ -559,13 +588,16 @@ class CitationExplorer:
                 ),
                 max_retries=3,
                 base_delay=2.0,
-                retry_on=(429, 503, 504)
+                retry_on=(429, 503, 504),
             )
             response.raise_for_status()
-            data = response.json()
+            data = response.json() or {}
 
             cited_papers = []
-            for ref_data in data.get("data", []):
+            items = data.get("data") or []
+            if not isinstance(items, list):
+                items = []
+            for ref_data in items:
                 cited_paper = ref_data.get("citedPaper", {})
                 if cited_paper and cited_paper.get("paperId"):
                     paper = CitationPaper(
@@ -581,6 +613,50 @@ class CitationExplorer:
                     cited_papers.append(paper)
 
             return cited_papers
+        except httpx.HTTPStatusError as e:
+            if e.response is not None and e.response.status_code == 429:
+                self.rate_limited = True
+            logger.warning(f"Error getting cited papers for {paper_id}: {e}")
+            return []
         except Exception as e:
             logger.warning(f"Error getting cited papers for {paper_id}: {e}")
             return []
+
+    def _normalize_openalex_id(self, paper_id: str) -> str:
+        if paper_id.startswith("https://openalex.org/"):
+            return paper_id.replace("https://openalex.org/", "")
+        return paper_id
+
+    def _is_openalex_id(self, paper_id: str) -> bool:
+        normalized = self._normalize_openalex_id(paper_id)
+        return normalized.startswith("W")
+
+    async def _resolve_to_s2_id(self, paper_id: str) -> Optional[str]:
+        """Resolve OpenAlex IDs to Semantic Scholar IDs when possible."""
+        if not paper_id:
+            return None
+
+        normalized = self._normalize_openalex_id(paper_id)
+        if not self._is_openalex_id(normalized):
+            return normalized
+
+        try:
+            paper = await self.search.get_paper_details(normalized, source="openalex")
+            if not paper:
+                return None
+
+            if paper.doi:
+                results = await self.search.search_semantic_scholar(paper.doi, limit=1)
+                if results:
+                    return results[0].id
+
+            if paper.title:
+                results = await self.search.search_semantic_scholar(
+                    paper.title, limit=3
+                )
+                if results:
+                    return results[0].id
+        except Exception as e:
+            logger.warning("Failed to resolve OpenAlex ID %s: %s", paper_id, e)
+
+        return None

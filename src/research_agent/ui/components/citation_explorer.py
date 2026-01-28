@@ -5,7 +5,11 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 from research_agent.tools.academic_search import AcademicSearchTools
-from research_agent.tools.citation_explorer import CitationExplorer, CitationNetwork, AuthorNetwork
+from research_agent.tools.citation_explorer import (
+    CitationExplorer,
+    CitationNetwork,
+    AuthorNetwork,
+)
 from research_agent.tools.researcher_registry import get_researcher_registry
 
 
@@ -29,7 +33,9 @@ def render_citation_explorer():
                     interactive=True,
                     scale=3,
                 )
-                refresh_researchers_btn = gr.Button("🔄 Refresh", scale=1, min_width=100)
+                refresh_researchers_btn = gr.Button(
+                    "🔄 Refresh", scale=1, min_width=100
+                )
 
             researcher_papers_table = gr.Dataframe(
                 headers=["Title", "Year", "Citations", "Paper ID"],
@@ -207,7 +213,9 @@ async def explore_citations(paper_input: str, direction: str, depth: int):
 
         # Check if it looks like a known paper ID format
         is_doi = paper_input.startswith("10.")
-        is_s2_id = len(paper_input) == 40 and paper_input.isalnum()  # S2 IDs are 40-char hex
+        is_s2_id = (
+            len(paper_input) == 40 and paper_input.isalnum()
+        )  # S2 IDs are 40-char hex
         is_openalex_id = paper_input.startswith("W") and paper_input[1:].isdigit()
 
         if is_doi or is_s2_id:
@@ -222,7 +230,14 @@ async def explore_citations(paper_input: str, direction: str, depth: int):
             else:
                 # OpenAlex IDs don't work directly with S2, search by title would be needed
                 await search_tools.close()
-                return f"OpenAlex ID '{paper_input}' not found in Semantic Scholar. Try searching by paper title instead.", None, None, None, None, None
+                return (
+                    f"OpenAlex ID '{paper_input}' not found in Semantic Scholar. Try searching by paper title instead.",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
         else:
             # Treat as title search
             papers = await search_tools.search_semantic_scholar(paper_input, limit=5)
@@ -230,14 +245,27 @@ async def explore_citations(paper_input: str, direction: str, depth: int):
                 # Try to find best match
                 paper_id = papers[0].id
                 # Show what we found
-                found_title = papers[0].title[:50] + "..." if len(papers[0].title) > 50 else papers[0].title
+                found_title = (
+                    papers[0].title[:50] + "..."
+                    if len(papers[0].title) > 50
+                    else papers[0].title
+                )
             else:
                 await search_tools.close()
-                return f"No papers found for: '{paper_input}'. Try a different search term.", None, None, None, None, None
+                return (
+                    f"No papers found for: '{paper_input}'. Try a different search term.",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
 
         network = await explorer.get_citations(paper_id, direction, depth)
 
         summary = f"""## 📊 Citation Network Summary
+
+**Mode:** Paper
 
 **Seed Paper:** {network.seed_paper.title}
 - **Year:** {network.seed_paper.year or "Unknown"}
@@ -248,6 +276,12 @@ async def explore_citations(paper_input: str, direction: str, depth: int):
 - 📚 Papers cited by this: {len(network.cited_papers)}
 - ⭐ Highly connected papers: {len(network.highly_connected)}
 """
+
+        if explorer.rate_limited:
+            summary = (
+                "> ⚠️ Semantic Scholar rate limit reached. Results may be incomplete. "
+                "Wait a few minutes and retry.\n\n" + summary
+            )
 
         citing_df = _papers_to_dataframe(network.citing_papers)
         cited_df = _papers_to_dataframe(network.cited_papers)
@@ -341,7 +375,7 @@ def _render_network_graph(network: CitationNetwork):
             node_colors.append("#4ECDC4")  # Teal for citing
             node_sizes.append(400)
         else:  # cited
-            node_colors.append("#45B7D1")  # Blue for cited
+            node_colors.append("#1F4E79")  # Dark blue for cited
             node_sizes.append(400)
 
     # Create figure
@@ -365,7 +399,7 @@ def _render_network_graph(network: CitationNetwork):
     legend_elements = [
         plt.scatter([], [], c="#FF6B6B", s=100, label="Seed Paper"),
         plt.scatter([], [], c="#4ECDC4", s=60, label="Papers Citing This"),
-        plt.scatter([], [], c="#45B7D1", s=60, label="Papers Cited By This"),
+        plt.scatter([], [], c="#1F4E79", s=60, label="Papers Cited By This"),
     ]
     ax.legend(handles=legend_elements, loc="upper left", fontsize=9)
 
@@ -424,12 +458,14 @@ def on_researcher_selected(researcher_name: str):
     # Format papers for dataframe
     data = []
     for paper in profile.top_papers:
-        data.append([
-            paper.title or "Unknown",
-            paper.year or "Unknown",
-            paper.citation_count or 0,
-            paper.paper_id,
-        ])
+        data.append(
+            [
+                paper.title or "Unknown",
+                paper.year or "Unknown",
+                paper.citation_count or 0,
+                paper.paper_id,
+            ]
+        )
 
     return data
 
@@ -437,6 +473,7 @@ def on_researcher_selected(researcher_name: str):
 async def explore_researcher_network(researcher_name: str, depth: int):
     """Explore citation network for a researcher."""
     import logging
+
     logger = logging.getLogger(__name__)
 
     if not researcher_name:
@@ -446,13 +483,29 @@ async def explore_researcher_network(researcher_name: str, depth: int):
     profile = registry.get(researcher_name)
 
     if not profile:
-        return f"Researcher '{researcher_name}' not found in registry.", None, None, None, None, None
+        return (
+            f"Researcher '{researcher_name}' not found in registry.",
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
     if not profile.top_papers:
-        return f"No papers found for {researcher_name}. Go back to Researcher Lookup and enable 'Fetch Papers' checkbox, then look them up again.", None, None, None, None, None
+        return (
+            f"No papers found for {researcher_name}. Go back to Researcher Lookup and enable 'Fetch Papers' checkbox, then look them up again.",
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
     try:
-        logger.info(f"Exploring network for {researcher_name} with {len(profile.top_papers)} papers")
+        logger.info(
+            f"Exploring network for {researcher_name} with {len(profile.top_papers)} papers"
+        )
         search_tools = AcademicSearchTools()
         explorer = CitationExplorer(search_tools)
 
@@ -463,7 +516,9 @@ async def explore_researcher_network(researcher_name: str, depth: int):
             citations_per_paper=min(depth // 2, 10),  # Cap at 10 for speed
         )
 
-        logger.info(f"Got network: {len(network.papers_citing_author)} citing, {len(network.papers_cited_by_author)} cited")
+        logger.info(
+            f"Got network: {len(network.papers_citing_author)} citing, {len(network.papers_cited_by_author)} cited"
+        )
 
         # Build summary
         summary = f"""## 👤 {network.author_name}'s Citation Network
@@ -499,6 +554,7 @@ async def explore_researcher_network(researcher_name: str, depth: int):
 
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         error_msg = f"Error exploring researcher network: {str(e)}"
         return error_msg, None, None, None, None, None
@@ -538,9 +594,12 @@ def _render_author_network_graph(network: AuthorNetwork):
     if len(G.nodes()) <= 1:
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.text(
-            0.5, 0.5,
+            0.5,
+            0.5,
             f"No citation data found for {network.author_name}",
-            ha="center", va="center", fontsize=14,
+            ha="center",
+            va="center",
+            fontsize=14,
         )
         ax.axis("off")
         return fig
@@ -582,13 +641,17 @@ def _render_author_network_graph(network: AuthorNetwork):
 
     # Legend
     legend_elements = [
-        plt.scatter([], [], c="#FF6B6B", s=100, label=f"{network.author_name}'s Papers"),
+        plt.scatter(
+            [], [], c="#FF6B6B", s=100, label=f"{network.author_name}'s Papers"
+        ),
         plt.scatter([], [], c="#4ECDC4", s=60, label="Papers Citing Their Work"),
         plt.scatter([], [], c="#45B7D1", s=60, label="Papers They Cite"),
     ]
     ax.legend(handles=legend_elements, loc="upper left", fontsize=9)
 
-    ax.set_title(f"Citation Network for {network.author_name}", fontsize=14, fontweight="bold")
+    ax.set_title(
+        f"Citation Network for {network.author_name}", fontsize=14, fontweight="bold"
+    )
     ax.axis("off")
     plt.tight_layout()
 
