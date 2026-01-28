@@ -43,6 +43,9 @@ class ResearchState(TypedDict):
     candidates_for_ingestion: List[Dict]
     final_answer: str
     error: Optional[str]
+    # Context from UI selection
+    current_researcher: Optional[str]
+    current_paper_id: Optional[str]
 
 
 @dataclass
@@ -502,6 +505,10 @@ Respond with ONLY the category name, nothing else."""
         query = state.get("current_query", "")
         local_results = []
 
+        # Extract context for boosting
+        current_researcher = state.get("current_researcher")
+        current_paper_id = state.get("current_paper_id")
+
         if not self.vector_store or not self.embedder:
             logger.warning(
                 "Vector store or embedder not configured, skipping local search"
@@ -533,12 +540,19 @@ Respond with ONLY the category name, nothing else."""
                     ]
                 }
 
+            # If we have a current paper, get it first for context
+            context_paper = None
+            if current_paper_id:
+                context_paper = self.vector_store.get_paper(current_paper_id)
+                if context_paper:
+                    logger.info(f"Using paper context: {context_paper.get('metadata', {}).get('title', 'Unknown')[:50]}")
+
             # Search all collections: papers, notes, and web_sources
             # Papers get year filter, others don't
             paper_results = self.vector_store.search(
                 query_embedding=query_embedding,
                 collection="papers",
-                n_results=self.config.max_local_results,
+                n_results=self.config.max_local_results * 2,  # Get more for re-ranking
                 filter_dict=filter_dict,
                 query_text=query,
             )
@@ -644,16 +658,55 @@ Respond with ONLY the category name, nothing else."""
                     }
                 )
 
+            # Apply context-based boosting
+            if current_researcher or current_paper_id:
+                boost_amount = 0.15  # Boost by 15% for context matches
+
+                for result in local_results:
+                    # Boost papers by the current researcher
+                    if current_researcher:
+                        authors = result.get("authors", "").lower()
+                        researcher_lower = current_researcher.lower()
+                        # Check if researcher name appears in authors
+                        if researcher_lower in authors:
+                            result["relevance_score"] = min(1.0, result["relevance_score"] + boost_amount)
+                            result["context_match"] = "researcher"
+                            logger.debug(f"Boosted paper by {current_researcher}: {result.get('title', '')[:40]}")
+
+                    # Boost papers related to the current paper
+                    if current_paper_id and context_paper:
+                        paper_id = result.get("paper_id", "")
+                        # Same paper gets highest boost
+                        if paper_id == current_paper_id:
+                            result["relevance_score"] = min(1.0, result["relevance_score"] + boost_amount * 2)
+                            result["context_match"] = "selected_paper"
+                        # Papers with similar authors get a boost
+                        elif context_paper.get("metadata", {}).get("authors"):
+                            context_authors = context_paper["metadata"]["authors"].lower()
+                            result_authors = result.get("authors", "").lower()
+                            # Check for author overlap
+                            if any(author.strip() in result_authors for author in context_authors.split(",") if len(author.strip()) > 3):
+                                result["relevance_score"] = min(1.0, result["relevance_score"] + boost_amount * 0.5)
+                                result["context_match"] = "related_author"
+
             # Sort all results by relevance score
             local_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+
+            # Limit to configured max results after boosting/sorting
+            local_results = local_results[:self.config.max_local_results]
 
             # Log breakdown
             paper_count = len(paper_results.get("documents", []))
             notes_count = len(notes_results.get("documents", []))
             web_count = len(web_results.get("documents", []))
+            context_info = ""
+            if current_researcher:
+                context_info += f", context_researcher: {current_researcher}"
+            if current_paper_id:
+                context_info += f", context_paper: {current_paper_id[:15]}..."
             logger.info(
                 f"Found {len(local_results)} local results "
-                f"(papers: {paper_count}, notes: {notes_count}, web: {web_count})"
+                f"(papers: {paper_count}, notes: {notes_count}, web: {web_count}{context_info})"
             )
 
             # Decide if we need external search
@@ -801,6 +854,8 @@ Respond with ONLY the category name, nothing else."""
         query_type = state.get("query_type", "general")
         local_results = state.get("local_results", [])
         external_results = state.get("external_results", [])
+        current_researcher = state.get("current_researcher")
+        current_paper_id = state.get("current_paper_id")
 
         # Combine all results
         all_results = local_results + external_results
@@ -811,8 +866,12 @@ Respond with ONLY the category name, nothing else."""
                 "final_answer": "I couldn't find relevant information and no LLM is available for generation.",
             }
 
-        # Build synthesis prompt
-        prompt = self._build_synthesis_prompt(query, query_type, all_results)
+        # Build synthesis prompt with context
+        prompt = self._build_synthesis_prompt(
+            query, query_type, all_results,
+            current_researcher=current_researcher,
+            current_paper_id=current_paper_id,
+        )
 
         # Generate response
         try:
@@ -831,7 +890,12 @@ Respond with ONLY the category name, nothing else."""
         return {**state, "final_answer": answer}
 
     def _build_synthesis_prompt(
-        self, query: str, query_type: str, results: List[Dict]
+        self,
+        query: str,
+        query_type: str,
+        results: List[Dict],
+        current_researcher: Optional[str] = None,
+        current_paper_id: Optional[str] = None,
     ) -> str:
         """Build a prompt for synthesizing results based on query type."""
 
@@ -844,6 +908,25 @@ Respond with ONLY the category name, nothing else."""
             "openalex": "OpenAlex",
             "web": "Web Search",
         }
+
+        # Build context section if we have selection context
+        context_section = ""
+        if current_researcher or current_paper_id:
+            context_parts = []
+            if current_researcher:
+                context_parts.append(f"The user is currently focused on researcher: {current_researcher}")
+            if current_paper_id:
+                # Find the paper title from results if possible
+                paper_title = None
+                for r in results:
+                    if r.get("paper_id") == current_paper_id:
+                        paper_title = r.get("title")
+                        break
+                if paper_title:
+                    context_parts.append(f"The user is currently focused on the paper: \"{paper_title}\"")
+                else:
+                    context_parts.append(f"The user has selected a specific paper (ID: {current_paper_id[:20]}...)")
+            context_section = "\n\nContext: " + ". ".join(context_parts) + ". Prioritize information relevant to this context."
 
         # Format sources
         sources_text = ""
@@ -898,7 +981,7 @@ Cite sources using [1], [2], etc."""
             instruction = """You are a helpful research assistant. Answer the question based on the available sources.
 Be informative and cite sources where relevant using [1], [2], etc."""
 
-        prompt = f"""{instruction}
+        prompt = f"""{instruction}{context_section}
 
 Question: {query}
 
@@ -985,9 +1068,22 @@ Response:"""
         return {**state, "final_answer": final_answer}
 
     async def _run_async(
-        self, user_query: str, search_filters: Optional[Dict[str, Any]] = None
+        self,
+        user_query: str,
+        search_filters: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Internal async implementation of run using LangGraph workflow."""
+        """Internal async implementation of run using LangGraph workflow.
+
+        Args:
+            user_query: The user's question
+            search_filters: Optional filters (year_from, year_to, min_citations)
+            context: Optional context from UI (researcher, paper_id)
+        """
+        # Extract context
+        context = context or {}
+        current_researcher = context.get("researcher")
+        current_paper_id = context.get("paper_id")
 
         # Apply search filters to config
         if search_filters:
@@ -1019,6 +1115,8 @@ Response:"""
             "candidates_for_ingestion": [],
             "final_answer": "",
             "error": None,
+            "current_researcher": current_researcher,
+            "current_paper_id": current_paper_id,
         }
 
         result = {
@@ -1069,11 +1167,20 @@ Response:"""
         return result
 
     def run(
-        self, user_query: str, search_filters: Optional[Dict[str, Any]] = None
+        self,
+        user_query: str,
+        search_filters: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Run the research agent (synchronous wrapper)."""
+        """Run the research agent (synchronous wrapper).
+
+        Args:
+            user_query: The user's question
+            search_filters: Optional filters (year_from, year_to, min_citations)
+            context: Optional context from UI (researcher, paper_id)
+        """
         try:
-            return asyncio.run(self._run_async(user_query, search_filters))
+            return asyncio.run(self._run_async(user_query, search_filters, context))
         except RuntimeError as e:
             # Handle case where event loop already exists
             loop = asyncio.get_event_loop()
@@ -1083,11 +1190,11 @@ Response:"""
 
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(
-                        asyncio.run, self._run_async(user_query, search_filters)
+                        asyncio.run, self._run_async(user_query, search_filters, context)
                     )
                     return future.result()
             else:
-                return asyncio.run(self._run_async(user_query, search_filters))
+                return asyncio.run(self._run_async(user_query, search_filters, context))
 
     async def ingest_paper(self, paper_data: Dict) -> bool:
         """Ingest a new paper into the vector store."""

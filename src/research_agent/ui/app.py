@@ -553,8 +553,8 @@ def create_app(agent=None):
             # Return: dropdown choices, dropdown value, current model display
             return gr.update(choices=models, value=current), current
 
-        def respond(message, history, year_from, year_to, min_citations):
-            """Handle chat messages."""
+        def respond(message, history, year_from, year_to, min_citations, context_state):
+            """Handle chat messages with optional context from selected researcher/paper."""
             if agent is None:
                 # Demo mode
                 response = f"[Demo mode] You asked: {message}\n\nThe agent is not loaded. Run with a real agent to get responses."
@@ -566,8 +566,32 @@ def create_app(agent=None):
                         "year_to": int(year_to) if year_to else None,
                         "min_citations": int(min_citations) if min_citations else None,
                     }
-                    result = agent.run(message, search_filters=filters)
+
+                    # Extract context from state
+                    context = context_state or {}
+                    current_researcher = context.get("researcher")
+                    current_paper_id = context.get("paper_id")
+
+                    # Pass context to agent
+                    result = agent.run(
+                        message,
+                        search_filters=filters,
+                        context={
+                            "researcher": current_researcher,
+                            "paper_id": current_paper_id,
+                        }
+                    )
                     response = result.get("answer", "No response generated")
+
+                    # Add context indicator if context was used
+                    if current_researcher or current_paper_id:
+                        context_info = []
+                        if current_researcher:
+                            context_info.append(f"researcher: {current_researcher}")
+                        if current_paper_id:
+                            context_info.append(f"paper: {current_paper_id[:20]}...")
+                        response = f"*[Context: {', '.join(context_info)}]*\n\n{response}"
+
                 except Exception as e:
                     response = f"Error: {str(e)}"
 
@@ -2195,12 +2219,12 @@ def create_app(agent=None):
         # Wire up events
         msg.submit(
             respond,
-            [msg, chatbot, year_from_chat, year_to_chat, min_citations_chat],
+            [msg, chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
             [msg, chatbot],
         )
         submit.click(
             respond,
-            [msg, chatbot, year_from_chat, year_to_chat, min_citations_chat],
+            [msg, chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
             [msg, chatbot],
         )
         clear.click(lambda: [], outputs=[chatbot])
