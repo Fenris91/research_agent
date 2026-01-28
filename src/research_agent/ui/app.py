@@ -197,6 +197,64 @@ def create_app(agent=None):
                     placeholder="Upload PDFs to add to your knowledge base",
                 )
 
+                gr.Markdown("### Add Research Note")
+                gr.Markdown("*Save your own notes, annotations, or summaries to include in chat searches.*")
+
+                with gr.Row():
+                    note_title = gr.Textbox(
+                        label="Title",
+                        placeholder="e.g., Notes on spatial theory",
+                        scale=2,
+                    )
+                    note_tags = gr.Textbox(
+                        label="Tags (comma-separated)",
+                        placeholder="e.g., spatial, theory, urban",
+                        scale=2,
+                    )
+
+                note_content = gr.Textbox(
+                    label="Note Content",
+                    placeholder="Write your research notes here...",
+                    lines=4,
+                )
+
+                with gr.Row():
+                    add_note_btn = gr.Button("Add Note", variant="primary")
+                    note_status = gr.Textbox(
+                        label="Status",
+                        interactive=False,
+                        scale=3,
+                    )
+
+                gr.Markdown("### Add Web Source")
+                gr.Markdown("*Save web content, reports, or grey literature to include in chat searches.*")
+
+                with gr.Row():
+                    web_url = gr.Textbox(
+                        label="URL (optional)",
+                        placeholder="https://example.com/report.html",
+                        scale=2,
+                    )
+                    web_title = gr.Textbox(
+                        label="Title",
+                        placeholder="e.g., City Planning Report 2024",
+                        scale=2,
+                    )
+
+                web_content = gr.Textbox(
+                    label="Content",
+                    placeholder="Paste the web content or report text here...",
+                    lines=4,
+                )
+
+                with gr.Row():
+                    add_web_btn = gr.Button("Add Web Source", variant="primary")
+                    web_status = gr.Textbox(
+                        label="Status",
+                        interactive=False,
+                        scale=3,
+                    )
+
                 gr.Markdown("### Browse Papers")
 
                 with gr.Row():
@@ -847,6 +905,110 @@ def create_app(agent=None):
                     status_parts.append(f"(+{len(errors) - 3} more)")
 
             return ". ".join(status_parts), stats, table
+
+        def add_research_note(
+            title, content, tags, year_from=None, year_to=None, min_citations=0, context_state=None
+        ):
+            """Add a research note to the knowledge base."""
+            if not content or not content.strip():
+                return "Please enter note content.", None, None
+
+            store, embedder_model, _ = _get_kb_resources()
+
+            # Generate note ID from title or timestamp
+            import hashlib
+            from datetime import datetime
+
+            note_id = hashlib.md5(
+                f"{title or 'note'}_{datetime.now().isoformat()}".encode()
+            ).hexdigest()[:12]
+
+            try:
+                # Generate embedding for the note
+                embedding = embedder_model.embed_query(content)
+                if hasattr(embedding, "tolist"):
+                    embedding = embedding.tolist()
+
+                # Prepare metadata
+                metadata = {
+                    "title": title or "Untitled Note",
+                    "tags": tags or "",
+                }
+
+                # Add to vector store
+                store.add_note(note_id, content, embedding, metadata)
+
+                stats, table = refresh_stats_and_table(
+                    year_from, year_to, min_citations, context_state
+                )
+
+                return f"✓ Added note: {title or 'Untitled'}", stats, table
+
+            except Exception as e:
+                return f"Error adding note: {e}", None, None
+
+        def add_web_source(
+            url, title, content, year_from=None, year_to=None, min_citations=0, context_state=None
+        ):
+            """Add a web source to the knowledge base."""
+            if not content or not content.strip():
+                return "Please enter content for the web source.", None, None
+
+            store, embedder_model, _ = _get_kb_resources()
+
+            # Generate source ID from URL or title
+            import hashlib
+            from datetime import datetime
+
+            source_base = url or title or "web"
+            source_id = hashlib.md5(
+                f"{source_base}_{datetime.now().isoformat()}".encode()
+            ).hexdigest()[:12]
+
+            try:
+                # Chunk the content if it's long
+                chunk_size = 512
+                chunks = []
+                words = content.split()
+                current_chunk = []
+                current_length = 0
+
+                for word in words:
+                    current_chunk.append(word)
+                    current_length += len(word) + 1
+                    if current_length >= chunk_size:
+                        chunks.append(" ".join(current_chunk))
+                        current_chunk = []
+                        current_length = 0
+
+                if current_chunk:
+                    chunks.append(" ".join(current_chunk))
+
+                if not chunks:
+                    chunks = [content]
+
+                # Generate embeddings
+                embeddings = embedder_model.embed_documents(
+                    chunks, batch_size=32, show_progress=False
+                )
+
+                # Prepare metadata
+                metadata = {
+                    "title": title or "Web Source",
+                    "url": url or "",
+                }
+
+                # Add to vector store
+                store.add_web_source(source_id, chunks, embeddings, metadata)
+
+                stats, table = refresh_stats_and_table(
+                    year_from, year_to, min_citations, context_state
+                )
+
+                return f"✓ Added web source: {title or url or 'Untitled'} ({len(chunks)} chunks)", stats, table
+
+            except Exception as e:
+                return f"Error adding web source: {e}", None, None
 
         def delete_paper(
             paper_id, year_from=None, year_to=None, min_citations=0, context_state=None
@@ -2258,6 +2420,32 @@ def create_app(agent=None):
                 context_state,
             ],
             outputs=[upload_status, kb_stats, papers_table],
+        )
+        add_note_btn.click(
+            add_research_note,
+            inputs=[
+                note_title,
+                note_content,
+                note_tags,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+                context_state,
+            ],
+            outputs=[note_status, kb_stats, papers_table],
+        )
+        add_web_btn.click(
+            add_web_source,
+            inputs=[
+                web_url,
+                web_title,
+                web_content,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+                context_state,
+            ],
+            outputs=[web_status, kb_stats, papers_table],
         )
         delete_paper_btn.click(
             delete_paper,
