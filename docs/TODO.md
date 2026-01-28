@@ -2,8 +2,8 @@
 
 Cross-reference task list for Claude, OpenCode, and VSCode.
 
-**Last Updated**: January 27, 2026
-**Last Verified**: January 27, 2026
+**Last Updated**: January 28, 2026
+**Last Verified**: January 28, 2026
 
 ---
 
@@ -36,6 +36,68 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 
 ## Not Started
 
+### High Priority - Web Sources & LLM Integrations
+
+- [ ] **Auto-Save Web Results from Researcher Lookup**
+  - When researcher lookup fetches web results (DuckDuckGo), offer to save to `web_sources`
+  - Add "Save to KB" button next to each web result in the Researcher Lookup tab
+  - Optionally auto-save highly relevant results (configurable threshold)
+  - Benefits: Web context about researchers becomes searchable in chat
+
+- [ ] **Auto-Save Citation Abstracts**
+  - Citation Explorer fetches paper abstracts but doesn't persist them
+  - Add option to auto-ingest cited/citing papers with abstracts to KB
+  - Store relationship metadata (cites/cited_by) in paper metadata
+  - Benefits: Build knowledge graph automatically while exploring citations
+
+- [ ] **Additional Cloud LLM Providers**
+  - [ ] **Grok (xAI)** - OpenAI-compatible API at `https://api.x.ai/v1`
+    - Env var: `XAI_API_KEY`
+    - Models: grok-beta, grok-2
+    - Good for: Real-time knowledge, reasoning
+  - [ ] **Google Gemini** - via google-generativeai SDK
+    - Env var: `GOOGLE_API_KEY`
+    - Models: gemini-pro, gemini-1.5-flash (free tier!)
+    - Good for: Long context (1M tokens), multimodal
+  - [ ] **Perplexity** - OpenAI-compatible with built-in web search
+    - Env var: `PERPLEXITY_API_KEY`
+    - Models: llama-3.1-sonar-small-128k-online
+    - Good for: Research queries with live web citations
+  - [ ] **Mistral** - OpenAI-compatible
+    - Env var: `MISTRAL_API_KEY`
+    - Models: mistral-small, mistral-medium
+    - Good for: Fast, cheap, good quality
+
+- [ ] **Multi-Model Pipeline**
+  - Use fast/cheap model for query classification (Groq/llama-3.1-8b)
+  - Use capable model for synthesis (GPT-4o/Claude)
+  - Configurable in config.yaml per task type
+  - Benefits: Cost optimization, speed for simple tasks
+
+- [ ] **Perplexity Integration for Research Queries**
+  - Perplexity's API returns answers with web citations
+  - Could replace/augment DuckDuckGo for web search
+  - Auto-extract and save cited sources to web_sources
+  - Benefits: Higher quality web research with proper citations
+
+### Medium Priority
+
+- [ ] **Notes Browser in KB Tab**
+  - List and manage saved research notes
+  - Edit/delete notes
+  - Filter by tags
+
+- [ ] **Web Sources Browser in KB Tab**
+  - List and manage saved web sources
+  - Show URL, title, date added
+  - Delete web sources
+
+- [ ] **Researcher Profile Persistence**
+  - Currently ResearcherRegistry is session-scoped
+  - Persist researcher profiles to SQLite (like citations.sqlite)
+  - Link researchers to their papers in KB
+  - Benefits: Build researcher knowledge base over time
+
 ### Low Priority
 
 - [ ] **Fine-tuning** - Domain-specific model training
@@ -45,6 +107,26 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 ---
 
 ## Completed
+
+### January 28, 2026
+- [x] **Cloud LLM Auto-Detection** - No local model required:
+  - Auto-detect available API keys (OpenAI, Groq, OpenRouter)
+  - Groq free tier recommended for getting started
+  - Falls back to Ollama → HuggingFace if no cloud keys
+  - `provider: "auto"` as default in config.yaml
+- [x] **Multi-Collection Search** - Chat searches all KB collections:
+  - Papers, research notes, and web sources searched together
+  - Results merged and sorted by relevance
+  - Source type shown in responses (Knowledge Base, Research Note, Web Source)
+- [x] **Context-Aware Chat** - Use current selection:
+  - Pass researcher/paper context from KB to chat
+  - Boost papers by selected researcher (15% relevance boost)
+  - Boost papers by same authors as selected paper
+  - Context shown in LLM prompt for better synthesis
+- [x] **Notes & Web Sources UI** - New KB tab sections:
+  - "Add Research Note" - title, tags, content
+  - "Add Web Source" - URL, title, content
+  - Both now searchable in chat
 
 ### January 27, 2026
 - [x] **API Response Caching** - Reduces API calls and rate limit issues:
@@ -147,3 +229,12 @@ Cross-reference task list for Claude, OpenCode, and VSCode.
 - [ ] Multi-user support
 - [ ] API endpoint for programmatic access
 - [ ] Chrome extension for paper capture
+- [ ] **Specialized LLMs for Research Tasks**:
+  - Grok for real-time/current events research
+  - Perplexity for web-grounded answers with citations
+  - Claude for long document analysis
+  - GPT-4o for multimodal (analyze figures in papers)
+- [ ] **Agent-to-Agent Communication**:
+  - Research agent could call other specialized agents
+  - E.g., "fact-check agent" using Perplexity
+  - "Citation analysis agent" for bibliometrics
