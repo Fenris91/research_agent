@@ -13,6 +13,7 @@ from research_agent.tools.citation_explorer import (
     AuthorNetwork,
 )
 from research_agent.tools.researcher_registry import get_researcher_registry
+from research_agent.db.citation_store import CitationPaperRecord, CitationStore
 
 
 def render_citation_explorer():
@@ -23,21 +24,22 @@ def render_citation_explorer():
             "Explore citation relationships for papers or researchers from your lookup history."
         )
 
-        # Researcher selection section
-        with gr.Accordion("👤 Explore by Researcher", open=True):
-            gr.Markdown(
-                "_Select a researcher from your lookup history to explore their citation network._"
-            )
-            with gr.Row():
-                researcher_dropdown = gr.Dropdown(
-                    choices=[],
-                    label="Select Researcher",
-                    interactive=True,
-                    scale=3,
+        with gr.Row():
+            with gr.Column(scale=1):
+                gr.Markdown("### 👤 Explore by Researcher")
+                gr.Markdown(
+                    "_Select a researcher from your lookup history to explore their citation network._"
                 )
-                refresh_researchers_btn = gr.Button(
-                    "🔄 Refresh", scale=1, min_width=100
-                )
+                with gr.Row():
+                    researcher_dropdown = gr.Dropdown(
+                        choices=[],
+                        label="Select Researcher",
+                        interactive=True,
+                        scale=3,
+                    )
+                    refresh_researchers_btn = gr.Button(
+                        "🔄 Refresh", scale=1, min_width=100
+                    )
 
             researcher_papers_table = gr.Dataframe(
                 headers=["Title", "Year", "Citations", "Paper ID"],
@@ -49,23 +51,14 @@ def render_citation_explorer():
                 visible=True,
             )
 
-            explore_researcher_btn = gr.Button(
-                "🔍 Explore Researcher's Citation Network",
-                variant="primary",
-            )
-
-        gr.Markdown("---")
-        gr.Markdown("### Or explore a specific paper:")
-
-        with gr.Row():
-            with gr.Column(scale=2):
+            with gr.Column(scale=1):
+                gr.Markdown("### 📄 Explore a Specific Paper")
                 paper_input = gr.Textbox(
                     label="Paper ID or Title",
                     placeholder="Enter Semantic Scholar paper ID or search by title",
                     value="",
                 )
 
-            with gr.Column(scale=1):
                 direction = gr.Radio(
                     choices=["both", "citing", "cited"],
                     value="both",
@@ -82,9 +75,16 @@ def render_citation_explorer():
                     info="Maximum papers to fetch per direction",
                 )
 
-        with gr.Row():
-            search_btn = gr.Button("🔍 Explore Citations", variant="primary", size="lg")
-            clear_btn = gr.Button("🗑️ Clear", variant="secondary")
+                with gr.Row():
+                    search_btn = gr.Button(
+                        "🔍 Explore Citations", variant="primary", size="lg"
+                    )
+                    clear_btn = gr.Button("🗑️ Clear", variant="secondary")
+
+                explore_researcher_btn = gr.Button(
+                    "🔍 Explore Researcher's Citation Network",
+                    variant="primary",
+                )
 
         # Results sections
         with gr.Accordion("📊 Citation Network Summary", open=True):
@@ -333,6 +333,48 @@ async def explore_citations(paper_input: str, direction: str, depth: int):
         related_papers = await explorer.suggest_related(paper_id, limit=depth)
         related_df = _papers_to_dataframe(related_papers)
 
+        # Persist citation network
+        try:
+            store = CitationStore()
+            store.save_papers(
+                [
+                    CitationPaperRecord(
+                        paper_id=network.seed_paper.paper_id,
+                        title=network.seed_paper.title,
+                        year=network.seed_paper.year,
+                        citations=network.seed_paper.citation_count,
+                        source=network.seed_paper.source,
+                        doi=network.seed_paper.doi,
+                    )
+                ]
+            )
+            store.save_papers(
+                [
+                    CitationPaperRecord(
+                        paper_id=p.paper_id,
+                        title=p.title,
+                        year=p.year,
+                        citations=p.citation_count,
+                        source=p.source,
+                        doi=p.doi,
+                    )
+                    for p in (
+                        network.citing_papers + network.cited_papers + related_papers
+                    )
+                ]
+            )
+            edges = []
+            seed_id = network.seed_paper.paper_id
+            for p in network.citing_papers:
+                edges.append((p.paper_id, seed_id, "cites"))
+            for p in network.cited_papers:
+                edges.append((seed_id, p.paper_id, "cites"))
+            for p in related_papers:
+                edges.append((seed_id, p.paper_id, "related"))
+            store.save_edges(seed_id, edges)
+        except Exception:
+            pass
+
         # Generate network visualization
         network_fig = _render_network_graph(network)
 
@@ -419,6 +461,8 @@ async def save_selected_to_kb(table_data):
         return "Check one or more rows first."
 
     store, embedder = _get_kb_resources()
+    from research_agent.ui.kb_ingest import ingest_paper_to_kb
+
     search_tools = AcademicSearchTools()
 
     added = 0
@@ -458,39 +502,25 @@ async def save_selected_to_kb(table_data):
                 doi = None
                 source = "semantic_scholar"
 
-            parts = [title]
-            if abstract:
-                parts.append(f"Abstract: {abstract}")
-            if venue:
-                parts.append(f"Venue: {venue}")
-            if fields:
-                parts.append(f"Fields: {', '.join(fields)}")
-            if doi:
-                parts.append(f"DOI: {doi}")
-
-            content = "\n".join(parts).strip()
-            if not content:
-                skipped += 1
-                continue
-
-            embeddings = embedder.embed_documents(
-                [content], batch_size=1, show_progress=False
+            added_flag, _reason = ingest_paper_to_kb(
+                store=store,
+                embedder=embedder,
+                paper_id=paper_id,
+                title=title,
+                abstract=abstract,
+                venue=venue,
+                fields=fields,
+                doi=doi,
+                year=paper.year if paper else row[2],
+                citations=citations,
+                authors=authors,
+                source=source,
+                extra_metadata={"ingest_source": "citation_explorer"},
             )
-
-            metadata = {
-                "title": title,
-                "year": paper.year if paper else row[2],
-                "venue": venue,
-                "citations": citations,
-                "doi": doi,
-                "fields": fields,
-                "authors": authors,
-                "source": source,
-                "ingest_source": "citation_explorer",
-            }
-
-            store.add_paper(paper_id, [content], embeddings, metadata)
-            added += 1
+            if added_flag:
+                added += 1
+            else:
+                skipped += 1
         except Exception as e:
             errors.append(f"{paper_id}: {e}")
 
@@ -750,6 +780,42 @@ async def explore_researcher_network(researcher_name: str, depth: int):
 
         # Skip suggest_related for speed - it makes many additional API calls
         related_df = None
+
+        # Persist author network
+        try:
+            store = CitationStore()
+            seed_id = f"author:{researcher_name}"
+            store.save_papers(
+                [
+                    CitationPaperRecord(
+                        paper_id=p.paper_id,
+                        title=p.title,
+                        year=p.year,
+                        citations=p.citation_count,
+                        source=p.source,
+                        doi=p.doi,
+                    )
+                    for p in (
+                        network.author_papers
+                        + network.papers_citing_author
+                        + network.papers_cited_by_author
+                    )
+                ]
+            )
+            edges = []
+            for p in network.papers_citing_author:
+                if network.author_papers:
+                    edges.append(
+                        (p.paper_id, network.author_papers[0].paper_id, "cites")
+                    )
+            for p in network.papers_cited_by_author:
+                if network.author_papers:
+                    edges.append(
+                        (network.author_papers[0].paper_id, p.paper_id, "cites")
+                    )
+            store.save_edges(seed_id, edges)
+        except Exception:
+            pass
 
         # Generate network visualization
         network_fig = _render_author_network_graph(network)

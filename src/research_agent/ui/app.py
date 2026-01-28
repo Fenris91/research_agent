@@ -41,21 +41,35 @@ def create_app(agent=None):
         - Data analysis
         """)
 
-        with gr.Tab("Research Chat"):
-            chatbot = gr.Chatbot(
-                height=500, placeholder="Ask me about your research topic..."
-            )
+        context_state = gr.State({"researcher": None, "paper_id": None})
 
+        with gr.Accordion("Current Selection", open=False):
             with gr.Row():
-                msg = gr.Textbox(
-                    placeholder="What are the key theories in urban anthropology?",
-                    label="Your question",
-                    scale=4,
+                current_researcher = gr.Dropdown(
+                    choices=[],
+                    label="Current Researcher",
+                    interactive=True,
+                    value=None,
+                    allow_custom_value=True,
+                    scale=2,
                 )
-                submit = gr.Button("Send", variant="primary", scale=1)
-
-            with gr.Row():
-                clear = gr.Button("Clear Chat")
+                current_paper_id = gr.Textbox(
+                    label="Current Paper ID",
+                    interactive=True,
+                    placeholder="Select a paper to track context",
+                    scale=2,
+                )
+                refresh_context_btn = gr.Button("Refresh", scale=1)
+                analyze_current_researcher_btn = gr.Button(
+                    "Analyze Current Researcher",
+                    variant="secondary",
+                    scale=1,
+                )
+                analyze_current_paper_btn = gr.Button(
+                    "Analyze Current Paper",
+                    variant="secondary",
+                    scale=1,
+                )
 
             with gr.Accordion("Settings", open=False):
                 gr.Markdown("### LLM Model")
@@ -136,6 +150,22 @@ def create_app(agent=None):
                     placeholder="Using config defaults",
                 )
 
+        with gr.Tab("Research Chat"):
+            chatbot = gr.Chatbot(
+                height=500, placeholder="Ask me about your research topic..."
+            )
+
+            with gr.Row():
+                msg = gr.Textbox(
+                    placeholder="What are the key theories in urban anthropology?",
+                    label="Your question",
+                    scale=4,
+                )
+                submit = gr.Button("Send", variant="primary", scale=1)
+
+            with gr.Row():
+                clear = gr.Button("Clear Chat")
+
         with gr.Tabs() as main_tabs:
             with gr.Tab("Knowledge Base"):
                 gr.Markdown("## Your Research Library")
@@ -199,6 +229,13 @@ def create_app(agent=None):
                     headers=["Title", "Year", "Authors", "Added", "Paper ID"],
                     label="Papers in Knowledge Base",
                 )
+
+                with gr.Row():
+                    analyze_kb_btn = gr.Button(
+                        "Analyze KB in Data Analysis",
+                        variant="secondary",
+                        scale=1,
+                    )
 
                 with gr.Row():
                     delete_paper_id = gr.Textbox(
@@ -697,23 +734,44 @@ def create_app(agent=None):
                 )
             return table_data
 
-        def refresh_stats_and_table(year_from=None, year_to=None, min_citations=0):
+        def refresh_stats_and_table(
+            year_from=None, year_to=None, min_citations=0, context_state=None
+        ):
             """Refresh knowledge base statistics and paper list."""
             store, _, _ = _get_kb_resources()
             stats = store.get_stats()
-            papers = store.list_papers(limit=500)
+            papers = store.list_papers_detailed(limit=5000)
+
+            context = context_state or {}
+            researcher_filter = context.get("researcher")
+            paper_filter = context.get("paper_id")
+
+            filtered = papers
+            if paper_filter:
+                filtered = [p for p in filtered if p.get("paper_id") == paper_filter]
+            elif researcher_filter:
+                filtered = [
+                    p for p in filtered if p.get("researcher") == researcher_filter
+                ]
+
+            if filtered is not papers:
+                stats = dict(stats)
+                stats["filtered_papers"] = len(filtered)
+
             return stats, _format_papers_table(
-                papers,
+                filtered,
                 year_from=year_from if year_from and year_from > 1900 else None,
                 year_to=year_to if year_to and year_to < 2030 else None,
                 min_citations=min_citations or 0,
             )
 
-        def ingest_documents(files, year_from=None, year_to=None, min_citations=0):
+        def ingest_documents(
+            files, year_from=None, year_to=None, min_citations=0, context_state=None
+        ):
             """Process and add documents to the knowledge base."""
             if not files:
                 stats, table = refresh_stats_and_table(
-                    year_from, year_to, min_citations
+                    year_from, year_to, min_citations, context_state
                 )
                 return "No files selected.", stats, table
 
@@ -742,12 +800,19 @@ def create_app(agent=None):
                     embeddings = embedder_model.embed_documents(
                         chunk_texts, batch_size=32, show_progress=False
                     )
-                    store.add_paper(paper_id, chunk_texts, embeddings, doc.metadata)
+                    from research_agent.ui.kb_ingest import normalize_metadata
+
+                    metadata = normalize_metadata(
+                        doc.metadata, {"ingest_source": "upload"}
+                    )
+                    store.add_paper(paper_id, chunk_texts, embeddings, metadata)
                     added += 1
                 except Exception as e:
                     errors.append(f"{getattr(file_obj, 'name', file_obj)}: {e}")
 
-            stats, table = refresh_stats_and_table(year_from, year_to, min_citations)
+            stats, table = refresh_stats_and_table(
+                year_from, year_to, min_citations, context_state
+            )
 
             status_parts = [f"Added {added} document(s)"]
             if skipped:
@@ -759,11 +824,13 @@ def create_app(agent=None):
 
             return ". ".join(status_parts), stats, table
 
-        def delete_paper(paper_id, year_from=None, year_to=None, min_citations=0):
+        def delete_paper(
+            paper_id, year_from=None, year_to=None, min_citations=0, context_state=None
+        ):
             """Delete a paper from the knowledge base."""
             if not paper_id:
                 stats, table = refresh_stats_and_table(
-                    year_from, year_to, min_citations
+                    year_from, year_to, min_citations, context_state
                 )
                 return "Enter a paper ID to delete.", stats, table
 
@@ -774,15 +841,290 @@ def create_app(agent=None):
                 if deleted
                 else f"Paper not found: {paper_id}."
             )
-            stats, table = refresh_stats_and_table(year_from, year_to, min_citations)
+            stats, table = refresh_stats_and_table(
+                year_from, year_to, min_citations, context_state
+            )
             return status, stats, table
 
-        def reset_kb(year_from=None, year_to=None, min_citations=0):
+        def reset_kb(year_from=None, year_to=None, min_citations=0, context_state=None):
             """Reset the knowledge base."""
             store, _, _ = _get_kb_resources()
             store.reset()
-            stats, table = refresh_stats_and_table(year_from, year_to, min_citations)
+            stats, table = refresh_stats_and_table(
+                year_from, year_to, min_citations, context_state
+            )
             return "Knowledge base reset.", stats, table
+
+        def _get_researcher_choices():
+            from research_agent.tools.researcher_registry import get_researcher_registry
+
+            registry = get_researcher_registry()
+            researchers = registry.list_all()
+            return [r.name for r in researchers if r.name]
+
+        def refresh_context_choices(state):
+            """Refresh shared researcher dropdown choices."""
+            choices = _get_researcher_choices()
+            value = None
+            if state and state.get("researcher") in choices:
+                value = state.get("researcher")
+            elif choices:
+                value = choices[0]
+            new_state = dict(state or {})
+            new_state["researcher"] = value
+            return new_state, gr.update(choices=choices, value=value)
+
+        def sync_researcher_context(name: str, state):
+            """Update shared context when a researcher is selected."""
+            choices = _get_researcher_choices()
+            if name and name not in choices:
+                choices.insert(0, name)
+
+            new_state = dict(state or {})
+            new_state["researcher"] = name
+            update = gr.update(choices=choices, value=name)
+            return new_state, update, update, update
+
+        def sync_researcher_context_with_table(
+            name: str, state, year_from=None, year_to=None, min_citations=0
+        ):
+            new_state, current_update, select_update, citation_update = (
+                sync_researcher_context(name, state)
+            )
+            stats, table = refresh_stats_and_table(
+                year_from, year_to, min_citations, new_state
+            )
+            return (
+                new_state,
+                current_update,
+                select_update,
+                citation_update,
+                stats,
+                table,
+            )
+
+        def sync_paper_context(paper_id: str, state):
+            new_state = dict(state or {})
+            new_state["paper_id"] = paper_id
+            update = gr.update(value=paper_id)
+            return new_state, update, update
+
+        def sync_paper_context_with_table(
+            paper_id: str, state, year_from=None, year_to=None, min_citations=0
+        ):
+            new_state, current_update, citation_update = sync_paper_context(
+                paper_id, state
+            )
+            stats, table = refresh_stats_and_table(
+                year_from, year_to, min_citations, new_state
+            )
+            return (
+                new_state,
+                current_update,
+                citation_update,
+                stats,
+                table,
+            )
+
+        def load_kb_into_analysis(year_from=None, year_to=None, min_citations=0):
+            """Load KB papers into the data analysis tab."""
+            import pandas as pd
+
+            store, _, _ = _get_kb_resources()
+            papers = store.list_papers_detailed(limit=5000)
+            if not papers:
+                _analysis_df["df"] = None
+                _analysis_df["path"] = None
+                return (
+                    "No papers found in the knowledge base.",
+                    gr.update(choices=[], value=[]),
+                    gr.update(choices=[], value=None),
+                    gr.update(value="Data Analysis"),
+                )
+
+            df = pd.DataFrame(papers)
+
+            def _to_int(value):
+                try:
+                    return int(value)
+                except Exception:
+                    return None
+
+            if "year" in df.columns:
+                df["year"] = df["year"].apply(_to_int)
+
+            if "citations" in df.columns:
+                df["citations"] = df["citations"].apply(_to_int)
+
+            if year_from and year_from > 1900:
+                df = df[df["year"].isna() | (df["year"] >= year_from)]
+            if year_to and year_to < 2030:
+                df = df[df["year"].isna() | (df["year"] <= year_to)]
+            if min_citations:
+                df = df[df["citations"].isna() | (df["citations"] >= min_citations)]
+
+            if df.empty:
+                _analysis_df["df"] = None
+                _analysis_df["path"] = None
+                return (
+                    "No papers match the current filters.",
+                    gr.update(choices=[], value=[]),
+                    gr.update(choices=[], value=None),
+                    gr.update(value="Data Analysis"),
+                )
+
+            _analysis_df["df"] = df
+            _analysis_df["path"] = None
+
+            cols = list(df.columns)
+            numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+            date_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
+            cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+            info = f"**Rows:** {len(df)} | **Cols:** {len(cols)}\n"
+            info += f"Numeric: {len(numeric_cols)} | Date: {len(date_cols)} | Text: {len(cat_cols)}"
+
+            return (
+                info,
+                gr.update(
+                    choices=cols, value=numeric_cols[:2] if numeric_cols else cols[:2]
+                ),
+                gr.update(choices=["(None)"] + cols, value="(None)"),
+                gr.update(value="Data Analysis"),
+            )
+
+        def refresh_context_from_lookup(
+            lookup_results, state, year_from=None, year_to=None, min_citations=0
+        ):
+            """Update shared researcher dropdown after lookup."""
+            names = []
+            for r in lookup_results or []:
+                name = r.get("name") if isinstance(r, dict) else None
+                if name:
+                    names.append(name)
+
+            unique = []
+            seen = set()
+            for name in names:
+                if name not in seen:
+                    seen.add(name)
+                    unique.append(name)
+
+            new_state = dict(state or {})
+            new_state["researcher"] = unique[0] if unique else None
+            stats, table = refresh_stats_and_table(
+                year_from, year_to, min_citations, new_state
+            )
+            return (
+                new_state,
+                gr.update(choices=unique, value=unique[0] if unique else None),
+                stats,
+                table,
+            )
+
+        def _load_df_into_analysis(df):
+            """Shared loader for Data Analysis from dataframe."""
+
+            def _to_int(value):
+                try:
+                    return int(value)
+                except Exception:
+                    return None
+
+            if "year" in df.columns:
+                df["year"] = df["year"].apply(_to_int)
+            if "citations" in df.columns:
+                df["citations"] = df["citations"].apply(_to_int)
+
+            _analysis_df["df"] = df
+            _analysis_df["path"] = None
+
+            cols = list(df.columns)
+            numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+            date_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
+            cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+            info = f"**Rows:** {len(df)} | **Cols:** {len(cols)}\n"
+            info += f"Numeric: {len(numeric_cols)} | Date: {len(date_cols)} | Text: {len(cat_cols)}"
+
+            return (
+                info,
+                gr.update(
+                    choices=cols, value=numeric_cols[:2] if numeric_cols else cols[:2]
+                ),
+                gr.update(choices=["(None)"] + cols, value="(None)"),
+                gr.update(value="Data Analysis"),
+            )
+
+        def load_kb_for_researcher(
+            researcher_name, year_from=None, year_to=None, min_citations=0
+        ):
+            """Load KB papers for a specific researcher into analysis."""
+            import pandas as pd
+
+            if not researcher_name:
+                return (
+                    "Select a researcher first.",
+                    gr.update(choices=[], value=[]),
+                    gr.update(choices=[], value=None),
+                    gr.update(value="Data Analysis"),
+                )
+
+            store, _, _ = _get_kb_resources()
+            papers = store.list_papers_detailed(limit=5000)
+            df = pd.DataFrame(papers)
+            if df.empty or "researcher" not in df.columns:
+                return (
+                    "No researcher-tagged papers found in KB.",
+                    gr.update(choices=[], value=[]),
+                    gr.update(choices=[], value=None),
+                    gr.update(value="Data Analysis"),
+                )
+
+            df = df[df["researcher"] == researcher_name]
+            if df.empty:
+                return (
+                    "No papers found for this researcher in KB.",
+                    gr.update(choices=[], value=[]),
+                    gr.update(choices=[], value=None),
+                    gr.update(value="Data Analysis"),
+                )
+
+            return _load_df_into_analysis(df)
+
+        def load_kb_for_paper(paper_id):
+            """Load a single KB paper into analysis."""
+            import pandas as pd
+
+            if not paper_id:
+                return (
+                    "Select a paper first.",
+                    gr.update(choices=[], value=[]),
+                    gr.update(choices=[], value=None),
+                    gr.update(value="Data Analysis"),
+                )
+
+            store, _, _ = _get_kb_resources()
+            papers = store.list_papers_detailed(limit=5000)
+            df = pd.DataFrame(papers)
+            if df.empty:
+                return (
+                    "No papers found in KB.",
+                    gr.update(choices=[], value=[]),
+                    gr.update(choices=[], value=None),
+                    gr.update(value="Data Analysis"),
+                )
+
+            df = df[df["paper_id"] == paper_id]
+            if df.empty:
+                return (
+                    "Selected paper not found in KB.",
+                    gr.update(choices=[], value=[]),
+                    gr.update(choices=[], value=None),
+                    gr.update(value="Data Analysis"),
+                )
+
+            return _load_df_into_analysis(df)
 
         def select_kb_paper(table_data, evt: gr.SelectData):
             """Select a paper ID from the KB table."""
@@ -798,6 +1140,22 @@ def create_app(agent=None):
                 return ""
             row = rows[row_index]
             return row[4] if len(row) > 4 else ""
+
+        def select_kb_paper_with_context(
+            table_data,
+            evt: gr.SelectData,
+            state,
+            year_from=None,
+            year_to=None,
+            min_citations=0,
+        ):
+            paper_id = select_kb_paper(table_data, evt)
+            new_state = dict(state or {})
+            new_state["paper_id"] = paper_id
+            stats, table = refresh_stats_and_table(
+                year_from, year_to, min_citations, new_state
+            )
+            return new_state, paper_id, stats, table
 
         async def open_kb_citations(paper_id, direction, depth):
             """Open a KB paper in the citation explorer."""
@@ -832,7 +1190,7 @@ def create_app(agent=None):
                 connected_df,
                 related_df,
                 network_fig,
-                gr.update(selected="Citation Explorer"),
+                gr.update(value="Citation Explorer"),
             )
 
         def export_bibtex():
@@ -1211,6 +1569,7 @@ def create_app(agent=None):
                 )
 
             store, embedder_model, _ = _get_kb_resources()
+            from research_agent.ui.kb_ingest import ingest_paper_to_kb
 
             added = 0
             skipped = 0
@@ -1232,40 +1591,28 @@ def create_app(agent=None):
                     venue = paper.venue or ""
                     fields = paper.fields or []
 
-                    parts = [title]
-                    if abstract:
-                        parts.append(f"Abstract: {abstract}")
-                    if venue:
-                        parts.append(f"Venue: {venue}")
-                    if fields:
-                        parts.append(f"Fields: {', '.join(fields)}")
-                    if paper.doi:
-                        parts.append(f"DOI: {paper.doi}")
-
-                    content = "\n".join(parts).strip()
-                    if not content:
-                        skipped += 1
-                        continue
-
-                    embeddings = embedder_model.embed_documents(
-                        [content], batch_size=1, show_progress=False
+                    added_flag, reason = ingest_paper_to_kb(
+                        store=store,
+                        embedder=embedder_model,
+                        paper_id=paper_id,
+                        title=title,
+                        abstract=abstract,
+                        venue=venue,
+                        fields=fields,
+                        doi=paper.doi,
+                        year=paper.year,
+                        citations=paper.citation_count,
+                        authors=None,
+                        source=paper.source,
+                        extra_metadata={
+                            "researcher": researcher_name,
+                            "ingest_source": "researcher_lookup",
+                        },
                     )
-
-                    metadata = {
-                        "title": title,
-                        "year": paper.year,
-                        "venue": venue,
-                        "citations": paper.citation_count,
-                        "doi": paper.doi,
-                        "fields": fields,
-                        "authors": "",
-                        "source": paper.source,
-                        "researcher": researcher_name,
-                        "ingest_source": "researcher_lookup",
-                    }
-
-                    store.add_paper(paper_id, [content], embeddings, metadata)
-                    added += 1
+                    if added_flag:
+                        added += 1
+                    else:
+                        skipped += 1
                 except Exception as e:
                     errors.append(f"{paper.title}: {e}")
 
@@ -1859,45 +2206,75 @@ def create_app(agent=None):
         clear.click(lambda: [], outputs=[chatbot])
         refresh_btn.click(
             refresh_stats_and_table,
-            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            inputs=[year_from_kb, year_to_kb, min_citations_kb, context_state],
             outputs=[kb_stats, papers_table],
         )
         year_from_kb.change(
             refresh_stats_and_table,
-            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            inputs=[year_from_kb, year_to_kb, min_citations_kb, context_state],
             outputs=[kb_stats, papers_table],
         )
         year_to_kb.change(
             refresh_stats_and_table,
-            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            inputs=[year_from_kb, year_to_kb, min_citations_kb, context_state],
             outputs=[kb_stats, papers_table],
         )
         min_citations_kb.change(
             refresh_stats_and_table,
-            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            inputs=[year_from_kb, year_to_kb, min_citations_kb, context_state],
             outputs=[kb_stats, papers_table],
         )
         upload_btn.click(
             ingest_documents,
-            inputs=[upload_pdf, year_from_kb, year_to_kb, min_citations_kb],
+            inputs=[
+                upload_pdf,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+                context_state,
+            ],
             outputs=[upload_status, kb_stats, papers_table],
         )
         delete_paper_btn.click(
             delete_paper,
-            inputs=[delete_paper_id, year_from_kb, year_to_kb, min_citations_kb],
+            inputs=[
+                delete_paper_id,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+                context_state,
+            ],
             outputs=[delete_status, kb_stats, papers_table],
         )
 
         reset_kb_btn.click(
             reset_kb,
-            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            inputs=[year_from_kb, year_to_kb, min_citations_kb, context_state],
             outputs=[reset_kb_status, kb_stats, papers_table],
         )
 
         papers_table.select(
-            select_kb_paper,
-            inputs=[papers_table],
-            outputs=[kb_selected_paper_id],
+            select_kb_paper_with_context,
+            inputs=[
+                papers_table,
+                context_state,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+            ],
+            outputs=[context_state, kb_selected_paper_id, kb_stats, papers_table],
+        )
+
+        papers_table.select(
+            select_kb_paper_with_context,
+            inputs=[
+                papers_table,
+                context_state,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+            ],
+            outputs=[context_state, current_paper_id, kb_stats, papers_table],
         )
 
         open_kb_citations_btn.click(
@@ -1917,6 +2294,123 @@ def create_app(agent=None):
                 citation_ui["network_plot"],
                 main_tabs,
             ],
+        )
+
+        refresh_context_btn.click(
+            refresh_context_choices,
+            inputs=[context_state],
+            outputs=[context_state, current_researcher],
+        )
+
+        researcher_select.change(
+            sync_researcher_context_with_table,
+            inputs=[
+                researcher_select,
+                context_state,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+            ],
+            outputs=[
+                context_state,
+                current_researcher,
+                researcher_select,
+                citation_ui["researcher_dropdown"],
+                kb_stats,
+                papers_table,
+            ],
+        )
+
+        citation_ui["researcher_dropdown"].change(
+            sync_researcher_context_with_table,
+            inputs=[
+                citation_ui["researcher_dropdown"],
+                context_state,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+            ],
+            outputs=[
+                context_state,
+                current_researcher,
+                researcher_select,
+                citation_ui["researcher_dropdown"],
+                kb_stats,
+                papers_table,
+            ],
+        )
+
+        current_researcher.change(
+            sync_researcher_context_with_table,
+            inputs=[
+                current_researcher,
+                context_state,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+            ],
+            outputs=[
+                context_state,
+                current_researcher,
+                researcher_select,
+                citation_ui["researcher_dropdown"],
+                kb_stats,
+                papers_table,
+            ],
+        )
+
+        citation_ui["paper_input"].change(
+            sync_paper_context_with_table,
+            inputs=[
+                citation_ui["paper_input"],
+                context_state,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+            ],
+            outputs=[
+                context_state,
+                current_paper_id,
+                citation_ui["paper_input"],
+                kb_stats,
+                papers_table,
+            ],
+        )
+
+        current_paper_id.change(
+            sync_paper_context_with_table,
+            inputs=[
+                current_paper_id,
+                context_state,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+            ],
+            outputs=[
+                context_state,
+                current_paper_id,
+                citation_ui["paper_input"],
+                kb_stats,
+                papers_table,
+            ],
+        )
+
+        analyze_kb_btn.click(
+            load_kb_into_analysis,
+            inputs=[year_from_kb, year_to_kb, min_citations_kb],
+            outputs=[data_info, column_select, group_by_col, main_tabs],
+        )
+
+        analyze_current_researcher_btn.click(
+            load_kb_for_researcher,
+            inputs=[current_researcher, year_from_kb, year_to_kb, min_citations_kb],
+            outputs=[data_info, column_select, group_by_col, main_tabs],
+        )
+
+        analyze_current_paper_btn.click(
+            load_kb_for_paper,
+            inputs=[current_paper_id],
+            outputs=[data_info, column_select, group_by_col, main_tabs],
         )
         export_bibtex_btn.click(
             export_bibtex,
@@ -2026,6 +2520,46 @@ def create_app(agent=None):
             ],
         )
 
+        lookup_btn.click(
+            refresh_context_from_lookup,
+            inputs=[
+                researcher_results_state,
+                context_state,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+            ],
+            outputs=[context_state, current_researcher, kb_stats, papers_table],
+        )
+
+        from research_agent.ui.components.citation_explorer import (
+            refresh_researcher_dropdown,
+        )
+
+        lookup_btn.click(
+            refresh_researcher_dropdown,
+            outputs=[citation_ui["researcher_dropdown"]],
+        )
+
+        lookup_btn.click(
+            sync_researcher_context_with_table,
+            inputs=[
+                current_researcher,
+                context_state,
+                year_from_kb,
+                year_to_kb,
+                min_citations_kb,
+            ],
+            outputs=[
+                context_state,
+                current_researcher,
+                researcher_select,
+                citation_ui["researcher_dropdown"],
+                kb_stats,
+                papers_table,
+            ],
+        )
+
         clear_results_btn.click(
             clear_results,
             outputs=[
@@ -2131,6 +2665,7 @@ def launch_app(agent=None, port: int = 7860, share: bool = False):
 if __name__ == "__main__":
     # Launch with agent
     import os
+    from pathlib import Path
 
     # Check for Ollama preference via environment variable
     # Default: use Ollama with qwen3:32b (most capable), falls back to mistral-small3.2
@@ -2138,19 +2673,48 @@ if __name__ == "__main__":
     ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:32b")
     ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
+    def _load_ui_config():
+        config_path = Path("configs/config.yaml")
+        if not config_path.exists():
+            return {}
+        try:
+            import yaml
+
+            with config_path.open("r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            return {}
+
     agent = None
     try:
         from research_agent.agents.research_agent import ResearchAgent
+        from research_agent.db.vector_store import ResearchVectorStore
+        from research_agent.db.embeddings import get_embedder
 
         print("Initializing Research Agent...")
+        cfg = _load_ui_config()
+        embed_cfg = cfg.get("embedding", {})
+        vec_cfg = cfg.get("vector_store", {})
+
+        embedder = get_embedder(
+            model_name=embed_cfg.get("name", "BAAI/bge-base-en-v1.5"),
+            device=embed_cfg.get("device"),
+        )
+        vector_store = ResearchVectorStore(
+            persist_dir=vec_cfg.get("persist_directory", "./data/chroma_db")
+        )
         if use_ollama:
             print(f"Using Ollama model: {ollama_model}")
             agent = ResearchAgent(
-                use_ollama=True, ollama_model=ollama_model, ollama_base_url=ollama_url
+                vector_store=vector_store,
+                embedder=embedder,
+                use_ollama=True,
+                ollama_model=ollama_model,
+                ollama_base_url=ollama_url,
             )
         else:
             print("Using HuggingFace models (set USE_OLLAMA=true to use Ollama)")
-            agent = ResearchAgent()
+            agent = ResearchAgent(vector_store=vector_store, embedder=embedder)
         print("✓ Agent loaded successfully")
         launch_app(agent=agent)
     except Exception as e:

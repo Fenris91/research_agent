@@ -365,7 +365,9 @@ class ResearchVectorStore:
         coll = self._get_collection(collection)
         results = cast(
             Dict[str, Any],
-            coll.get(where=filter_dict, limit=limit, include=["documents", "metadatas"]),
+            coll.get(
+                where=filter_dict, limit=limit, include=["documents", "metadatas"]
+            ),
         )
         ids = results.get("ids") or []
         documents = results.get("documents") or []
@@ -554,6 +556,51 @@ class ResearchVectorStore:
         papers.sort(key=lambda x: x.get("added_at", ""), reverse=True)
 
         # Apply pagination
+        return papers[offset : offset + limit]
+
+    def list_papers_detailed(self, limit: int = 1000, offset: int = 0) -> List[Dict]:
+        """
+        List papers with extended metadata.
+
+        Args:
+            limit: Maximum papers to return
+            offset: Number of papers to skip
+
+        Returns:
+            List of paper metadata dicts
+        """
+        all_results = cast(Dict[str, Any], self.papers.get(include=["metadatas"]))
+        all_metadatas = all_results.get("metadatas") or []
+
+        if not all_metadatas:
+            return []
+
+        seen_ids = set()
+        papers = []
+
+        for meta in all_metadatas:
+            paper_id = meta.get("paper_id", "")
+            if paper_id and paper_id not in seen_ids:
+                seen_ids.add(paper_id)
+                papers.append(
+                    {
+                        "paper_id": paper_id,
+                        "title": meta.get("title", "Unknown"),
+                        "year": meta.get("year"),
+                        "authors": meta.get("authors", ""),
+                        "added_at": meta.get("added_at", ""),
+                        "citations": meta.get("citations")
+                        or meta.get("citation_count"),
+                        "venue": meta.get("venue", ""),
+                        "fields": meta.get("fields", ""),
+                        "source": meta.get("source", ""),
+                        "researcher": meta.get("researcher", ""),
+                        "ingest_source": meta.get("ingest_source", ""),
+                        "doi": meta.get("doi", ""),
+                    }
+                )
+
+        papers.sort(key=lambda x: x.get("added_at", ""), reverse=True)
         return papers[offset : offset + limit]
 
     def list_notes(self, limit: int = 100, offset: int = 0) -> List[Dict]:
