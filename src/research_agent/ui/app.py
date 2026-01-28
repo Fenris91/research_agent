@@ -57,390 +57,410 @@ def create_app(agent=None):
             with gr.Row():
                 clear = gr.Button("Clear Chat")
 
-        with gr.Accordion("Settings", open=False):
-            gr.Markdown("### LLM Model")
-            with gr.Row():
-                model_dropdown = gr.Dropdown(
-                    choices=["Loading..."],
-                    value="Loading...",
-                    label="Select Model",
-                    scale=3,
-                    interactive=True,
-                )
-                refresh_models_btn = gr.Button("🔄", scale=1, min_width=50)
-
-            current_model_display = gr.Textbox(
-                label="Current Model",
-                interactive=False,
-                placeholder="No model loaded",
-            )
-
-            gr.Markdown("### Search Settings")
-            search_depth = gr.Slider(
-                minimum=1,
-                maximum=20,
-                value=5,
-                step=1,
-                label="Max external results per source",
-            )
-            auto_ingest = gr.Checkbox(
-                label="Automatically add high-quality sources to knowledge base",
-                value=False,
-            )
-
-            gr.Markdown("### Search Filters")
-            with gr.Row():
-                year_from_chat = gr.Slider(
-                    minimum=1900,
-                    maximum=2030,
-                    value=1900,
-                    step=1,
-                    label="From Year",
-                    info="Use 1900 for no lower bound",
-                )
-                year_to_chat = gr.Slider(
-                    minimum=1900,
-                    maximum=2030,
-                    value=2030,
-                    step=1,
-                    label="To Year",
-                    info="Use 2030 for no upper bound",
-                )
-            min_citations_chat = gr.Slider(
-                minimum=0,
-                maximum=1000,
-                value=0,
-                step=10,
-                label="Min citations",
-                info="0 to disable",
-            )
-
-            gr.Markdown("### Reranker (Retrieval)")
-            with gr.Row():
-                reranker_enable_chat = gr.Checkbox(
-                    label="Enable reranker (BGE)",
-                    value=False,
-                    info="Improves ranking of retrieved chunks",
-                )
-                rerank_topk_chat = gr.Slider(
-                    minimum=1,
-                    maximum=50,
-                    value=10,
-                    step=1,
-                    label="Rerank top-k",
-                    info="How many results to rerank",
-                )
-            rerank_status_chat = gr.Textbox(
-                label="Reranker Status",
-                interactive=False,
-                placeholder="Using config defaults",
-            )
-
-        with gr.Tab("Knowledge Base"):
-            gr.Markdown("## Your Research Library")
-
-            with gr.Row():
-                kb_stats = gr.JSON(
-                    label="Statistics",
-                    value={"total_papers": 0, "total_notes": 0, "total_web_sources": 0},
-                )
-                refresh_btn = gr.Button("Refresh")
-
-            gr.Markdown("### Add Papers")
-
-            with gr.Row():
-                upload_pdf = gr.File(
-                    label="Upload Documents",
-                    file_types=[".pdf", ".txt", ".md", ".docx"],
-                    file_count="multiple",
-                )
-                upload_btn = gr.Button("Process & Add", variant="primary")
-
-            upload_status = gr.Textbox(
-                label="Status",
-                interactive=False,
-                placeholder="Upload PDFs to add to your knowledge base",
-            )
-
-            gr.Markdown("### Browse Papers")
-
-            with gr.Row():
-                year_from_kb = gr.Slider(
-                    minimum=1900,
-                    maximum=2030,
-                    value=1900,
-                    step=1,
-                    label="From Year",
-                    info="1900 = no lower bound",
-                )
-                year_to_kb = gr.Slider(
-                    minimum=1900,
-                    maximum=2030,
-                    value=2030,
-                    step=1,
-                    label="To Year",
-                    info="2030 = no upper bound",
-                )
-            min_citations_kb = gr.Slider(
-                minimum=0,
-                maximum=1000,
-                value=0,
-                step=10,
-                label="Min citations",
-                info="0 = no filter",
-            )
-
-            papers_table = gr.Dataframe(
-                headers=["Title", "Year", "Authors", "Added", "Paper ID"],
-                label="Papers in Knowledge Base",
-            )
-
-            with gr.Row():
-                delete_paper_id = gr.Textbox(
-                    label="Paper ID",
-                    placeholder="Enter paper ID to delete",
-                    scale=4,
-                )
-                delete_paper_btn = gr.Button("Delete", variant="stop", scale=1)
-
-            with gr.Row():
-                reset_kb_btn = gr.Button("Reset KB", variant="stop", scale=1)
-
-            delete_status = gr.Textbox(
-                label="Delete Status",
-                interactive=False,
-                placeholder="Enter a paper ID to delete",
-            )
-            reset_kb_status = gr.Textbox(
-                label="Reset Status",
-                interactive=False,
-                placeholder="Reset will remove all KB data",
-            )
-
-            gr.Markdown("### Export")
-            with gr.Row():
-                export_bibtex_btn = gr.Button("Export BibTeX", variant="secondary")
-                bibtex_download = gr.File(label="Download", visible=False)
-            export_status = gr.Textbox(
-                label="Export Status",
-                interactive=False,
-                placeholder="Click Export to generate BibTeX file",
-            )
-
-            with gr.Accordion("Retrieval Settings", open=False):
-                gr.Markdown("Reranker settings (shared with Chat)")
+            with gr.Accordion("Settings", open=False):
+                gr.Markdown("### LLM Model")
                 with gr.Row():
-                    reranker_enable_kb = gr.Checkbox(
-                        label="Enable reranker (BGE)", value=False
+                    model_dropdown = gr.Dropdown(
+                        choices=["Loading..."],
+                        value="Loading...",
+                        label="Select Model",
+                        scale=3,
+                        interactive=True,
                     )
-                    rerank_topk_kb = gr.Slider(
+                    refresh_models_btn = gr.Button("🔄", scale=1, min_width=50)
+
+                current_model_display = gr.Textbox(
+                    label="Current Model",
+                    interactive=False,
+                    placeholder="No model loaded",
+                )
+
+                gr.Markdown("### Search Settings")
+                search_depth = gr.Slider(
+                    minimum=1,
+                    maximum=20,
+                    value=5,
+                    step=1,
+                    label="Max external results per source",
+                )
+                auto_ingest = gr.Checkbox(
+                    label="Automatically add high-quality sources to knowledge base",
+                    value=False,
+                )
+
+                gr.Markdown("### Search Filters")
+                with gr.Row():
+                    year_from_chat = gr.Slider(
+                        minimum=1900,
+                        maximum=2030,
+                        value=1900,
+                        step=1,
+                        label="From Year",
+                        info="Use 1900 for no lower bound",
+                    )
+                    year_to_chat = gr.Slider(
+                        minimum=1900,
+                        maximum=2030,
+                        value=2030,
+                        step=1,
+                        label="To Year",
+                        info="Use 2030 for no upper bound",
+                    )
+                min_citations_chat = gr.Slider(
+                    minimum=0,
+                    maximum=1000,
+                    value=0,
+                    step=10,
+                    label="Min citations",
+                    info="0 to disable",
+                )
+
+                gr.Markdown("### Reranker (Retrieval)")
+                with gr.Row():
+                    reranker_enable_chat = gr.Checkbox(
+                        label="Enable reranker (BGE)",
+                        value=False,
+                        info="Improves ranking of retrieved chunks",
+                    )
+                    rerank_topk_chat = gr.Slider(
                         minimum=1,
                         maximum=50,
                         value=10,
                         step=1,
                         label="Rerank top-k",
+                        info="How many results to rerank",
                     )
-                rerank_status_kb = gr.Textbox(
+                rerank_status_chat = gr.Textbox(
                     label="Reranker Status",
                     interactive=False,
                     placeholder="Using config defaults",
                 )
 
-        with gr.Tab("Researcher Lookup"):
-            gr.Markdown("""
-            ## Researcher Profile Lookup
+        with gr.Tabs() as main_tabs:
+            with gr.Tab("Knowledge Base"):
+                gr.Markdown("## Your Research Library")
 
-            Look up citation data, publications, and web presence for researchers.
+                with gr.Row():
+                    kb_stats = gr.JSON(
+                        label="Statistics",
+                        value={
+                            "total_papers": 0,
+                            "total_notes": 0,
+                            "total_web_sources": 0,
+                        },
+                    )
+                    refresh_btn = gr.Button("Refresh")
 
-            **Data Sources:**
-            - OpenAlex (open academic database)
-            - Semantic Scholar (citation data, h-index)
-            - DuckDuckGo (web presence)
-            """)
+                gr.Markdown("### Add Papers")
 
-            with gr.Row():
-                with gr.Column(scale=2):
-                    researcher_input = gr.Textbox(
-                        label="Researcher Names",
-                        placeholder="Enter names separated by commas or newlines:\n\nDavid Harvey\nDoreen Massey, Tim Ingold\nAnna Tsing",
-                        lines=6,
+                with gr.Row():
+                    upload_pdf = gr.File(
+                        label="Upload Documents",
+                        file_types=[".pdf", ".txt", ".md", ".docx"],
+                        file_count="multiple",
+                    )
+                    upload_btn = gr.Button("Process & Add", variant="primary")
+
+                upload_status = gr.Textbox(
+                    label="Status",
+                    interactive=False,
+                    placeholder="Upload PDFs to add to your knowledge base",
+                )
+
+                gr.Markdown("### Browse Papers")
+
+                with gr.Row():
+                    year_from_kb = gr.Slider(
+                        minimum=1900,
+                        maximum=2030,
+                        value=1900,
+                        step=1,
+                        label="From Year",
+                        info="1900 = no lower bound",
+                    )
+                    year_to_kb = gr.Slider(
+                        minimum=1900,
+                        maximum=2030,
+                        value=2030,
+                        step=1,
+                        label="To Year",
+                        info="2030 = no upper bound",
+                    )
+                min_citations_kb = gr.Slider(
+                    minimum=0,
+                    maximum=1000,
+                    value=0,
+                    step=10,
+                    label="Min citations",
+                    info="0 = no filter",
+                )
+
+                papers_table = gr.Dataframe(
+                    headers=["Title", "Year", "Authors", "Added", "Paper ID"],
+                    label="Papers in Knowledge Base",
+                )
+
+                with gr.Row():
+                    delete_paper_id = gr.Textbox(
+                        label="Paper ID",
+                        placeholder="Enter paper ID to delete",
+                        scale=4,
+                    )
+                    delete_paper_btn = gr.Button("Delete", variant="stop", scale=1)
+
+                with gr.Row():
+                    reset_kb_btn = gr.Button("Reset KB", variant="stop", scale=1)
+
+                with gr.Row():
+                    kb_selected_paper_id = gr.Textbox(
+                        label="Selected Paper ID",
+                        interactive=False,
+                        placeholder="Click a row to select",
+                        scale=4,
+                    )
+                    open_kb_citations_btn = gr.Button(
+                        "Open in Citation Explorer",
+                        variant="secondary",
+                        scale=1,
                     )
 
-                with gr.Column(scale=1):
-                    gr.Markdown("### Options")
-                    use_openalex = gr.Checkbox(label="OpenAlex", value=True)
-                    use_semantic_scholar = gr.Checkbox(
-                        label="Semantic Scholar", value=True
+                delete_status = gr.Textbox(
+                    label="Delete Status",
+                    interactive=False,
+                    placeholder="Enter a paper ID to delete",
+                )
+                reset_kb_status = gr.Textbox(
+                    label="Reset Status",
+                    interactive=False,
+                    placeholder="Reset will remove all KB data",
+                )
+
+                gr.Markdown("### Export")
+                with gr.Row():
+                    export_bibtex_btn = gr.Button("Export BibTeX", variant="secondary")
+                    bibtex_download = gr.File(label="Download", visible=False)
+                export_status = gr.Textbox(
+                    label="Export Status",
+                    interactive=False,
+                    placeholder="Click Export to generate BibTeX file",
+                )
+
+                with gr.Accordion("Retrieval Settings", open=False):
+                    gr.Markdown("Reranker settings (shared with Chat)")
+                    with gr.Row():
+                        reranker_enable_kb = gr.Checkbox(
+                            label="Enable reranker (BGE)", value=False
+                        )
+                        rerank_topk_kb = gr.Slider(
+                            minimum=1,
+                            maximum=50,
+                            value=10,
+                            step=1,
+                            label="Rerank top-k",
+                        )
+                    rerank_status_kb = gr.Textbox(
+                        label="Reranker Status",
+                        interactive=False,
+                        placeholder="Using config defaults",
                     )
-                    use_web_search = gr.Checkbox(label="Web Search", value=False)
-                    fetch_papers = gr.Checkbox(
-                        label="Fetch Papers (for Citation Explorer)",
-                        value=False,
-                        info="Slower but enables citation network exploration",
+
+            with gr.Tab("Researcher Lookup"):
+                gr.Markdown("""
+                ## Researcher Profile Lookup
+
+                Look up citation data, publications, and web presence for researchers.
+
+                **Data Sources:**
+                - OpenAlex (open academic database)
+                - Semantic Scholar (citation data, h-index)
+                - DuckDuckGo (web presence)
+                """)
+
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        researcher_input = gr.Textbox(
+                            label="Researcher Names",
+                            placeholder="Enter names separated by commas or newlines:\n\nDavid Harvey\nDoreen Massey, Tim Ingold\nAnna Tsing",
+                            lines=6,
+                        )
+
+                    with gr.Column(scale=1):
+                        gr.Markdown("### Options")
+                        use_openalex = gr.Checkbox(label="OpenAlex", value=True)
+                        use_semantic_scholar = gr.Checkbox(
+                            label="Semantic Scholar", value=True
+                        )
+                        use_web_search = gr.Checkbox(label="Web Search", value=False)
+                        fetch_papers = gr.Checkbox(
+                            label="Fetch Papers (for Citation Explorer)",
+                            value=False,
+                            info="Slower but enables citation network exploration",
+                        )
+                        fetch_papers_limit = gr.Slider(
+                            minimum=5,
+                            maximum=50,
+                            value=10,
+                            step=1,
+                            label="Max papers to fetch",
+                        )
+
+                with gr.Row():
+                    lookup_btn = gr.Button(
+                        "Lookup Researchers", variant="primary", scale=2
                     )
-                    fetch_papers_limit = gr.Slider(
-                        minimum=5,
-                        maximum=50,
+                    clear_results_btn = gr.Button("Clear Results", scale=1)
+
+                lookup_status = gr.Textbox(
+                    label="Status",
+                    interactive=False,
+                    placeholder="Enter researcher names and click 'Lookup Researchers'",
+                )
+
+                gr.Markdown("### Results")
+
+                results_table = gr.Dataframe(
+                    headers=[
+                        "Name",
+                        "Affiliations",
+                        "Works",
+                        "Citations",
+                        "H-Index",
+                        "Fields",
+                    ],
+                    label="Researcher Profiles",
+                    interactive=False,
+                )
+
+                with gr.Accordion("Web Results", open=False):
+                    web_results_output = gr.JSON(label="Web Search Results")
+
+                with gr.Row():
+                    export_csv_btn = gr.Button("Export CSV")
+                    export_json_btn = gr.Button("Export JSON")
+
+                csv_download = gr.File(label="Download CSV", visible=False)
+                json_download = gr.File(label="Download JSON", visible=False)
+
+                gr.Markdown("### Explore Citations for Researcher")
+                with gr.Row():
+                    researcher_select = gr.Dropdown(
+                        choices=[],
+                        label="Select researcher",
+                        interactive=True,
+                        value=None,
+                    )
+                    send_to_citations_btn = gr.Button(
+                        "Explore Citations",
+                        variant="secondary",
+                    )
+
+                with gr.Row():
+                    seed_paper_select = gr.Dropdown(
+                        choices=[],
+                        label="Seed paper (optional)",
+                        interactive=True,
+                        value=None,
+                    )
+                    load_papers_btn = gr.Button(
+                        "Load Papers",
+                        variant="secondary",
+                    )
+
+                gr.Markdown("### Ingest Papers to Knowledge Base")
+                with gr.Row():
+                    ingest_papers_limit = gr.Slider(
+                        minimum=1,
+                        maximum=20,
                         value=10,
                         step=1,
-                        label="Max papers to fetch",
+                        label="Max papers to ingest",
+                    )
+                    ingest_researcher_btn = gr.Button(
+                        "Ingest Top Papers",
+                        variant="primary",
+                    )
+                ingest_researcher_status = gr.Textbox(
+                    label="Ingestion Status",
+                    interactive=False,
+                    placeholder="Select a researcher and click Ingest",
+                )
+
+                # State to store full results
+                researcher_results_state = gr.State([])
+                researcher_papers_state = gr.State({})
+
+            with gr.Tab("Citation Explorer"):
+                from research_agent.ui.components import render_citation_explorer
+
+                citation_ui = render_citation_explorer()
+
+            with gr.Tab("Data Analysis"):
+                gr.Markdown("## Analyze Your Data")
+
+                with gr.Row():
+                    data_input = gr.File(
+                        label="Upload CSV or Excel file",
+                        file_types=[".csv", ".xlsx", ".xls"],
+                        scale=2,
+                    )
+                    with gr.Column(scale=1):
+                        data_info = gr.Textbox(
+                            label="Data Info",
+                            interactive=False,
+                            placeholder="Upload a file to see info",
+                        )
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        analysis_type = gr.Radio(
+                            choices=[
+                                "Descriptive Statistics",
+                                "Correlation Analysis",
+                                "Frequency Analysis",
+                                "Pivot Table",
+                                "Time Series",
+                                "Custom Query",
+                            ],
+                            label="Analysis Type",
+                            value="Descriptive Statistics",
+                        )
+
+                    with gr.Column(scale=1):
+                        plot_type = gr.Radio(
+                            choices=[
+                                "Histogram",
+                                "Box Plot",
+                                "Bar Chart",
+                                "Line Chart",
+                                "Scatter",
+                            ],
+                            label="Plot Type",
+                            value="Histogram",
+                        )
+
+                with gr.Row():
+                    column_select = gr.Dropdown(
+                        choices=[],
+                        label="Select Column(s)",
+                        multiselect=True,
+                        interactive=True,
+                    )
+                    group_by_col = gr.Dropdown(
+                        choices=[],
+                        label="Group By (for Pivot/Comparison)",
+                        multiselect=False,
+                        interactive=True,
                     )
 
-            with gr.Row():
-                lookup_btn = gr.Button("Lookup Researchers", variant="primary", scale=2)
-                clear_results_btn = gr.Button("Clear Results", scale=1)
-
-            lookup_status = gr.Textbox(
-                label="Status",
-                interactive=False,
-                placeholder="Enter researcher names and click 'Lookup Researchers'",
-            )
-
-            gr.Markdown("### Results")
-
-            results_table = gr.Dataframe(
-                headers=[
-                    "Name",
-                    "Affiliations",
-                    "Works",
-                    "Citations",
-                    "H-Index",
-                    "Fields",
-                ],
-                label="Researcher Profiles",
-                interactive=False,
-            )
-
-            with gr.Accordion("Web Results", open=False):
-                web_results_output = gr.JSON(label="Web Search Results")
-
-            with gr.Row():
-                export_csv_btn = gr.Button("Export CSV")
-                export_json_btn = gr.Button("Export JSON")
-
-            csv_download = gr.File(label="Download CSV", visible=False)
-            json_download = gr.File(label="Download JSON", visible=False)
-
-            gr.Markdown("### Explore Citations for Researcher")
-            with gr.Row():
-                researcher_select = gr.Dropdown(
-                    choices=[],
-                    label="Select researcher",
-                    interactive=True,
-                    value=None,
-                )
-                send_to_citations_btn = gr.Button(
-                    "Explore Citations",
-                    variant="secondary",
+                custom_query = gr.Textbox(
+                    label="Custom analysis request",
+                    placeholder="e.g., 'Show me the distribution of ages by region'",
+                    visible=True,
                 )
 
-            with gr.Row():
-                seed_paper_select = gr.Dropdown(
-                    choices=[],
-                    label="Seed paper (optional)",
-                    interactive=True,
-                    value=None,
-                )
-                load_papers_btn = gr.Button(
-                    "Load Papers",
-                    variant="secondary",
-                )
-
-            gr.Markdown("### Ingest Papers to Knowledge Base")
-            with gr.Row():
-                ingest_papers_limit = gr.Slider(
-                    minimum=1,
-                    maximum=20,
-                    value=10,
-                    step=1,
-                    label="Max papers to ingest",
-                )
-                ingest_researcher_btn = gr.Button(
-                    "Ingest Top Papers",
-                    variant="primary",
-                )
-            ingest_researcher_status = gr.Textbox(
-                label="Ingestion Status",
-                interactive=False,
-                placeholder="Select a researcher and click Ingest",
-            )
-
-            # State to store full results
-            researcher_results_state = gr.State([])
-            researcher_papers_state = gr.State({})
-
-        with gr.Tab("Citation Explorer"):
-            from research_agent.ui.components import render_citation_explorer
-
-            citation_ui = render_citation_explorer()
-
-        with gr.Tab("Data Analysis"):
-            gr.Markdown("## Analyze Your Data")
-
-            with gr.Row():
-                data_input = gr.File(
-                    label="Upload CSV or Excel file",
-                    file_types=[".csv", ".xlsx", ".xls"],
-                    scale=2,
-                )
-                with gr.Column(scale=1):
-                    data_info = gr.Textbox(
-                        label="Data Info",
-                        interactive=False,
-                        placeholder="Upload a file to see info",
-                    )
-
-            with gr.Row():
-                with gr.Column(scale=1):
-                    analysis_type = gr.Radio(
-                        choices=[
-                            "Descriptive Statistics",
-                            "Correlation Analysis",
-                            "Frequency Analysis",
-                            "Pivot Table",
-                            "Time Series",
-                            "Custom Query",
-                        ],
-                        label="Analysis Type",
-                        value="Descriptive Statistics",
-                    )
-
-                with gr.Column(scale=1):
-                    plot_type = gr.Radio(
-                        choices=[
-                            "Histogram",
-                            "Box Plot",
-                            "Bar Chart",
-                            "Line Chart",
-                            "Scatter",
-                        ],
-                        label="Plot Type",
-                        value="Histogram",
-                    )
-
-            with gr.Row():
-                column_select = gr.Dropdown(
-                    choices=[],
-                    label="Select Column(s)",
-                    multiselect=True,
-                    interactive=True,
-                )
-                group_by_col = gr.Dropdown(
-                    choices=[],
-                    label="Group By (for Pivot/Comparison)",
-                    multiselect=False,
-                    interactive=True,
-                )
-
-            custom_query = gr.Textbox(
-                label="Custom analysis request",
-                placeholder="e.g., 'Show me the distribution of ages by region'",
-                visible=True,
-            )
-
-            with gr.Row():
-                analyze_btn = gr.Button("Analyze", variant="primary", scale=2)
-                download_plot_btn = gr.Button("Download Plot", scale=1)
+                with gr.Row():
+                    analyze_btn = gr.Button("Analyze", variant="primary", scale=2)
+                    download_plot_btn = gr.Button("Download Plot", scale=1)
 
             analysis_output = gr.Markdown(label="Results")
 
@@ -763,6 +783,57 @@ def create_app(agent=None):
             store.reset()
             stats, table = refresh_stats_and_table(year_from, year_to, min_citations)
             return "Knowledge base reset.", stats, table
+
+        def select_kb_paper(table_data, evt: gr.SelectData):
+            """Select a paper ID from the KB table."""
+            if table_data is None:
+                return ""
+            rows = table_data if isinstance(table_data, list) else table_data.values
+            row_index = (
+                evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+            )
+            if not isinstance(row_index, int) or row_index < 0:
+                return ""
+            if row_index >= len(rows):
+                return ""
+            row = rows[row_index]
+            return row[4] if len(row) > 4 else ""
+
+        async def open_kb_citations(paper_id, direction, depth):
+            """Open a KB paper in the citation explorer."""
+            if not paper_id:
+                return (
+                    "",
+                    "Select a paper from the KB table first.",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    gr.update(),
+                )
+
+            from research_agent.ui.components.citation_explorer import explore_citations
+
+            (
+                summary,
+                citing_df,
+                cited_df,
+                connected_df,
+                related_df,
+                network_fig,
+            ) = await explore_citations(paper_id, direction, depth)
+
+            return (
+                paper_id,
+                summary,
+                citing_df,
+                cited_df,
+                connected_df,
+                related_df,
+                network_fig,
+                gr.update(selected="Citation Explorer"),
+            )
 
         def export_bibtex():
             """Export all papers in knowledge base to BibTeX format."""
@@ -1821,6 +1892,31 @@ def create_app(agent=None):
             reset_kb,
             inputs=[year_from_kb, year_to_kb, min_citations_kb],
             outputs=[reset_kb_status, kb_stats, papers_table],
+        )
+
+        papers_table.select(
+            select_kb_paper,
+            inputs=[papers_table],
+            outputs=[kb_selected_paper_id],
+        )
+
+        open_kb_citations_btn.click(
+            open_kb_citations,
+            inputs=[
+                kb_selected_paper_id,
+                citation_ui["direction"],
+                citation_ui["depth"],
+            ],
+            outputs=[
+                citation_ui["paper_input"],
+                citation_ui["summary_output"],
+                citation_ui["citing_output"],
+                citation_ui["cited_output"],
+                citation_ui["connected_output"],
+                citation_ui["related_output"],
+                citation_ui["network_plot"],
+                main_tabs,
+            ],
         )
         export_bibtex_btn.click(
             export_bibtex,
