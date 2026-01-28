@@ -7,6 +7,7 @@ Run with: python -m research_agent.main
 import argparse
 import os
 from pathlib import Path
+from typing import Optional, Tuple
 
 try:
     from dotenv import load_dotenv
@@ -16,6 +17,77 @@ except Exception:
     pass
 
 import yaml
+
+
+# Cloud provider configurations (OpenAI-compatible endpoints)
+CLOUD_PROVIDERS = {
+    "openai": {
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY",
+        "default_model": "gpt-4o-mini",
+        "models": ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1", "gpt-4o"],
+    },
+    "groq": {
+        "name": "Groq (Free Tier)",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key_env": "GROQ_API_KEY",
+        "default_model": "llama-3.3-70b-versatile",
+        "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+    },
+    "openrouter": {
+        "name": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "default_model": "meta-llama/llama-3.1-8b-instruct:free",
+        "models": ["meta-llama/llama-3.1-8b-instruct:free", "google/gemma-2-9b-it:free"],
+    },
+}
+
+
+def check_ollama_available(base_url: str = "http://localhost:11434") -> bool:
+    """Check if Ollama server is reachable."""
+    try:
+        import requests
+        response = requests.get(f"{base_url}/api/tags", timeout=2)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def detect_available_provider(config: dict) -> Tuple[str, Optional[dict]]:
+    """
+    Auto-detect the best available LLM provider.
+
+    Priority:
+    1. OpenAI (if OPENAI_API_KEY is set)
+    2. Groq (if GROQ_API_KEY is set - free tier!)
+    3. OpenRouter (if OPENROUTER_API_KEY is set)
+    4. Ollama (if server is reachable)
+    5. HuggingFace (local, requires GPU)
+
+    Returns:
+        Tuple of (provider_name, provider_config) or (provider_name, None) for local providers
+    """
+    model_cfg = config.get("model", {}) if isinstance(config, dict) else {}
+
+    # Check cloud providers in priority order
+    for provider_key in ["openai", "groq", "openrouter"]:
+        provider = CLOUD_PROVIDERS[provider_key]
+        api_key = os.getenv(provider["api_key_env"])
+        if api_key:
+            print(f"  Found {provider['name']} API key")
+            return provider_key, provider
+
+    # Check Ollama
+    ollama_base_url = model_cfg.get("ollama_base_url", "http://localhost:11434")
+    if check_ollama_available(ollama_base_url):
+        print(f"  Found Ollama server at {ollama_base_url}")
+        return "ollama", None
+
+    # Fallback to HuggingFace (local)
+    print("  No cloud providers found, will use local HuggingFace models")
+    return "huggingface", None
 
 
 def load_config(config_path: str = "configs/config.yaml") -> dict:
@@ -64,8 +136,35 @@ def run_checks():
     print("Research Agent - Setup Check")
     print("=" * 50)
 
+    # Check LLM providers
+    print("\n1. Checking LLM providers...")
+    available_providers = []
+
+    # Check cloud providers
+    for provider_key, provider in CLOUD_PROVIDERS.items():
+        api_key = os.getenv(provider["api_key_env"])
+        if api_key:
+            print(f"   ✓ {provider['name']} ({provider_key}) - API key found")
+            available_providers.append(provider_key)
+        else:
+            print(f"   ○ {provider['name']} ({provider_key}) - no API key")
+
+    # Check Ollama
+    if check_ollama_available():
+        print("   ✓ Ollama - server running")
+        available_providers.append("ollama")
+    else:
+        print("   ○ Ollama - not running (start with: ollama serve)")
+
+    if not available_providers:
+        print("   ⚠️  No cloud providers configured!")
+        print("   Tip: Get a FREE Groq API key at https://console.groq.com/keys")
+        print("   Then set GROQ_API_KEY in your .env file")
+    else:
+        print(f"\n   Provider auto-detection will use: {available_providers[0]}")
+
     # Check GPU
-    print("\n1. Checking GPU...")
+    print("\n2. Checking GPU...")
     try:
         from research_agent.models.llm_loader import check_gpu
 
@@ -75,7 +174,7 @@ def run_checks():
         print("   Run: pip install torch")
 
     # Check embedding model can load
-    print("\n2. Checking embedding model...")
+    print("\n3. Checking embedding model...")
     try:
         from sentence_transformers import SentenceTransformer
 
@@ -85,7 +184,7 @@ def run_checks():
         print("   Run: pip install sentence-transformers")
 
     # Check ChromaDB
-    print("\n3. Checking vector database...")
+    print("\n4. Checking vector database...")
     try:
         import chromadb
 
@@ -95,7 +194,7 @@ def run_checks():
         print("   Run: pip install chromadb")
 
     # Check LangChain
-    print("\n4. Checking agent framework...")
+    print("\n5. Checking agent framework...")
     try:
         import langchain
         import langgraph
@@ -106,7 +205,7 @@ def run_checks():
         print("   Run: pip install langchain langgraph")
 
     # Check Gradio
-    print("\n5. Checking UI framework...")
+    print("\n6. Checking UI framework...")
     try:
         import gradio
 
@@ -116,7 +215,7 @@ def run_checks():
         print("   Run: pip install gradio")
 
     # Check API libraries
-    print("\n6. Checking API libraries...")
+    print("\n7. Checking API libraries...")
     apis = {
         "semanticscholar": "Semantic Scholar",
         "pyalex": "OpenAlex",
@@ -189,7 +288,14 @@ def build_agent_from_config(config: dict):
     from research_agent.tools.web_search import WebSearchTool
 
     model_cfg = config.get("model", {}) if isinstance(config, dict) else {}
-    provider = model_cfg.get("provider", "ollama")
+    provider = model_cfg.get("provider", "auto")
+
+    # Auto-detect provider if set to "auto"
+    detected_cloud_config = None
+    if provider == "auto":
+        print("Auto-detecting LLM provider...")
+        provider, detected_cloud_config = detect_available_provider(config)
+        print(f"  Selected provider: {provider}")
 
     use_ollama = provider == "ollama"
     ollama_base_url = model_cfg.get("ollama_base_url", "http://localhost:11434")
@@ -200,10 +306,19 @@ def build_agent_from_config(config: dict):
         model_cfg.get("openai_compatible", {}) if isinstance(model_cfg, dict) else {}
     )
 
-    openai_base_url = openai_cfg.get("base_url", "https://api.openai.com/v1")
-    openai_api_key = os.getenv(openai_cfg.get("api_key_env", "OPENAI_API_KEY"))
-    openai_models = openai_cfg.get("models", [])
-    openai_default_model = openai_models[0] if openai_models else "gpt-4o-mini"
+    # If we detected a cloud provider, use its configuration
+    if detected_cloud_config:
+        openai_base_url = detected_cloud_config["base_url"]
+        openai_api_key = os.getenv(detected_cloud_config["api_key_env"])
+        openai_models = detected_cloud_config["models"]
+        openai_default_model = detected_cloud_config["default_model"]
+        # For cloud providers, we use "openai" provider type (OpenAI-compatible API)
+        provider = "openai"
+    else:
+        openai_base_url = openai_cfg.get("base_url", "https://api.openai.com/v1")
+        openai_api_key = os.getenv(openai_cfg.get("api_key_env", "OPENAI_API_KEY"))
+        openai_models = openai_cfg.get("models", [])
+        openai_default_model = openai_models[0] if openai_models else "gpt-4o-mini"
 
     openai_compat_base_url = openai_compat_cfg.get(
         "base_url", "http://localhost:8082/v1"
