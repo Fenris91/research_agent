@@ -1,0 +1,66 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*.egg-info
+*.egg
+dist
+build
+.eggs
+
+# Virtual environments
+venv
+.venv
+ENV
+env
+.conda
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Data & cache (mounted as volumes)
+data/
+cache/
+logs/
+exports/
+
+# Secrets
+.env
+.env.local
+*.local.yaml
+secrets/
+
+# Large files
+*.pdf
+*.csv
+*.xlsx
+*.bin
+*.safetensors
+*.gguf
+models/
+
+# Notebooks & docs (not needed in container)
+notebooks/
+docs/
+*.ipynb
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache
+.tox
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
