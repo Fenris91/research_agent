@@ -2882,64 +2882,17 @@ def launch_app(agent=None, port: int = 7860, share: bool = False):
 
 
 if __name__ == "__main__":
-    # Launch with agent
-    import os
-    from pathlib import Path
-
-    # Check for Ollama preference via environment variable
-    # Default: use Ollama with qwen3:32b (most capable), falls back to mistral-small3.2
-    use_ollama = os.getenv("USE_OLLAMA", "true").lower() == "true"
-    ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:32b")
-    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-
-    def _load_ui_config():
-        config_path = Path("configs/config.yaml")
-        if not config_path.exists():
-            return {}
-        try:
-            import yaml
-
-            with config_path.open("r", encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-        except Exception:
-            return {}
+    from research_agent.main import build_agent_from_config, load_config
 
     agent = None
     try:
-        from research_agent.agents.research_agent import ResearchAgent
-        from research_agent.db.vector_store import ResearchVectorStore
-        from research_agent.db.embeddings import get_embedder
-
-        print("Initializing Research Agent...")
-        cfg = _load_ui_config()
-        embed_cfg = cfg.get("embedding", {})
-        vec_cfg = cfg.get("vector_store", {})
-
-        embedder = get_embedder(
-            model_name=embed_cfg.get("name", "BAAI/bge-base-en-v1.5"),
-            device=embed_cfg.get("device"),
-        )
-        vector_store = ResearchVectorStore(
-            persist_dir=vec_cfg.get("persist_directory", "./data/chroma_db")
-        )
-        if use_ollama:
-            print(f"Using Ollama model: {ollama_model}")
-            agent = ResearchAgent(
-                vector_store=vector_store,
-                embedder=embedder,
-                use_ollama=True,
-                ollama_model=ollama_model,
-                ollama_base_url=ollama_url,
-            )
-        else:
-            print("Using HuggingFace models (set USE_OLLAMA=true to use Ollama)")
-            agent = ResearchAgent(vector_store=vector_store, embedder=embedder)
-        print("✓ Agent loaded successfully")
-        launch_app(agent=agent)
+        config = load_config()
+        agent = build_agent_from_config(config)
+        print("Agent loaded successfully")
     except Exception as e:
-        print(f"⚠️ Failed to load agent: {e}")
+        print(f"Failed to load agent: {e}")
         import traceback
-
         traceback.print_exc()
         print("\nLaunching in demo mode...")
-        launch_app(agent=None)
+
+    launch_app(agent=agent)
