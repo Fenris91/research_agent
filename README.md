@@ -43,10 +43,10 @@ conda create -n research_agent python=3.11
 conda activate research_agent
 
 # 3. Install dependencies
-pip install -r requirements.txt
+pip install -r requirements-runtime.txt
 
 # 4. Run the UI
-python -m research_agent.ui.app
+python -m research_agent.main --mode ui
 ```
 
 ## Usage Examples
@@ -231,6 +231,12 @@ researcher_lookup:
 | Unpaywall | Generous | Email only |
 
 ## Development
+
+Install full dev dependencies:
+
+```bash
+pip install -r requirements.txt
+```
 
 ```bash
 # Run tests

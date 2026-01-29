@@ -35,10 +35,10 @@ RUN pip install --no-cache-dir \
     --index-url https://download.pytorch.org/whl/cpu
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY requirements-runtime.txt .
 # Skip torch/torchvision/torchaudio (already installed above as CPU-only)
 # and skip bitsandbytes (CUDA-only, not needed for CPU)
-RUN grep -v -E '^(torch|torchvision|torchaudio|bitsandbytes)' requirements.txt > requirements-docker.txt \
+RUN grep -v -E '^(torch|torchvision|torchaudio|bitsandbytes)' requirements-runtime.txt > requirements-docker.txt \
     && pip install --no-cache-dir -r requirements-docker.txt \
     && rm requirements-docker.txt
 
@@ -74,8 +74,8 @@ RUN pip install --no-cache-dir \
     torch torchvision torchaudio \
     --index-url https://download.pytorch.org/whl/cu124
 
-COPY requirements.txt .
-RUN grep -v -E '^(torch|torchvision|torchaudio)' requirements.txt > requirements-docker.txt \
+COPY requirements-runtime.txt .
+RUN grep -v -E '^(torch|torchvision|torchaudio)' requirements-runtime.txt > requirements-docker.txt \
     && pip install --no-cache-dir -r requirements-docker.txt \
     && rm requirements-docker.txt
 
