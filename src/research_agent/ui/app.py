@@ -2861,7 +2861,7 @@ def create_app(agent=None):
     return app
 
 
-def launch_app(agent=None, port: int = 7860, share: bool = False):
+def launch_app(agent=None, port: int = 7860, share: bool = False, host: str = None):
     """
     Launch the Gradio app.
 
@@ -2869,9 +2869,13 @@ def launch_app(agent=None, port: int = 7860, share: bool = False):
         agent: ResearchAgent instance
         port: Port to run on
         share: Create public link
+        host: Server hostname/IP to bind to (default: 127.0.0.1, use 0.0.0.0 for Docker)
     """
     app = create_app(agent)
-    app.launch(server_port=port, share=share, show_error=True)
+    kwargs = {"server_port": port, "share": share, "show_error": True}
+    if host:
+        kwargs["server_name"] = host
+    app.launch(**kwargs)
 
 
 if __name__ == "__main__":

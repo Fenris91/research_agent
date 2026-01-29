@@ -6,6 +6,7 @@ Uses sentence-transformers for local embeddings.
 """
 
 import logging
+import os
 from typing import List, Optional, Union
 
 logger = logging.getLogger(__name__)
@@ -50,17 +51,30 @@ class EmbeddingModel:
         if self._model is None:
             try:
                 from sentence_transformers import SentenceTransformer
-
-                self._model = SentenceTransformer(
-                    self.model_name,
-                    device=self._device
-                )
-                logger.info(f"Loaded embedding model: {self.model_name}")
             except ImportError:
                 raise ImportError(
                     "sentence-transformers required. "
                     "Install with: pip install sentence-transformers"
                 )
+
+            device = self._device or os.environ.get("EMBEDDING_DEVICE")
+            try:
+                self._model = SentenceTransformer(
+                    self.model_name,
+                    device=device
+                )
+            except (RuntimeError, AssertionError):
+                if device and device != "cpu":
+                    logger.warning(
+                        f"Failed to load embeddings on '{device}', falling back to CPU"
+                    )
+                    self._model = SentenceTransformer(
+                        self.model_name,
+                        device="cpu"
+                    )
+                else:
+                    raise
+            logger.info(f"Loaded embedding model: {self.model_name} on {self._model.device}")
 
     @property
     def dimension(self) -> int:

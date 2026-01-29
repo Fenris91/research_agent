@@ -118,6 +118,9 @@ def main():
     parser.add_argument(
         "--share", action="store_true", help="Create public Gradio link"
     )
+    parser.add_argument(
+        "--host", type=str, default=None, help="Host to bind to (use 0.0.0.0 for Docker)"
+    )
 
     args = parser.parse_args()
     config = load_config(args.config)
@@ -125,7 +128,7 @@ def main():
     if args.mode == "check":
         run_checks()
     elif args.mode == "ui":
-        run_ui(config, args.port, args.share)
+        run_ui(config, args.port, args.share, args.host)
     elif args.mode == "cli":
         run_cli(config)
 
@@ -233,7 +236,7 @@ def run_checks():
     print("=" * 50)
 
 
-def run_ui(config: dict, port: int, share: bool):
+def run_ui(config: dict, port: int, share: bool, host: str = None):
     """Launch the Gradio UI."""
     print("Starting Research Agent UI...")
 
@@ -241,7 +244,7 @@ def run_ui(config: dict, port: int, share: bool):
 
     from research_agent.ui import launch_app
 
-    launch_app(agent=agent, port=port, share=share)
+    launch_app(agent=agent, port=port, share=share, host=host)
 
 
 def run_cli(config: dict):
@@ -273,10 +276,6 @@ def run_cli(config: dict):
         except KeyboardInterrupt:
             print("\nGoodbye!")
             break
-
-
-if __name__ == "__main__":
-    main()
 
 
 def build_agent_from_config(config: dict):
@@ -398,3 +397,7 @@ def build_agent_from_config(config: dict):
         openai_compat_api_key=openai_compat_api_key,
         openai_compat_models=openai_compat_models,
     )
+
+
+if __name__ == "__main__":
+    main()

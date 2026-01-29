@@ -1,0 +1,48 @@
+# Research Agent - Docker Compose
+#
+# Quick start:
+#   1. Copy .env.example to .env and add your API keys
+#   2. docker compose up --build
+#   3. Open http://localhost:7860
+#
+# To use with an external Ollama server, set OLLAMA_HOST in .env:
+#   OLLAMA_HOST=http://host.docker.internal:11434
+
+services:
+  research-agent:
+    build:
+      context: .
+      target: cpu  # Change to "gpu" for NVIDIA GPU support
+    container_name: research-agent
+    ports:
+      - "7860:7860"
+    env_file:
+      - .env
+    environment:
+      - EMBEDDING_DEVICE=cpu
+      # Connect to Ollama on the host machine (if running)
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    volumes:
+      # Persistent data
+      - ra-data:/app/data
+      - ra-logs:/app/logs
+      - ra-cache:/app/cache
+      - ra-exports:/app/exports
+      # HuggingFace model cache (avoids re-downloading embeddings)
+      - ra-hf-cache:/app/.hf_cache
+    restart: unless-stopped
+    # Uncomment for GPU support (requires nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  ra-data:
+  ra-logs:
+  ra-cache:
+  ra-exports:
+  ra-hf-cache:
