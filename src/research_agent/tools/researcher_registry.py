@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 from threading import Lock
 
 from research_agent.tools.researcher_lookup import ResearcherProfile, AuthorPaper
+from research_agent.db.researcher_store import ResearcherStore
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,23 @@ class ResearcherRegistry:
                 cls._instance = super().__new__(cls)
                 cls._instance._researchers: Dict[str, ResearcherProfile] = {}
                 cls._instance._registry_lock = Lock()
+                cls._instance._store = ResearcherStore()
+                cls._instance._load_from_store()
         return cls._instance
+
+    def _load_from_store(self) -> None:
+        """Populate in-memory cache from SQLite on startup."""
+        try:
+            profiles = self._store.load_all()
+            for profile in profiles:
+                key = profile.normalized_name or profile.name.lower().strip()
+                self._researchers[key] = profile
+            if profiles:
+                logger.info(
+                    f"Loaded {len(profiles)} researchers from persistent store"
+                )
+        except Exception:
+            logger.exception("Failed to load researchers from store")
 
     @classmethod
     def get_instance(cls) -> "ResearcherRegistry":
@@ -57,6 +74,10 @@ class ResearcherRegistry:
             key = profile.normalized_name or profile.name.lower().strip()
             self._researchers[key] = profile
             logger.debug(f"Added researcher to registry: {profile.name}")
+        try:
+            self._store.save_researcher(profile)
+        except Exception:
+            logger.exception(f"Failed to persist researcher: {profile.name}")
 
     def add_batch(self, profiles: List[ResearcherProfile]) -> None:
         """
@@ -70,6 +91,10 @@ class ResearcherRegistry:
                 key = profile.normalized_name or profile.name.lower().strip()
                 self._researchers[key] = profile
             logger.info(f"Added {len(profiles)} researchers to registry")
+        try:
+            self._store.save_researchers(profiles)
+        except Exception:
+            logger.exception("Failed to persist researcher batch")
 
     def get(self, name: str) -> Optional[ResearcherProfile]:
         """
@@ -151,6 +176,10 @@ class ResearcherRegistry:
             if key in self._researchers:
                 del self._researchers[key]
                 logger.debug(f"Removed researcher from registry: {name}")
+                try:
+                    self._store.delete_researcher(key)
+                except Exception:
+                    logger.exception(f"Failed to delete researcher from store: {name}")
                 return True
             return False
 
@@ -159,6 +188,10 @@ class ResearcherRegistry:
         with self._registry_lock:
             self._researchers.clear()
             logger.info("Cleared researcher registry")
+        try:
+            self._store.clear()
+        except Exception:
+            logger.exception("Failed to clear researcher store")
 
     def count(self) -> int:
         """Get the number of researchers in the registry."""

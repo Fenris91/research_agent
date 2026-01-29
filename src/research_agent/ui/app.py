@@ -2647,6 +2647,13 @@ def create_app(agent=None):
             outputs=[kb_stats, papers_table],
         )
 
+        # Initialize researcher dropdowns from persisted data on load
+        app.load(
+            refresh_context_choices,
+            inputs=[context_state],
+            outputs=[context_state, current_researcher],
+        )
+
         # Reranker toggle syncing (Chat + KB share state)
         reranker_enable_chat.change(
             _set_reranker_settings,
