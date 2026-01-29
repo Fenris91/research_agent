@@ -51,7 +51,7 @@ COPY configs/ configs/
 COPY src/ src/
 
 # Install the package (non-editable for container)
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . --no-deps
 
 # Set up directories and permissions for non-root user
 RUN mkdir -p data/chroma_db logs cache exports .hf_cache \
@@ -84,7 +84,7 @@ RUN pip install --no-cache-dir openai>=1.14.0 pytz
 COPY setup.py .
 COPY configs/ configs/
 COPY src/ src/
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . --no-deps
 
 RUN mkdir -p data/chroma_db logs cache exports .hf_cache \
     && chown -R agent:agent /app
