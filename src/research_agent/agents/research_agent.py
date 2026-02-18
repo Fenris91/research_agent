@@ -427,16 +427,38 @@ class ResearchAgent:
         if not query:
             return {**state, "error": "No query provided", "query_type": "general"}
 
+        # Fast pre-check: detect obvious casual/greeting messages without calling the LLM
+        query_lower = query.lower().strip()
+        casual_patterns = [
+            "hi", "hello", "hey", "how are you", "good morning", "good evening",
+            "good afternoon", "thanks", "thank you", "bye", "goodbye", "ok", "okay",
+            "sure", "yes", "no", "help", "what can you do", "who are you",
+        ]
+        if any(query_lower == p or query_lower.startswith(p + " ") or query_lower.startswith(p + "!") or query_lower.startswith(p + ",") for p in casual_patterns):
+            logger.info("Query classified as: general (casual pattern match)")
+            search_query = self._extract_search_keywords(query)
+            return {
+                **state,
+                "query_type": "general",
+                "search_query": search_query,
+                "should_search_external": False,
+            }
+
         # Use LLM to classify query type
-        classification_prompt = f"""Classify this research query into one category.
+        classification_prompt = f"""Classify this query into one category.
 
 Query: {query}
 
 Categories:
-- literature_review: Requests for overview of research on a topic, state of the field, key papers
-- factual: Specific factual questions that need precise answers from sources
-- analysis: Requests to analyze, compare, or evaluate concepts, theories, or findings
-- general: General questions, greetings, or unclear requests
+- literature_review: Requests for overview of research on a topic, state of the field, key papers, what does a report/paper say about something
+- factual: Specific factual questions about research content that need precise answers from sources
+- analysis: Requests to analyze, compare, or evaluate concepts, theories, or findings from research
+- general: Greetings, casual conversation, administrative questions, anything NOT about research content
+
+Rules:
+- If the query asks about what a paper/report says, classify as "factual" or "literature_review"
+- If the query is a greeting like "hi", "hello", "how are you", classify as "general"
+- When in doubt about research vs casual, prefer "factual"
 
 Respond with ONLY the category name, nothing else."""
 
@@ -747,12 +769,13 @@ Keywords:"""
                 f"(papers: {paper_count}, notes: {notes_count}, web: {web_count}{context_info})"
             )
 
-            # Decide if we need external search
-            should_search_external = len(
-                local_results
-            ) < self.config.min_local_results_to_skip_external or state.get(
-                "should_search_external", True
-            )
+            # Decide if we need external search.
+            # External search is skipped if:
+            #   - The query type doesn't warrant it (general/casual), OR
+            #   - We already have enough local results to answer the query.
+            query_type_wants_external = state.get("should_search_external", True)
+            not_enough_local = len(local_results) < self.config.min_local_results_to_skip_external
+            should_search_external = query_type_wants_external and not_enough_local
 
         except Exception as e:
             logger.error(f"Local search error: {e}")
@@ -972,7 +995,7 @@ Keywords:"""
             title = result.get("title", "Unknown")
             authors = result.get("authors", "")
             year = result.get("year", "")
-            content = result.get("content", "")[:500]  # Truncate content
+            content = result.get("content", "")[:800]  # Truncate content
             source = result.get("source", "unknown")
             source_label = source_labels.get(source, source)
             tags = result.get("tags", "")
@@ -996,34 +1019,65 @@ Keywords:"""
 
         # Build prompt based on query type
         if query_type == "literature_review":
-            instruction = """You are a research assistant. Provide a comprehensive literature review based on the sources.
-Structure your response with:
+            instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
+
+CRITICAL INSTRUCTIONS:
+- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
+- Answer based on the CONTENT of the chunks provided, not by matching title strings.
+- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
+- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
+
+Provide a comprehensive literature review based on the source content:
 1. Overview of the research landscape
-2. Key themes and findings
-3. Notable papers and their contributions
+2. Key themes and findings from the sources
+3. Notable contributions from each relevant source
 4. Research gaps or future directions
 
-Cite sources using [1], [2], etc."""
+Cite sources by their title using [1], [2], etc."""
 
         elif query_type == "factual":
-            instruction = """You are a research assistant. Provide a precise, factual answer based on the sources.
+            instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
+
+CRITICAL INSTRUCTIONS:
+- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
+- Answer based on the CONTENT of the chunks provided, not by matching title strings.
+- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
+- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
+
+Provide a precise, factual answer based on the source content.
 Be specific and cite your sources using [1], [2], etc.
 If sources conflict, note the disagreement."""
 
         elif query_type == "analysis":
-            instruction = """You are a research assistant. Provide a critical analysis based on the sources.
+            instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
+
+CRITICAL INSTRUCTIONS:
+- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
+- Answer based on the CONTENT of the chunks provided, not by matching title strings.
+- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
+- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
+
+Provide a critical analysis based on the source content.
 Compare different perspectives, evaluate evidence, and draw conclusions.
 Cite sources using [1], [2], etc."""
 
         else:  # general
-            instruction = """You are a helpful research assistant. Answer the question based on the available sources.
+            instruction = """You are a helpful research assistant with access to a personal knowledge base of ingested papers.
+
+CRITICAL INSTRUCTIONS:
+- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
+- Answer based on the CONTENT of the chunks provided, not by matching title strings.
+- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
+- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
+
+Answer the question based on the available source content.
 Be informative and cite sources where relevant using [1], [2], etc."""
 
         prompt = f"""{instruction}{context_section}
 
 Question: {query}
 
-Available Sources:
+Available Sources (use the content of these excerpts to answer — do not just match on titles):
 {sources_text}
 
 Response:"""
