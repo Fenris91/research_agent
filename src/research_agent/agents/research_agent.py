@@ -34,6 +34,7 @@ class ResearchState(TypedDict):
 
     messages: Annotated[List[Dict], operator.add]
     current_query: str
+    search_query: str  # Concise keywords extracted for API searches
     query_type: str  # "literature_review", "factual", "analysis", "general"
     search_results: List[Dict]
     local_results: List[Dict]
@@ -493,12 +494,49 @@ Respond with ONLY the category name, nothing else."""
             logger.error(f"Query classification error: {e}")
             query_type = "general"
 
+        # Extract concise search keywords from the full query
+        search_query = self._extract_search_keywords(query)
+        logger.info(f"Extracted search keywords: {search_query}")
+
         return {
             **state,
             "query_type": query_type,
+            "search_query": search_query,
             "should_search_external": query_type
             in ["literature_review", "factual", "analysis"],
         }
+
+    def _extract_search_keywords(self, query: str, max_len: int = 200) -> str:
+        """Extract concise search keywords from a potentially long user query.
+
+        Uses LLM when available, otherwise falls back to simple truncation.
+        """
+        # If already short enough, use as-is
+        if len(query) <= max_len:
+            return query
+
+        # Try LLM extraction
+        if self.model:
+            try:
+                prompt = f"""Extract 3-8 concise academic search keywords from this research query.
+Return ONLY the keywords separated by spaces, nothing else.
+
+Query: {query}
+
+Keywords:"""
+                keywords = self.infer(prompt, max_tokens=60).strip()
+                # Sanity check: if the LLM returned something reasonable
+                if 5 < len(keywords) < max_len and "\n" not in keywords:
+                    return keywords
+            except Exception as e:
+                logger.warning(f"LLM keyword extraction failed: {e}")
+
+        # Fallback: take first max_len chars, break at last space
+        truncated = query[:max_len]
+        last_space = truncated.rfind(" ")
+        if last_space > max_len // 2:
+            truncated = truncated[:last_space]
+        return truncated
 
     async def _search_local(self, state: ResearchState) -> Dict:
         """Search local vector store for relevant documents across all collections."""
@@ -728,7 +766,7 @@ Respond with ONLY the category name, nothing else."""
 
     async def _search_external(self, state: ResearchState) -> Dict:
         """Search external academic databases and web sources."""
-        query = state.get("current_query", "")
+        query = state.get("search_query") or state.get("current_query", "")
         external_results = []
         min_citations = max(0, int(self.config.min_citations or 0))
 
@@ -1106,6 +1144,7 @@ Response:"""
         initial_state: ResearchState = {
             "messages": [],
             "current_query": user_query,
+            "search_query": "",
             "query_type": "general",
             "search_results": [],
             "local_results": [],
@@ -1180,21 +1219,20 @@ Response:"""
             context: Optional context from UI (researcher, paper_id)
         """
         try:
-            return asyncio.run(self._run_async(user_query, search_filters, context))
-        except RuntimeError as e:
-            # Handle case where event loop already exists
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If loop is already running, create a task
-                import concurrent.futures
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
 
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(
-                        asyncio.run, self._run_async(user_query, search_filters, context)
-                    )
-                    return future.result()
-            else:
-                return asyncio.run(self._run_async(user_query, search_filters, context))
+        if loop and loop.is_running():
+            # Already in an async context (e.g. Gradio) — run in a new thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run, self._run_async(user_query, search_filters, context)
+                )
+                return future.result()
+        else:
+            return asyncio.run(self._run_async(user_query, search_filters, context))
 
     async def ingest_paper(self, paper_data: Dict) -> bool:
         """Ingest a new paper into the vector store."""

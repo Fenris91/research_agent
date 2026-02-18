@@ -27,7 +27,7 @@ def create_app(agent=None):
         Gradio Blocks app
     """
 
-    with gr.Blocks(title="Research Assistant", theme=gr.themes.Soft()) as app:
+    with gr.Blocks(title="Research Assistant") as app:
         gr.Markdown("""
         # Research Assistant
 
@@ -565,26 +565,36 @@ def create_app(agent=None):
         # Event handlers
 
         def get_available_models():
-            """Get list of available Ollama models."""
-            if agent is None or not agent.use_ollama:
-                return ["No Ollama models available"]
+            """Get list of available models for the current provider."""
+            if agent is None:
+                return ["No agent loaded"]
+
+            # Check provider type
+            provider = getattr(agent, "provider", None)
+            if provider not in {"ollama", "openai", "openai_compatible"}:
+                return ["Local model (no switching)"]
+
             try:
                 models = agent.list_available_models()
                 if models:
-                    # Sort with preferred models first
-                    preferred = [
-                        "qwen3:32b",
-                        "qwen2.5-coder:32b",
-                        "mistral-small3.2:latest",
-                    ]
-                    sorted_models = []
-                    for p in preferred:
-                        if p in models:
-                            sorted_models.append(p)
-                    for m in models:
-                        if m not in sorted_models:
-                            sorted_models.append(m)
-                    return sorted_models
+                    if provider == "ollama":
+                        # Sort Ollama models with preferred first
+                        preferred = [
+                            "qwen3:32b",
+                            "qwen2.5-coder:32b",
+                            "mistral-small3.2:latest",
+                        ]
+                        sorted_models = []
+                        for p in preferred:
+                            if p in models:
+                                sorted_models.append(p)
+                        for m in models:
+                            if m not in sorted_models:
+                                sorted_models.append(m)
+                        return sorted_models
+                    else:
+                        # OpenAI/compatible - return as-is
+                        return models
                 return ["No models found"]
             except Exception as e:
                 logger.error(f"Error getting models: {e}")
@@ -1483,9 +1493,6 @@ def create_app(agent=None):
 
             # Run async lookup
             try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
                 async def lookup_all():
                     profiles = []
                     for name in names:
@@ -1499,8 +1506,16 @@ def create_app(agent=None):
                         profiles.append(profile)
                     return profiles
 
-                profiles = loop.run_until_complete(lookup_all())
-                loop.run_until_complete(lookup.close())
+                async def run_lookup():
+                    try:
+                        return await lookup_all()
+                    finally:
+                        await lookup.close()
+
+                # Use a new event loop in a thread to avoid conflicts with Gradio's loop
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    profiles = pool.submit(asyncio.run, run_lookup()).result()
             except Exception as e:
                 logger.error(f"Lookup error: {e}")
                 import traceback
@@ -2879,7 +2894,7 @@ def launch_app(agent=None, port: int = 7860, share: bool = False, host: str = No
         host: Server hostname/IP to bind to (default: 127.0.0.1, use 0.0.0.0 for Docker)
     """
     app = create_app(agent)
-    kwargs = {"server_port": port, "share": share, "show_error": True}
+    kwargs = {"server_port": port, "share": share, "show_error": True, "theme": gr.themes.Soft()}
     if host:
         kwargs["server_name"] = host
     app.launch(**kwargs)

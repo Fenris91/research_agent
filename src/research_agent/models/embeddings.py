@@ -11,7 +11,7 @@ import numpy as np
 
 
 def load_embedding_model(
-    model_name: str = "BAAI/bge-large-en-v1.5", device: str = "cuda"
+    model_name: str = "BAAI/bge-base-en-v1.5", device: str = "cuda"
 ):
     """
     Load embedding model for semantic search.

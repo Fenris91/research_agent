@@ -111,7 +111,7 @@ class WebSearchTool:
 
         try:
             # DDGS is synchronous, run in executor
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def do_search():
                 import warnings

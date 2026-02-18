@@ -295,6 +295,15 @@ def build_agent_from_config(config: dict):
         print("Auto-detecting LLM provider...")
         provider, detected_cloud_config = detect_available_provider(config)
         print(f"  Selected provider: {provider}")
+    elif provider in CLOUD_PROVIDERS:
+        # Explicit cloud provider selection
+        cloud_cfg = CLOUD_PROVIDERS[provider]
+        api_key = os.getenv(cloud_cfg["api_key_env"])
+        if api_key:
+            print(f"Using {cloud_cfg['name']}...")
+            detected_cloud_config = cloud_cfg
+        else:
+            print(f"Warning: {provider} selected but {cloud_cfg['api_key_env']} not set")
 
     use_ollama = provider == "ollama"
     ollama_base_url = model_cfg.get("ollama_base_url", "http://localhost:11434")
