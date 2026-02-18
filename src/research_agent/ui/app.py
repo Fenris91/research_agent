@@ -557,6 +557,57 @@ def create_app(agent=None):
                     analyze_btn = gr.Button("Analyze", variant="primary", scale=2)
                     download_plot_btn = gr.Button("Download Plot", scale=1)
 
+            with gr.Tab("Concept Map"):
+                gr.Markdown("""
+                ## Concept Cluster Map
+
+                Visualize your knowledge base as an interactive 2D map.
+                Chunks that are **semantically similar** appear close together;
+                groups are automatically labelled with their dominant themes.
+
+                **Shapes:** ● Papers &nbsp; ◆ Notes &nbsp; ■ Web sources
+                """)
+
+                with gr.Row():
+                    cm_max_chunks = gr.Slider(
+                        minimum=100,
+                        maximum=2000,
+                        value=800,
+                        step=100,
+                        label="Max chunks per collection",
+                        info="Higher = more detail, slower to compute",
+                        scale=3,
+                    )
+                    cm_dim_method = gr.Radio(
+                        choices=["UMAP", "t-SNE"],
+                        value="UMAP",
+                        label="Dimensionality reduction",
+                        info="UMAP is faster and better at preserving global structure",
+                        scale=2,
+                    )
+                    cm_n_clusters = gr.Slider(
+                        minimum=0,
+                        maximum=20,
+                        value=0,
+                        step=1,
+                        label="Number of clusters (0 = auto)",
+                        info="Auto uses √(N/2) heuristic, capped at 15",
+                        scale=2,
+                    )
+
+                with gr.Row():
+                    cm_generate_btn = gr.Button(
+                        "Generate Concept Map", variant="primary", scale=2
+                    )
+
+                cm_status = gr.Textbox(
+                    label="Status",
+                    interactive=False,
+                    placeholder="Click 'Generate Concept Map' to visualize your knowledge base",
+                )
+
+                cm_plot = gr.Plot(label="Concept Map", show_label=False)
+
             analysis_output = gr.Markdown(label="Results")
 
             analysis_plot = gr.Plot(label="Visualization")
@@ -2393,6 +2444,25 @@ def create_app(agent=None):
                         break
             return found
 
+        def generate_concept_map(max_chunks, dim_method, n_clusters_raw):
+            """Generate an interactive 2D concept cluster map from the vector store."""
+            from research_agent.ui.visualization import build_concept_map
+
+            store, _, _ = _get_kb_resources()
+            n_clusters = None if int(n_clusters_raw) == 0 else int(n_clusters_raw)
+            dim_reduction = "umap" if dim_method == "UMAP" else "tsne"
+            try:
+                fig, status = build_concept_map(
+                    store,
+                    max_chunks=int(max_chunks),
+                    n_clusters=n_clusters,
+                    dim_reduction=dim_reduction,
+                )
+                return fig, status
+            except Exception as e:
+                logger.error(f"Concept map error: {e}")
+                return None, f"Error generating concept map: {e}"
+
         # Wire up events
         msg.submit(
             respond,
@@ -2878,6 +2948,13 @@ def create_app(agent=None):
         download_plot_btn.click(
             download_current_plot,
             outputs=[plot_download],
+        )
+
+        # Concept map events
+        cm_generate_btn.click(
+            generate_concept_map,
+            inputs=[cm_max_chunks, cm_dim_method, cm_n_clusters],
+            outputs=[cm_plot, cm_status],
         )
 
     return app
