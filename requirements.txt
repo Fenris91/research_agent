@@ -66,6 +66,7 @@ networkx>=3.0     # Graph visualization for context maps
 # UI
 # ============================================
 gradio>=4.25.0
+jinja2>=3.1.0  # Used directly by Knowledge Explorer (also a Gradio transitive dep)
 
 # ============================================
 # Utilities

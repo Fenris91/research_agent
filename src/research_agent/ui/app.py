@@ -13,6 +13,8 @@ from pathlib import Path
 
 import gradio as gr
 
+from research_agent.explorer import ExplorerRenderer, GraphBuilder, get_mock_graph_data
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,170 +29,499 @@ def create_app(agent=None):
         Gradio Blocks app
     """
 
+    # ── Dark theme matching the knowledge explorer ──────────────────
+    explorer_theme = gr.themes.Base(
+        primary_hue=gr.themes.colors.red,
+        neutral_hue=gr.themes.colors.slate,
+        font=gr.themes.GoogleFont("IBM Plex Mono"),
+        font_mono=gr.themes.GoogleFont("IBM Plex Mono"),
+    ).set(
+        # Background
+        body_background_fill="#0a0d13",
+        body_background_fill_dark="#0a0d13",
+        background_fill_primary="#0e1219",
+        background_fill_primary_dark="#0e1219",
+        background_fill_secondary="#0a0d13",
+        background_fill_secondary_dark="#0a0d13",
+        # Text
+        body_text_color="#c8d0e0",
+        body_text_color_dark="#c8d0e0",
+        body_text_color_subdued="#5a6580",
+        body_text_color_subdued_dark="#5a6580",
+        # Blocks / panels
+        block_background_fill="#0e1219",
+        block_background_fill_dark="#0e1219",
+        block_border_color="#1a1f2e",
+        block_border_color_dark="#1a1f2e",
+        block_label_background_fill="#0e1219",
+        block_label_background_fill_dark="#0e1219",
+        block_label_text_color="#5a6580",
+        block_label_text_color_dark="#5a6580",
+        block_title_text_color="#c8d0e0",
+        block_title_text_color_dark="#c8d0e0",
+        block_title_background_fill="#0e1219",
+        block_title_background_fill_dark="#0e1219",
+        block_shadow="none",
+        block_shadow_dark="none",
+        # Borders
+        border_color_accent="#c45c4a",
+        border_color_accent_dark="#c45c4a",
+        border_color_primary="#1a1f2e",
+        border_color_primary_dark="#1a1f2e",
+        color_accent="#c45c4a",
+        color_accent_soft="#c45c4a15",
+        color_accent_soft_dark="#c45c4a15",
+        # Input
+        input_background_fill="#0a0e16",
+        input_background_fill_dark="#0a0e16",
+        input_border_color="#1a1f2e",
+        input_border_color_dark="#1a1f2e",
+        input_border_color_focus="#c45c4a40",
+        input_border_color_focus_dark="#c45c4a40",
+        input_placeholder_color="#3e4a64",
+        input_placeholder_color_dark="#3e4a64",
+        input_shadow="none",
+        input_shadow_dark="none",
+        input_shadow_focus="none",
+        input_shadow_focus_dark="none",
+        # Buttons
+        button_primary_background_fill="#c45c4a",
+        button_primary_background_fill_dark="#c45c4a",
+        button_primary_text_color="white",
+        button_primary_text_color_dark="white",
+        button_primary_background_fill_hover="#d4705f",
+        button_primary_background_fill_hover_dark="#d4705f",
+        button_primary_border_color="#c45c4a",
+        button_primary_border_color_dark="#c45c4a",
+        button_primary_shadow="none",
+        button_primary_shadow_dark="none",
+        button_secondary_background_fill="#1a1f2e",
+        button_secondary_background_fill_dark="#1a1f2e",
+        button_secondary_text_color="#c8d0e0",
+        button_secondary_text_color_dark="#c8d0e0",
+        button_secondary_border_color="#1a1f2e",
+        button_secondary_border_color_dark="#1a1f2e",
+        button_secondary_shadow="none",
+        button_secondary_shadow_dark="none",
+        # Shadows
+        shadow_drop="none",
+        shadow_drop_lg="none",
+        shadow_spread="0px",
+        shadow_spread_dark="0px",
+        # Panel
+        panel_background_fill="#0e1219",
+        panel_background_fill_dark="#0e1219",
+        panel_border_color="#1a1f2e",
+        panel_border_color_dark="#1a1f2e",
+        # Table
+        table_border_color="#1a1f2e",
+        table_border_color_dark="#1a1f2e",
+        table_even_background_fill="#0e1219",
+        table_even_background_fill_dark="#0e1219",
+        table_odd_background_fill="#0a0d13",
+        table_odd_background_fill_dark="#0a0d13",
+        table_text_color="#c8d0e0",
+        table_text_color_dark="#c8d0e0",
+        # Accordion
+        accordion_text_color="#5a6580",
+        accordion_text_color_dark="#5a6580",
+        # Checkbox
+        checkbox_shadow="none",
+        checkbox_label_shadow="none",
+    )
+
+    explorer_css = """
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+
+    /*
+     * Layout: pure flexbox propagation using :has() selectors to target
+     * only the Gradio wrapper divs in the chain leading to #split-pane.
+     * !important used only where Gradio's Svelte scoped CSS must yield.
+     */
+
+    /* ── Dark scrollbars ─────────────────────────── */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: #1a1f2e #0a0d13;
+    }
+    *::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+    *::-webkit-scrollbar-track {
+        background: #0a0d13;
+    }
+    *::-webkit-scrollbar-thumb {
+        background: #1a1f2e;
+        border-radius: 3px;
+    }
+    *::-webkit-scrollbar-thumb:hover {
+        background: #2a3048;
+    }
+
+    /* ── Viewport ────────────────────────────────── */
+    html, body {
+        height: 100dvh;
+        height: 100vh;
+        overflow: hidden;
+    }
+    .gradio-container {
+        max-width: 100% !important;             /* theme sets 768/1280px */
+        padding: 0 2px !important;              /* theme sets 16px+ */
+        height: 100dvh;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    /* Target only the wrapper divs that lead to #split-pane */
+    div:has(> div > #split-pane),
+    div:has(> #split-pane) {
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    /* ── Top bar ─────────────────────────────────── */
+    #top-bar {
+        background: #0e1219;
+        border: 1px solid #1a1f2e;
+        border-radius: 4px;
+        padding: 3px 8px;
+        gap: 6px;
+        margin-bottom: 2px;
+        min-height: 0;
+        align-items: center;
+        flex: 0 0 auto;
+    }
+    /* Reset ALL inner elements: no stray borders */
+    #top-bar * {
+        border-color: #1a1f2e !important;
+        box-shadow: none !important;
+        outline: none !important;
+        min-height: 0;
+    }
+    #top-bar > div {
+        padding: 0;
+        border: none !important;
+        background: none;
+    }
+    #top-bar input,
+    #top-bar .wrap {
+        font-size: 10px;
+        padding: 4px 8px;
+        line-height: 1.2;
+        background: #0e1219;
+        border: 1px solid #1a1f2e !important;
+        border-radius: 4px;
+        color: #c8d0e0;
+    }
+    #top-bar input:focus,
+    #top-bar .wrap:focus-within {
+        border-color: #c45c4a40 !important;
+    }
+    #top-bar .wrap .icon-wrap,
+    #top-bar .wrap svg {
+        color: #3e4a64;
+        width: 12px;
+        height: 12px;
+    }
+    #top-bar button {
+        font-size: 9px;
+        padding: 4px 10px;
+        line-height: 1.2;
+        border-radius: 4px;
+    }
+    /* Researcher chip: active (selected) state */
+    #top-bar .researcher-active input {
+        background: #1a1f2e !important;
+        border-color: #c45c4a40 !important;
+        color: #e0d0c8 !important;
+        font-weight: 600 !important;
+    }
+    /* GO/× button sizing */
+    #top-bar .researcher-go-btn {
+        font-size: 8px !important;
+        padding: 4px 8px !important;
+        min-width: 28px !important;
+        letter-spacing: 0.5px;
+    }
+    /* Context layer buttons */
+    #top-bar .ctx-layer-btn {
+        font-size: 7px !important;
+        padding: 3px 8px !important;
+        min-width: 32px !important;
+        letter-spacing: 0.8px;
+        color: #2e3648;
+    }
+    #top-bar .ctx-active {
+        border-color: rgba(196, 92, 74, 0.5) !important;
+        color: #c45c4a !important;
+        background: rgba(196, 92, 74, 0.06) !important;
+    }
+
+    /* ── Split pane ──────────────────────────────── */
+    #split-pane {
+        flex: 1 1 0 !important;                 /* override Svelte row height */
+        min-height: 0;
+        gap: 4px;
+        overflow: hidden;
+    }
+    #split-pane > div {
+        border: 1px solid #1a1f2e;
+        border-radius: 6px;
+        overflow: hidden;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* ── Chat pane ───────────────────────────────── */
+    #chat-col {
+        background: #0e1219;
+        padding: 0 !important;                  /* Svelte column padding */
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    /* Kill all grey borders from Svelte block wrappers */
+    #chat-col * {
+        border-color: transparent !important;
+    }
+    #chat-col #chat-input {
+        border-top: 1px solid #1a1f2e !important;
+    }
+    #chat-col #chat-input input {
+        border: 1px solid #1a1f2e !important;
+    }
+    #chat-col #chat-input input:focus {
+        border-color: #c45c4a40 !important;
+    }
+    /* Every wrapper div above the chatbot must propagate flex */
+    #chat-col > div:has(.chatbot) {
+        flex: 1 1 0 !important;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        padding: 0;
+    }
+    /* Chatbot component and all its inner wrappers fill space */
+    #chat-col .chatbot,
+    #chat-col .chatbot > div {
+        flex: 1 1 0 !important;
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0;
+        border-radius: 0;
+        background: #0e1219;
+    }
+    #chat-col .chatbot .bubble-wrap {
+        height: 100%;
+    }
+    /* Chat input + clear pinned to bottom */
+    #chat-input {
+        padding: 6px 10px;
+        border-top: 1px solid #1a1f2e;
+        gap: 4px;
+        background: #0e1219;
+        flex: 0 0 auto !important;
+    }
+    #chat-input > div {
+        border: none;
+        background: none;
+        padding: 0;
+        min-height: 0;
+    }
+    #chat-input input {
+        font-size: 10px;
+        padding: 6px 10px;
+        background: #0a0e16;
+        border: 1px solid #1a1f2e;
+        border-radius: 4px;
+        color: #c8d0e0;
+    }
+    #chat-input input:focus {
+        border-color: #c45c4a40;
+    }
+    #chat-input button {
+        font-size: 9px;
+        letter-spacing: 0.5px;
+        padding: 6px 12px;
+        border-radius: 4px;
+        min-height: 0;
+    }
+
+    /* ── Explorer pane ───────────────────────────── */
+    #explorer-col {
+        padding: 0 !important;                  /* Svelte column padding */
+        background: #0a0d13;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    /* Propagate flex through all Gradio wrapper divs */
+    #explorer-col > div,
+    #explorer-col > div > div,
+    #explorer-col > div > div > div {
+        flex: 1 1 0 !important;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        border: none;
+        padding: 0;
+        overflow: hidden;
+        position: relative;
+    }
+
+    /* ── Knowledge Management accordion ──────────── */
+    #km-accordion {
+        margin-top: 2px;
+        border: 1px solid #1a1f2e;
+        border-radius: 4px;
+        flex: 0 0 auto;
+        max-height: 45vh;
+        overflow-y: auto;
+    }
+    #km-accordion .label-wrap {
+        font-size: 8px;
+        letter-spacing: 0.8px;
+        padding: 3px 10px;
+    }
+    #km-accordion .tabitem {
+        max-height: 40vh;
+        overflow-y: auto;
+    }
+    """
+
+    _pwa_head = """
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="theme-color" content="#0a0d13">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <script>
+    /* Send layer change to explorer iframe */
+    function sendLayerToExplorer(layer) {
+      var iframe = document.querySelector("#explorer-col iframe");
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage({type: "set-layer", layer: layer}, "*");
+      }
+    }
+    /* Listen for layer changes FROM explorer iframe (bottom buttons) */
+    window.addEventListener("message", function(e) {
+      if (e.data && e.data.type === "explorer-layer") {
+        /* Sync top-bar button classes */
+        var layer = e.data.layer;
+        document.querySelectorAll(".ctx-layer-btn").forEach(function(btn) {
+          var classes = btn.className.split(" ").filter(function(c) { return c !== "ctx-active"; });
+          if (btn.textContent.trim() === layer.toUpperCase()) classes.push("ctx-active");
+          btn.className = classes.join(" ");
+        });
+      }
+    });
+    </script>
+    """
+
     with gr.Blocks(
         title="Research Assistant",
-        theme=gr.themes.Soft(),
     ) as app:
+        app._explorer_theme = explorer_theme
+        app._explorer_css = explorer_css
+        app._pwa_head = _pwa_head
         # Shared state
-        context_state = gr.State({"researcher": None, "paper_id": None})
+        context_state = gr.State({
+            "researcher": None, "paper_id": None,
+            "active_layer": "soc", "chat_context": None,
+        })
         _query_state = gr.State({"query": None, "chunks": []})
 
-        # ── TOP BAR ──────────────────────────────────────────────────────
-        with gr.Row(equal_height=True):
+        # ── TOP BAR ────────────────────────────────────────────────────
+        with gr.Row(equal_height=True, elem_id="top-bar"):
+            topbar_researcher = gr.Textbox(
+                placeholder="Researcher (press Enter to look up)",
+                show_label=False,
+                container=False,
+                scale=2,
+                min_width=140,
+            )
+            topbar_go_btn = gr.Button(
+                "GO", variant="secondary", scale=0, min_width=32,
+                elem_classes=["researcher-go-btn"],
+            )
+            kb_view_btn = gr.Button("KB", variant="secondary", scale=0, min_width=50)
             model_dropdown = gr.Dropdown(
                 choices=["Loading..."],
                 value="Loading...",
-                label="Model",
-                scale=3,
-                interactive=True,
-                min_width=160,
-            )
-            kb_status_display = gr.Textbox(
-                value="KB: — chunks  ● Loading",
-                label=None,
-                container=False,
-                interactive=False,
-                scale=3,
                 show_label=False,
-            )
-            refresh_models_btn = gr.Button("↺", scale=1, min_width=42, variant="secondary")
-            settings_toggle_btn = gr.Button("⚙ Settings", scale=1, min_width=100, variant="secondary")
-
-        # Hidden current_model_display for event-handler compat
-        current_model_display = gr.Textbox(visible=False, interactive=False, label="Current Model")
-
-        # ── SETTINGS ACCORDION (collapsed by default) ─────────────────────
-        with gr.Accordion("⚙  Settings", open=False, visible=True) as settings_accordion:
-            with gr.Row():
-                with gr.Column(scale=2):
-                    gr.Markdown("### Search Settings")
-                    with gr.Row():
-                        search_depth = gr.Slider(
-                            minimum=1,
-                            maximum=20,
-                            value=5,
-                            step=1,
-                            label="Max external results per source",
-                        )
-                        auto_ingest = gr.Checkbox(
-                            label="Automatically add high-quality sources to knowledge base",
-                            value=False,
-                        )
-
-                    gr.Markdown("### Search Filters")
-                    with gr.Row():
-                        year_from_chat = gr.Slider(
-                            minimum=1900,
-                            maximum=2030,
-                            value=1900,
-                            step=1,
-                            label="From Year",
-                            info="Use 1900 for no lower bound",
-                        )
-                        year_to_chat = gr.Slider(
-                            minimum=1900,
-                            maximum=2030,
-                            value=2030,
-                            step=1,
-                            label="To Year",
-                            info="Use 2030 for no upper bound",
-                        )
-                    min_citations_chat = gr.Slider(
-                        minimum=0,
-                        maximum=1000,
-                        value=0,
-                        step=10,
-                        label="Min citations",
-                        info="0 to disable",
-                    )
-
-                with gr.Column(scale=1):
-                    gr.Markdown("### Reranker (Retrieval)")
-                    with gr.Row():
-                        reranker_enable_chat = gr.Checkbox(
-                            label="Enable reranker (BGE)",
-                            value=False,
-                            info="Improves ranking of retrieved chunks",
-                        )
-                        rerank_topk_chat = gr.Slider(
-                            minimum=1,
-                            maximum=50,
-                            value=10,
-                            step=1,
-                            label="Rerank top-k",
-                            info="How many results to rerank",
-                        )
-                    rerank_status_chat = gr.Textbox(
-                        label="Reranker Status",
-                        interactive=False,
-                        placeholder="Using config defaults",
-                    )
-
-        # ── CONTEXT ROW ───────────────────────────────────────────────────
-        with gr.Row():
-            current_researcher = gr.Dropdown(
-                choices=[],
-                label="Researcher",
-                interactive=True,
-                value=None,
-                allow_custom_value=True,
-                scale=3,
-            )
-            current_paper_id = gr.Textbox(
-                label="Paper ID",
-                interactive=True,
-                placeholder="Current paper context",
-                scale=3,
-            )
-            refresh_context_btn = gr.Button("↺", scale=1, min_width=42)
-            analyze_current_researcher_btn = gr.Button(
-                "Analyze Researcher",
-                variant="secondary",
-                scale=1,
-            )
-            analyze_current_paper_btn = gr.Button(
-                "Analyze Paper",
-                variant="secondary",
-                scale=1,
-            )
-
-        # ── CHAT ──────────────────────────────────────────────────────────
-        chatbot = gr.Chatbot(
-            height=460,
-            placeholder="Ask me about your research topic...",
-            type="messages",
-        )
-
-        with gr.Row():
-            msg = gr.Textbox(
-                placeholder="What are the key theories in urban anthropology?",
-                label="Your question",
-                scale=5,
-            )
-            submit = gr.Button("Send", variant="primary", scale=1)
-
-        with gr.Row():
-            clear = gr.Button("Clear Chat")
-
-        # ── CONTEXT MAP ───────────────────────────────────────────────────
-        with gr.Group():
-            gr.Markdown("### Context Map")
-            with gr.Row():
-                ctx_kb_btn = gr.Button("KB Graph", variant="secondary", scale=1)
-                ctx_researcher_btn = gr.Button("Researcher", variant="secondary", scale=1)
-                ctx_query_btn = gr.Button("Query", variant="secondary", scale=1)
-                ctx_citations_btn = gr.Button("Citations", variant="secondary", scale=1)
-            context_map_plot = gr.Plot(label="Context Map", show_label=False)
-            context_map_status = gr.Textbox(
-                interactive=False,
-                placeholder="Select a view above to generate the context map.",
-                label=None,
                 container=False,
-                show_label=False,
+                scale=2,
+                interactive=True,
+                min_width=140,
+            )
+            layer_soc_btn = gr.Button(
+                "SOC", variant="secondary", scale=0, min_width=40,
+                elem_classes=["ctx-layer-btn", "ctx-active"],
+            )
+            layer_auth_btn = gr.Button(
+                "AUTH", variant="secondary", scale=0, min_width=40,
+                elem_classes=["ctx-layer-btn"],
+            )
+            layer_chat_btn = gr.Button(
+                "CHAT", variant="secondary", scale=0, min_width=40,
+                elem_classes=["ctx-layer-btn"],
             )
 
-        # ── KNOWLEDGE MANAGEMENT (accordion, collapsed) ────────────────────
-        with gr.Accordion("Knowledge Management", open=False):
+        # Hidden components (needed by event handlers wired elsewhere)
+        with gr.Group(visible=False):
+            current_model_display = gr.Textbox(interactive=False, label="Current Model")
+            kb_status_display = gr.Textbox()
+            refresh_models_btn = gr.Button()
+            year_from_chat = gr.Slider(minimum=1900, maximum=2030, value=1900)
+            year_to_chat = gr.Slider(minimum=1900, maximum=2030, value=2030)
+            min_citations_chat = gr.Slider(minimum=0, maximum=1000, value=0)
+            reranker_enable_chat = gr.Checkbox(value=False)
+            rerank_topk_chat = gr.Slider(minimum=1, maximum=50, value=10)
+            rerank_status_chat = gr.Textbox()
+            current_researcher = gr.Dropdown(choices=[], allow_custom_value=True)
+            current_paper_id = gr.Textbox()
+            refresh_context_btn = gr.Button()
+            analyze_current_researcher_btn = gr.Button()
+            analyze_current_paper_btn = gr.Button()
+            ctx_kb_btn = gr.Button()
+            ctx_researcher_btn = gr.Button()
+            ctx_query_btn = gr.Button()
+            ctx_citations_btn = gr.Button()
+            context_map_plot = gr.Plot()
+            context_map_status = gr.Textbox()
+
+        # ── SPLIT PANE: Chat (left) + Explorer (right) ───────────────────
+        with gr.Row(equal_height=False, elem_id="split-pane"):
+          # LEFT PANE: Chat
+          with gr.Column(scale=2, min_width=340, elem_id="chat-col"):
+            chatbot = gr.Chatbot(
+                value=[{"role": "assistant", "content": "What are you researching?"}],
+            )
+
+            with gr.Row(elem_id="chat-input"):
+                msg = gr.Textbox(
+                    show_label=False,
+                    container=False,
+                    scale=8,
+                )
+                submit = gr.Button("SEND", variant="primary", scale=0, min_width=50)
+                clear = gr.Button("CLR", variant="secondary", scale=0, min_width=36)
+
+          # RIGHT PANE: Knowledge Explorer
+          with gr.Column(scale=3, elem_id="explorer-col"):
+            _renderer = ExplorerRenderer()
+            explorer_html = gr.HTML(
+                value=_renderer.render(get_mock_graph_data())
+            )
+
+        # ── KNOWLEDGE MANAGEMENT (collapsed) ───────────────────────────
+        with gr.Accordion("Knowledge Management", open=False, elem_id="km-accordion"):
             with gr.Tabs() as main_tabs:
 
                 # ── Knowledge Base tab ────────────────────────────────────
@@ -703,13 +1034,70 @@ def create_app(agent=None):
             # Return: dropdown choices, dropdown value, current model display
             return gr.update(choices=models, value=current), current
 
-        def respond(message, history, year_from, year_to, min_citations, context_state):
-            """Handle chat messages with optional context from selected researcher/paper."""
+        def add_user_message(message, history):
+            """Immediately show the user message in chat."""
+            history.append({"role": "user", "content": message})
+            return "", history
+
+        def _extract_chat_keywords(response_text, sources):
+            """Extract keywords from agent response for CHAT layer highlighting."""
+            import re
+            keywords = []
+
+            # Paper titles from sources
+            for s in (sources or []):
+                title = s.get("title", "")
+                if title and title != "Unknown":
+                    keywords.append(title)
+
+            # Numbered/bulleted items (e.g. "1. **Key Theme**" or "- Something")
+            items = re.findall(
+                r'(?:^|\n)\s*(?:\d+[\.\)]\s*|[-*]\s+)\**(.+?)\**(?:\n|$|:)',
+                response_text,
+            )
+            for item in items:
+                cleaned = item.strip().rstrip(".:").strip("*")
+                if 3 < len(cleaned) < 80:
+                    keywords.append(cleaned)
+
+            # Quoted phrases
+            quoted = re.findall(r'"([^"]{4,60})"', response_text)
+            keywords.extend(quoted)
+
+            # Deduplicate (case-insensitive)
+            seen = set()
+            unique = []
+            for kw in keywords:
+                lower = kw.lower()
+                if lower not in seen:
+                    seen.add(lower)
+                    unique.append(kw)
+
+            return {"keywords": unique[:15], "paper_titles": [
+                s.get("title", "") for s in (sources or []) if s.get("title")
+            ]}
+
+        def generate_response(history, year_from, year_to, min_citations, context_state):
+            """Process the last user message and generate a response."""
+            # Extract the last user message (Gradio 6 may use structured content)
+            raw_content = history[-1]["content"] if history else ""
+            if isinstance(raw_content, list):
+                # Gradio 6 structured content: [{"type": "text", "text": "..."}]
+                message = " ".join(
+                    block.get("text", "") if isinstance(block, dict) else str(block)
+                    for block in raw_content
+                ).strip() or ""
+            else:
+                message = str(raw_content)
+
+            new_state = dict(context_state or {})
+            explorer_update = gr.update()
+            layer_updates = (gr.update(), gr.update(), gr.update())
+            sources = []
+
             if agent is None:
-                # Demo mode
                 response = f"[Demo mode] You asked: {message}\n\nThe agent is not loaded. Run with a real agent to get responses."
             else:
-                # Real mode - call the agent
                 try:
                     filters = {
                         "year_from": int(year_from) if year_from else None,
@@ -733,22 +1121,85 @@ def create_app(agent=None):
                     )
                     response = result.get("answer", "No response generated")
 
-                    # Add context indicator if context was used
-                    if current_researcher or current_paper_id:
-                        context_info = []
-                        if current_researcher:
-                            context_info.append(f"researcher: {current_researcher}")
-                        if current_paper_id:
-                            context_info.append(f"paper: {current_paper_id[:20]}...")
-                        response = f"*[Context: {', '.join(context_info)}]*\n\n{response}"
+                    # Append source attribution section if sources exist
+                    sources = result.get("sources", [])
+                    named_sources = [
+                        s for s in sources
+                        if s.get("title") and s.get("title") != "Unknown"
+                    ]
+                    if named_sources:
+                        source_labels = {
+                            "local_kb": "KB",
+                            "local_note": "note",
+                            "local_web": "web",
+                            "semantic_scholar": "S2",
+                            "openalex": "OA",
+                            "web": "web",
+                        }
+                        seen_titles = set()
+                        source_parts = []
+                        for s in named_sources:
+                            title = s["title"]
+                            if title in seen_titles:
+                                continue
+                            seen_titles.add(title)
+                            tag = source_labels.get(s.get("source", ""), "")
+                            year = s.get("year")
+                            part = f"{title}"
+                            if year:
+                                part += f" ({year})"
+                            if tag:
+                                part += f" [{tag}]"
+                            source_parts.append(part)
+                        response += "\n\n---\n*" + " · ".join(source_parts) + "*"
+
+                    # Extract chat keywords for CHAT layer
+                    chat_ctx = _extract_chat_keywords(response, sources)
+                    new_state["chat_context"] = chat_ctx
+
+                    # Auto-switch to CHAT layer if keywords found
+                    if chat_ctx["keywords"]:
+                        new_state["active_layer"] = "chat"
+                        layer_updates = _layer_btn_classes("chat")
+                        renderer = ExplorerRenderer()
+                        researcher_name = new_state.get("researcher")
+                        if researcher_name:
+                            from research_agent.tools.researcher_registry import get_researcher_registry
+                            registry = get_researcher_registry()
+                            profile = registry.get(researcher_name)
+                            if profile:
+                                gb = GraphBuilder()
+                                rid = gb.add_researcher(profile.to_dict())
+                                for paper in (profile.top_papers or []):
+                                    pid = gb.add_paper(paper)
+                                    gb.add_authorship_edge(rid, pid)
+                                gb.build_structural_context()
+                                explorer_update = renderer.render(
+                                    gb.to_dict(active_layer="chat",
+                                               highlight_terms=chat_ctx["keywords"])
+                                )
+                            else:
+                                gd = get_mock_graph_data()
+                                gd["active_layer"] = "chat"
+                                gd["highlight_terms"] = chat_ctx["keywords"]
+                                explorer_update = renderer.render(gd)
+                        else:
+                            gd = get_mock_graph_data()
+                            gd["active_layer"] = "chat"
+                            gd["highlight_terms"] = chat_ctx["keywords"]
+                            explorer_update = renderer.render(gd)
 
                 except Exception as e:
-                    response = f"Error: {str(e)}"
+                    error_msg = str(e)
+                    if "401" in error_msg:
+                        response = f"**API Authentication Error:** Your API key may be invalid or expired. Please check your API key configuration in `configs/config.yaml`.\n\n*Details: {error_msg}*"
+                    elif "429" in error_msg:
+                        response = f"**Rate Limit Reached:** Too many API requests. Please wait a moment and try again.\n\n*Details: {error_msg}*"
+                    else:
+                        response = f"**Error:** {error_msg}"
 
-            # Append in Gradio's message format
-            history.append({"role": "user", "content": message})
             history.append({"role": "assistant", "content": response})
-            return "", history
+            return history, new_state, explorer_update, *layer_updates
 
         vector_store = None
         embedder = None
@@ -1172,6 +1623,11 @@ def create_app(agent=None):
             stats, table = refresh_stats_and_table(
                 year_from, year_to, min_citations, new_state
             )
+            topbar_update = gr.update(
+                value=name or "",
+                elem_classes=["researcher-active"] if name else [],
+            )
+            go_btn_update = gr.update(value="\u00d7" if name else "GO")
             return (
                 new_state,
                 current_update,
@@ -1179,6 +1635,8 @@ def create_app(agent=None):
                 citation_update,
                 stats,
                 table,
+                topbar_update,
+                go_btn_update,
             )
 
         def sync_paper_context(paper_id: str, state):
@@ -2496,14 +2954,24 @@ def create_app(agent=None):
 
         # Wire up events
         msg.submit(
-            respond,
-            [msg, chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
+            add_user_message,
             [msg, chatbot],
+            [msg, chatbot],
+        ).then(
+            generate_response,
+            [chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
+            [chatbot, context_state, explorer_html,
+             layer_soc_btn, layer_auth_btn, layer_chat_btn],
         )
         submit.click(
-            respond,
-            [msg, chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
+            add_user_message,
             [msg, chatbot],
+            [msg, chatbot],
+        ).then(
+            generate_response,
+            [chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
+            [chatbot, context_state, explorer_html,
+             layer_soc_btn, layer_auth_btn, layer_chat_btn],
         )
         clear.click(lambda: [], outputs=[chatbot])
         refresh_btn.click(
@@ -2646,6 +3114,8 @@ def create_app(agent=None):
                 citation_ui["researcher_dropdown"],
                 kb_stats,
                 papers_table,
+                topbar_researcher,
+                topbar_go_btn,
             ],
         )
 
@@ -2665,6 +3135,8 @@ def create_app(agent=None):
                 citation_ui["researcher_dropdown"],
                 kb_stats,
                 papers_table,
+                topbar_researcher,
+                topbar_go_btn,
             ],
         )
 
@@ -2684,6 +3156,8 @@ def create_app(agent=None):
                 citation_ui["researcher_dropdown"],
                 kb_stats,
                 papers_table,
+                topbar_researcher,
+                topbar_go_btn,
             ],
         )
 
@@ -2892,6 +3366,8 @@ def create_app(agent=None):
                 citation_ui["researcher_dropdown"],
                 kb_stats,
                 papers_table,
+                topbar_researcher,
+                topbar_go_btn,
             ],
         )
 
@@ -2988,18 +3464,8 @@ def create_app(agent=None):
             outputs=[cm_plot, cm_status],
         )
 
-        # ── Settings accordion toggle ──────────────────────────────────────
+        # Settings toggle (hidden, kept for compat)
         settings_is_open = gr.State(False)
-
-        def _toggle_settings(is_open):
-            new_open = not bool(is_open)
-            return gr.update(open=new_open), new_open
-
-        settings_toggle_btn.click(
-            _toggle_settings,
-            inputs=[settings_is_open],
-            outputs=[settings_accordion, settings_is_open],
-        )
 
         # ── KB status display (top bar) ────────────────────────────────────
         def _get_kb_status():
@@ -3069,7 +3535,323 @@ def create_app(agent=None):
             outputs=[context_map_plot, context_map_status],
         )
 
+        # ── Layer switching ────────────────────────────────────────────
+        def _layer_btn_classes(layer):
+            """Return elem_classes updates for the 3 layer buttons."""
+            return (
+                gr.update(elem_classes=["ctx-layer-btn", "ctx-active"] if layer == "soc" else ["ctx-layer-btn"]),
+                gr.update(elem_classes=["ctx-layer-btn", "ctx-active"] if layer == "auth" else ["ctx-layer-btn"]),
+                gr.update(elem_classes=["ctx-layer-btn", "ctx-active"] if layer == "chat" else ["ctx-layer-btn"]),
+            )
+
+        def switch_layer_top(layer, state):
+            """Handle layer switch from top-bar buttons."""
+            new_state = dict(state or {})
+            new_state["active_layer"] = layer
+            soc, auth, chat = _layer_btn_classes(layer)
+            return new_state, soc, auth, chat
+
+        layer_soc_btn.click(
+            lambda s: switch_layer_top("soc", s),
+            inputs=[context_state],
+            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn],
+            js="() => { sendLayerToExplorer('soc'); }",
+        )
+        layer_auth_btn.click(
+            lambda s: switch_layer_top("auth", s),
+            inputs=[context_state],
+            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn],
+            js="() => { sendLayerToExplorer('auth'); }",
+        )
+        layer_chat_btn.click(
+            lambda s: switch_layer_top("chat", s),
+            inputs=[context_state],
+            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn],
+            js="() => { sendLayerToExplorer('chat'); }",
+        )
+
+        # ── Top bar: researcher lookup → explorer graph ──────────────────
+        def lookup_and_build_explorer(
+            researcher_name, state, year_from=None, year_to=None, min_citations=0
+        ):
+            """Look up researcher via APIs, build graph, sync all surfaces."""
+            logger.info(f"[Explorer] lookup_and_build_explorer called with: '{researcher_name}'")
+            if not researcher_name or not researcher_name.strip():
+                # Cleared field → reset everything
+                renderer = ExplorerRenderer()
+                mock_data = get_mock_graph_data()
+                mock_data["active_layer"] = "soc"
+                mock_html = renderer.render(mock_data)
+                reset_state = {
+                    "researcher": None, "paper_id": None,
+                    "active_layer": "soc", "chat_context": None,
+                }
+                choices = _get_researcher_choices()
+                dd = gr.update(choices=choices, value=None)
+                stats, table = refresh_stats_and_table(
+                    year_from, year_to, min_citations, reset_state
+                )
+                soc, auth, chat = _layer_btn_classes("soc")
+                return (
+                    mock_html, reset_state,
+                    gr.update(value="", elem_classes=[]),   # topbar chip reset
+                    gr.update(value="GO"),                  # go button reset
+                    dd, dd, dd, stats, table,
+                    soc, auth, chat,
+                )
+
+            name = researcher_name.strip()
+
+            try:
+                from research_agent.tools.researcher_lookup import ResearcherLookup
+                from research_agent.tools.researcher_registry import get_researcher_registry
+                import concurrent.futures
+
+                lookup = ResearcherLookup(
+                    use_openalex=True,
+                    use_semantic_scholar=True,
+                    use_web_search=False,
+                    request_delay=0.3,
+                )
+
+                async def _do_lookup():
+                    try:
+                        return await lookup.lookup_researcher(
+                            name, fetch_papers=True, papers_limit=10
+                        )
+                    finally:
+                        await lookup.close()
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    profile = pool.submit(asyncio.run, _do_lookup()).result()
+
+                if not profile:
+                    return (gr.update(),) * 12
+
+                # Store in registry
+                registry = get_researcher_registry()
+                registry.add(profile)
+
+                # Build graph
+                gb = GraphBuilder()
+                researcher_id = gb.add_researcher(profile.to_dict())
+                for paper in (profile.top_papers or []):
+                    paper_id = gb.add_paper(paper)
+                    gb.add_authorship_edge(researcher_id, paper_id)
+                gb.build_structural_context()
+
+                renderer = ExplorerRenderer()
+                html = renderer.render(gb.to_dict(active_layer="auth"))
+
+                # Sync all surfaces
+                new_state = dict(state or {})
+                new_state["researcher"] = profile.name
+                new_state["active_layer"] = "auth"
+
+                choices = _get_researcher_choices()
+                if profile.name not in choices:
+                    choices.insert(0, profile.name)
+                dd = gr.update(choices=choices, value=profile.name)
+                stats, table = refresh_stats_and_table(
+                    year_from, year_to, min_citations, new_state
+                )
+
+                soc, auth, chat = _layer_btn_classes("auth")
+                return (
+                    html, new_state,
+                    gr.update(value=profile.name, elem_classes=["researcher-active"]),
+                    gr.update(value="\u00d7"),              # GO → ×
+                    dd, dd, dd, stats, table,
+                    soc, auth, chat,
+                )
+
+            except Exception as e:
+                logger.error(f"[Explorer] {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+
+        _lookup_outputs = [
+            explorer_html, context_state, topbar_researcher,
+            topbar_go_btn,
+            current_researcher, researcher_select,
+            citation_ui["researcher_dropdown"],
+            kb_stats, papers_table,
+            layer_soc_btn, layer_auth_btn, layer_chat_btn,
+        ]
+
+        def activate_chip_loading(name):
+            """Immediately show chip state while lookup runs."""
+            if name and name.strip():
+                return gr.update(elem_classes=["researcher-active"]), gr.update(value="...")
+            return gr.update(elem_classes=[]), gr.update(value="GO")
+
+        topbar_researcher.submit(
+            activate_chip_loading,
+            inputs=[topbar_researcher],
+            outputs=[topbar_researcher, topbar_go_btn],
+        ).then(
+            lookup_and_build_explorer,
+            inputs=[topbar_researcher, context_state,
+                    year_from_kb, year_to_kb, min_citations_kb],
+            outputs=_lookup_outputs,
+        )
+
+        def topbar_go_or_clear(btn_value, researcher_name, state, yf, yt, mc):
+            """GO triggers lookup, × triggers clear."""
+            if btn_value in ("\u00d7", "..."):
+                return lookup_and_build_explorer("", state, yf, yt, mc)
+            return lookup_and_build_explorer(researcher_name, state, yf, yt, mc)
+
+        topbar_go_btn.click(
+            topbar_go_or_clear,
+            inputs=[topbar_go_btn, topbar_researcher, context_state,
+                    year_from_kb, year_to_kb, min_citations_kb],
+            outputs=_lookup_outputs,
+        )
+
+        def build_explorer_from_registry(name, state):
+            """Build explorer graph from an already-registered researcher profile.
+
+            Used when a researcher is selected in the KM accordion dropdown
+            (profile was already fetched by lookup_researchers and stored in
+            the singleton registry).
+            """
+            if not name or not name.strip():
+                renderer = ExplorerRenderer()
+                return renderer.render(get_mock_graph_data()), state
+
+            from research_agent.tools.researcher_registry import get_researcher_registry
+
+            registry = get_researcher_registry()
+            profile = registry.get(name.strip())
+
+            if not profile:
+                renderer = ExplorerRenderer()
+                return renderer.render(get_mock_graph_data()), state
+
+            gb = GraphBuilder()
+            researcher_id = gb.add_researcher(profile.to_dict())
+
+            for paper in (profile.top_papers or []):
+                paper_id = gb.add_paper(paper)
+                gb.add_authorship_edge(researcher_id, paper_id)
+
+            gb.build_structural_context()
+            renderer = ExplorerRenderer()
+            html = renderer.render(gb.to_dict(active_layer="auth"))
+
+            new_state = dict(state or {})
+            new_state["active_layer"] = "auth"
+            new_state["researcher"] = profile.name
+            return html, new_state
+
+        researcher_select.change(
+            build_explorer_from_registry,
+            inputs=[researcher_select, context_state],
+            outputs=[explorer_html, context_state],
+        )
+
+        def build_kb_explorer(state):
+            """Build KB graph with optional researcher overlay."""
+            store, _, _ = _get_kb_resources()
+            papers = store.list_papers_detailed(limit=200)
+
+            gb = GraphBuilder()
+
+            # Add all KB papers as nodes
+            for p in papers:
+                gb.add_paper({
+                    "id": p["paper_id"],
+                    "title": p["title"],
+                    "year": p.get("year"),
+                    "citations": p.get("citations") or 0,
+                    "fields": p.get("fields", "").split(", ") if p.get("fields") else [],
+                    "venue": p.get("venue", ""),
+                    "doi": p.get("doi", ""),
+                    "authors": p.get("authors", ""),
+                })
+
+            # Overlay researcher if one is selected
+            researcher_name = (state or {}).get("researcher")
+            if researcher_name:
+                from research_agent.tools.researcher_registry import get_researcher_registry
+                registry = get_researcher_registry()
+                profile = registry.get(researcher_name)
+
+                if profile:
+                    rid = gb.add_researcher(profile.to_dict())
+                    # Connect researcher to matching KB papers
+                    for p in papers:
+                        authors = (p.get("authors") or "").lower()
+                        if profile.normalized_name in authors:
+                            pid = f"paper:{p['paper_id']}"
+                            gb.add_authorship_edge(rid, pid)
+
+            gb.build_structural_context()
+            renderer = ExplorerRenderer()
+            return renderer.render(gb.to_dict())
+
+        kb_view_btn.click(
+            build_kb_explorer,
+            inputs=[context_state],
+            outputs=[explorer_html],
+        )
+
     return app
+
+
+def _find_available_port(preferred: int, max_attempts: int = 10) -> int:
+    """Find an available port, starting with preferred.
+
+    If the preferred port is occupied by a stale research_agent process,
+    kill it and reuse the port. Otherwise try successive ports.
+    """
+    import socket
+    import subprocess
+
+    for attempt in range(max_attempts):
+        candidate = preferred + attempt
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(("127.0.0.1", candidate))
+            sock.close()
+            return candidate
+        except OSError:
+            sock.close()
+            if attempt == 0:
+                # Try to kill stale research_agent on the preferred port
+                try:
+                    result = subprocess.run(
+                        ["lsof", "-ti", f":{candidate}"],
+                        capture_output=True, text=True, timeout=3,
+                    )
+                    pids = result.stdout.strip().split()
+                    for pid in pids:
+                        # Only kill our own processes
+                        cmd_result = subprocess.run(
+                            ["ps", "-p", pid, "-o", "args="],
+                            capture_output=True, text=True, timeout=3,
+                        )
+                        if "research_agent" in cmd_result.stdout:
+                            logger.info(f"Killing stale research_agent (PID {pid}) on port {candidate}")
+                            subprocess.run(["kill", pid], timeout=3)
+                            import time
+                            time.sleep(1)
+                            # Verify it freed up
+                            sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            try:
+                                sock2.bind(("127.0.0.1", candidate))
+                                sock2.close()
+                                return candidate
+                            except OSError:
+                                sock2.close()
+                except Exception as e:
+                    logger.debug(f"Could not check/kill stale process: {e}")
+
+            logger.info(f"Port {candidate} busy, trying {candidate + 1}")
+
+    raise RuntimeError(f"No available port found in range {preferred}-{preferred + max_attempts}")
 
 
 def launch_app(agent=None, port: int = 7860, share: bool = False, host: str = None):
@@ -3078,12 +3860,24 @@ def launch_app(agent=None, port: int = 7860, share: bool = False, host: str = No
 
     Args:
         agent: ResearchAgent instance
-        port: Port to run on
+        port: Port to run on (auto-increments if busy)
         share: Create public link
         host: Server hostname/IP to bind to (default: 127.0.0.1, use 0.0.0.0 for Docker)
     """
+    actual_port = _find_available_port(port)
+    if actual_port != port:
+        logger.info(f"Using port {actual_port} (preferred {port} was busy)")
+
     app = create_app(agent)
-    kwargs = {"server_port": port, "share": share, "show_error": True, "theme": gr.themes.Soft()}
+    kwargs = {
+        "server_port": actual_port,
+        "share": share,
+        "show_error": True,
+        "theme": getattr(app, "_explorer_theme", None),
+        "css": getattr(app, "_explorer_css", None),
+        "head": getattr(app, "_pwa_head", None),
+        "footer_links": [],
+    }
     if host:
         kwargs["server_name"] = host
     app.launch(**kwargs)

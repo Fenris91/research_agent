@@ -163,6 +163,19 @@ ui:
   theme: "soft"  # "soft", "default", "glass", etc.
 
 # ============================================
+# Knowledge Explorer
+# ============================================
+explorer:
+  enabled: true
+  mode: "public"          # "public" or "local"
+  email: null             # OpenAlex/Unpaywall polite pool
+  openalex_key: null
+  semantic_scholar_key: null
+  core_key: null
+  cache_ttl: 86400        # 24h -- paper metadata rarely changes
+  cache_dir: "./cache/explorer"
+
+# ============================================
 # Logging
 # ============================================
 logging:
