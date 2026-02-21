@@ -40,7 +40,11 @@ class ExplorerRenderer:
         raw_html = self._template.render(graph_json=graph_json)
         # Wrap in a full HTML document inside an iframe
         # Escape quotes for the srcdoc attribute
-        escaped = raw_html.replace("&", "&amp;").replace('"', "&quot;")
+        escaped = (raw_html
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;"))
         # Wrapper div with position:relative so the iframe can
         # use position:absolute to fill the space reliably
         # (height:100% on iframe fails when parent lacks explicit height).

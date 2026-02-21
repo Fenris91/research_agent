@@ -473,18 +473,14 @@ def create_app(agent=None):
                 elem_classes=["ctx-layer-btn"],
             )
 
-        # Hidden components (keep for event-handler compat)
+        # Hidden components (needed by event handlers wired elsewhere)
         with gr.Group(visible=False):
             current_model_display = gr.Textbox(interactive=False, label="Current Model")
             kb_status_display = gr.Textbox()
             refresh_models_btn = gr.Button()
-            settings_toggle_btn = gr.Button()
-            settings_accordion = gr.Group()
             year_from_chat = gr.Slider(minimum=1900, maximum=2030, value=1900)
             year_to_chat = gr.Slider(minimum=1900, maximum=2030, value=2030)
             min_citations_chat = gr.Slider(minimum=0, maximum=1000, value=0)
-            search_depth = gr.Slider(minimum=1, maximum=20, value=5)
-            auto_ingest = gr.Checkbox(value=False)
             reranker_enable_chat = gr.Checkbox(value=False)
             rerank_topk_chat = gr.Slider(minimum=1, maximum=50, value=10)
             rerank_status_chat = gr.Textbox()

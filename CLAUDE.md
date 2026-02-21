@@ -62,3 +62,9 @@ python -m research_agent.main --mode ui
 - **ResearcherRegistry**: singleton for sharing researcher profiles across UI tabs
 - **CSS**: minimal `!important` — uses elem_id selectors; `footer_links=[]` hides footer natively
 - **Port handling**: auto-detects and kills stale research_agent processes, increments port if busy
+
+## Docs
+- [ROADMAP.md](docs/ROADMAP.md) — active priorities and future ideas
+- [DATA_SOURCES.md](docs/DATA_SOURCES.md) — API landscape (OpenAlex, Semantic Scholar, CrossRef, Unpaywall, CORE)
+- [CHANGELOG.md](docs/CHANGELOG.md) — implementation history by date
+- [SETUP.md](docs/SETUP.md) — environment setup and troubleshooting

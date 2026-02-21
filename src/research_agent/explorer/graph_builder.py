@@ -8,6 +8,7 @@ into a JSON structure ready for D3.js force-directed rendering.
 import json
 import logging
 import math
+import threading
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
@@ -25,7 +26,7 @@ RESEARCHER_COLORS = [
     "#5cb85c",  # green
     "#f0ad4e",  # amber
     "#5bc0de",  # cyan
-    "#d9534f",  # coral
+    "#e8843a",  # coral/orange
     "#8a6d3b",  # brown
 ]
 
@@ -45,46 +46,49 @@ DOMAIN_COLORS = {
 # ── Dynamic field→domain mapping (loaded from JSON) ───────────────
 
 _mapping_cache: dict | None = None
+_mapping_lock = threading.Lock()
 
 
 def _load_mapping() -> dict[str, str]:
     """Load field→domain mapping from JSON config, with in-memory cache."""
     global _mapping_cache
-    if _mapping_cache is not None:
+    with _mapping_lock:
+        if _mapping_cache is not None:
+            return _mapping_cache
+        try:
+            with open(_MAPPING_PATH) as f:
+                data = json.load(f)
+            _mapping_cache = {k.lower().strip(): v for k, v in data.get("mapping", {}).items()}
+            logger.debug(f"Loaded {len(_mapping_cache)} field→domain mappings from {_MAPPING_PATH}")
+        except FileNotFoundError:
+            logger.warning(f"Mapping file not found: {_MAPPING_PATH}, using empty mapping")
+            _mapping_cache = {}
+        except Exception:
+            logger.exception("Failed to load field→domain mapping")
+            _mapping_cache = {}
         return _mapping_cache
-    try:
-        with open(_MAPPING_PATH) as f:
-            data = json.load(f)
-        _mapping_cache = {k.lower().strip(): v for k, v in data.get("mapping", {}).items()}
-        logger.debug(f"Loaded {len(_mapping_cache)} field→domain mappings from {_MAPPING_PATH}")
-    except FileNotFoundError:
-        logger.warning(f"Mapping file not found: {_MAPPING_PATH}, using empty mapping")
-        _mapping_cache = {}
-    except Exception:
-        logger.exception("Failed to load field→domain mapping")
-        _mapping_cache = {}
-    return _mapping_cache
 
 
 def _save_mapping(mapping: dict[str, str]) -> None:
     """Persist updated mapping back to JSON config."""
     global _mapping_cache
-    try:
-        # Load full file to preserve structure
+    with _mapping_lock:
         try:
-            with open(_MAPPING_PATH) as f:
-                data = json.load(f)
-        except FileNotFoundError:
-            data = {"domains": list(DOMAIN_COLORS.keys()), "mapping": {}}
+            # Load full file to preserve structure
+            try:
+                with open(_MAPPING_PATH) as f:
+                    data = json.load(f)
+            except FileNotFoundError:
+                data = {"domains": list(DOMAIN_COLORS.keys()), "mapping": {}}
 
-        data["mapping"] = {k: v for k, v in sorted(mapping.items())}
-        with open(_MAPPING_PATH, "w") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-        _mapping_cache = mapping
-        logger.info(f"Saved {len(mapping)} field→domain mappings to {_MAPPING_PATH}")
-    except Exception:
-        logger.exception("Failed to save field→domain mapping")
+            data["mapping"] = {k: v for k, v in sorted(mapping.items())}
+            with open(_MAPPING_PATH, "w") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+            _mapping_cache = mapping
+            logger.info(f"Saved {len(mapping)} field→domain mappings to {_MAPPING_PATH}")
+        except Exception:
+            logger.exception("Failed to save field→domain mapping")
 
 
 def _classify_field_llm(field_name: str, domains: list[str]) -> str | None:
@@ -202,6 +206,7 @@ class GraphBuilder:
         self._nodes: dict[str, dict] = {}
         self._edges: list[dict] = []
         self._researcher_color_idx = 0
+        self._query_counter = 0
 
     def _next_researcher_color(self) -> str:
         color = RESEARCHER_COLORS[self._researcher_color_idx % len(RESEARCHER_COLORS)]
@@ -303,7 +308,8 @@ class GraphBuilder:
 
     def add_query(self, query_text: str, matched_ids: list[str]) -> str:
         """Add a query node and semantic edges to matched nodes."""
-        qid = f"query:{len([n for n in self._nodes if n.startswith('query:')])}"
+        qid = f"query:{self._query_counter}"
+        self._query_counter += 1
         self._nodes[qid] = {
             "id": qid,
             "type": "query",

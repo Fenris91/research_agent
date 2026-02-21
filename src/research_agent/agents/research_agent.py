@@ -354,7 +354,8 @@ class ResearchAgent:
                 return response
 
         except torch.OutOfMemoryError as e:
-            # Implement exponential backoff strategy
+            if max_tokens <= 32:
+                return "Error: Insufficient VRAM even for minimal generation."
             max_tokens = max(32, max_tokens // 2)
             print(f"Reducing max_tokens to {max_tokens} due to VRAM constraints")
             return self.infer(prompt, max_tokens)  # Recurse with smaller output
@@ -1250,7 +1251,7 @@ Response:"""
                     self.config.min_citations = 0
 
         # Initialize state
-        logger.info(f"DEBUG _run_async: user_query type={type(user_query).__name__}, researcher type={type(current_researcher).__name__}, researcher={current_researcher}")
+        logger.debug(f"_run_async: user_query type={type(user_query).__name__}, researcher type={type(current_researcher).__name__}, researcher={current_researcher}")
         initial_state: ResearchState = {
             "messages": [],
             "current_query": user_query,
@@ -1348,7 +1349,7 @@ Response:"""
 
     async def ingest_paper(self, paper_data: Dict) -> bool:
         """Ingest a new paper into the vector store."""
-        return True
+        raise NotImplementedError("ingest_paper not yet implemented")
 
 
 def create_research_agent(
