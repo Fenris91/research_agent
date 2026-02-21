@@ -1,0 +1,791 @@
+<div id="knowledge-explorer">
+  <div class="explorer-toolbar">
+    <div class="explorer-search-wrap">
+      <input type="text" class="explorer-search" placeholder="Semantic search..." />
+      <button class="explorer-search-btn">SEARCH</button>
+    </div>
+    <div class="explorer-legend-inline">
+      <svg width="14" height="2"><line x1="0" y1="1" x2="14" y2="1" stroke="#5a6580" stroke-width="1.5" opacity="0.6"/></svg>
+      <span>AUTHOR</span>
+      <svg width="14" height="2"><line x1="0" y1="1" x2="14" y2="1" stroke="#475569" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.6"/></svg>
+      <span>CITES</span>
+      <svg width="14" height="2"><line x1="0" y1="1" x2="14" y2="1" stroke="#c45c4a" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.6"/></svg>
+      <span>SEMANTIC</span>
+      <span class="explorer-legend-sep"></span>
+      <span class="explorer-oa-dot" style="border-color:#22c55e"></span><span>OA</span>
+      <span class="explorer-oa-dot" style="border-color:#eab308"></span><span>PREPRINT</span>
+      <span class="explorer-oa-dot" style="border-color:#64748b"></span><span>PAYWALLED</span>
+    </div>
+  </div>
+  <div class="explorer-canvas">
+    <svg id="explorer-svg"></svg>
+    <div class="explorer-suggestions" id="explorer-suggestions">
+      <span class="explorer-suggestions-label">TRY:</span>
+    </div>
+  </div>
+  <div id="explorer-detail" class="explorer-detail">
+    <button class="explorer-detail-close">&times;</button>
+    <div class="explorer-detail-content"></div>
+  </div>
+</div>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+
+  #knowledge-explorer {
+    position: relative;
+    width: 100%;
+    height: 640px;
+    background: #0a0d13;
+    border-radius: 6px;
+    overflow: hidden;
+    font-family: 'IBM Plex Mono', 'Fira Code', monospace;
+    color: #c8d0e0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Toolbar ──────────────────────────────────── */
+  #knowledge-explorer .explorer-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    background: #0e1219;
+    border-bottom: 1px solid #1a1f2e;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  #knowledge-explorer .explorer-search-wrap {
+    display: flex;
+    flex: 1;
+    max-width: 280px;
+    min-width: 160px;
+    background: #0a0d13;
+    border: 1px solid #1a1f2e;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  #knowledge-explorer .explorer-search {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #c8d0e0;
+    padding: 5px 10px;
+    font-size: 10px;
+    font-family: inherit;
+  }
+
+  #knowledge-explorer .explorer-search-btn {
+    background: transparent;
+    border: none;
+    border-left: 1px solid #1a1f2e;
+    color: #c45c4a;
+    padding: 5px 10px;
+    cursor: pointer;
+    font-size: 8px;
+    font-weight: 600;
+    font-family: inherit;
+    letter-spacing: 0.5px;
+  }
+
+  #knowledge-explorer .explorer-legend-inline {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 6px;
+    font-weight: 600;
+    color: #2e3648;
+    letter-spacing: 0.8px;
+  }
+
+  #knowledge-explorer .explorer-legend-sep {
+    width: 1px;
+    height: 10px;
+    background: #1a1f2e;
+    display: inline-block;
+    margin: 0 3px;
+  }
+
+  #knowledge-explorer .explorer-oa-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    border: 1.5px solid;
+    display: inline-block;
+  }
+
+  /* ── Canvas ───────────────────────────────────── */
+  #knowledge-explorer .explorer-canvas {
+    flex: 1;
+    position: relative;
+    background: radial-gradient(ellipse at 50% 40%, #0e141f 0%, #0a0d13 65%);
+    overflow: hidden;
+  }
+
+  #knowledge-explorer #explorer-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* ── Suggestion pills ─────────────────────────── */
+  #knowledge-explorer .explorer-suggestions {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    z-index: 5;
+  }
+
+  #knowledge-explorer .explorer-suggestions-label {
+    font-size: 7px;
+    color: #2e3648;
+  }
+
+  #knowledge-explorer .explorer-suggestion-pill {
+    background: rgba(10, 13, 19, 0.8);
+    border: 1px solid #1a1f2e;
+    border-radius: 10px;
+    padding: 3px 9px;
+    cursor: pointer;
+    color: #5a6580;
+    font-size: 7px;
+    font-family: inherit;
+    letter-spacing: 0.3px;
+    backdrop-filter: blur(8px);
+    transition: all 0.2s;
+  }
+
+  #knowledge-explorer .explorer-suggestion-pill:hover {
+    border-color: rgba(196, 92, 74, 0.25);
+    color: #c45c4a;
+  }
+
+  /* ── Detail panel ─────────────────────────────── */
+  #knowledge-explorer .explorer-detail {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 230px;
+    height: 100%;
+    background: #0e1219;
+    border-left: 1px solid #1a1f2e;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    z-index: 20;
+    transform: translateX(100%);
+    transition: transform 300ms cubic-bezier(0.33, 0, 0.2, 1);
+  }
+
+  #knowledge-explorer .explorer-detail.explorer-detail-open {
+    transform: translateX(0);
+  }
+
+  #knowledge-explorer .explorer-detail-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    background: none;
+    border: none;
+    color: #5a6580;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 5px;
+    line-height: 1;
+    z-index: 2;
+  }
+
+  #knowledge-explorer .explorer-detail-close:hover {
+    color: #c8d0e0;
+  }
+
+  /* Detail content styles */
+  #knowledge-explorer .explorer-detail-header {
+    padding: 12px 14px 10px;
+    border-bottom: 1px solid #1a1f2e;
+  }
+
+  #knowledge-explorer .explorer-detail-type {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 5px;
+  }
+
+  #knowledge-explorer .explorer-detail-type-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  #knowledge-explorer .explorer-detail-type-label {
+    font-size: 7px;
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
+
+  #knowledge-explorer .explorer-detail-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #c8d0e0;
+    line-height: 1.35;
+    margin: 0;
+  }
+
+  #knowledge-explorer .explorer-detail-sub {
+    font-size: 8px;
+    color: #5a6580;
+    margin-top: 3px;
+  }
+
+  #knowledge-explorer .explorer-detail-body {
+    padding: 10px 14px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  #knowledge-explorer .explorer-detail-field-label {
+    font-size: 7px;
+    color: #2e3648;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+
+  #knowledge-explorer .explorer-detail-field-value {
+    font-size: 9px;
+    color: #5a6580;
+    line-height: 1.5;
+  }
+
+  #knowledge-explorer .explorer-detail-stat {
+    display: inline-block;
+    margin-right: 14px;
+  }
+
+  #knowledge-explorer .explorer-detail-stat-value {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  #knowledge-explorer .explorer-detail-tag {
+    display: inline-block;
+    border-radius: 5px;
+    padding: 2px 6px;
+    font-size: 6.5px;
+    margin: 1px;
+    border: 1px solid;
+  }
+
+  #knowledge-explorer .explorer-detail-oa-badge {
+    margin-left: auto;
+    font-size: 6px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 1px 5px;
+    letter-spacing: 0.3px;
+    border: 1px solid;
+  }
+
+  #knowledge-explorer .explorer-detail-btn {
+    width: 100%;
+    background: transparent;
+    border: 1px solid #1a1f2e;
+    border-radius: 4px;
+    padding: 5px 8px;
+    cursor: pointer;
+    color: #5a6580;
+    font-size: 7px;
+    font-weight: 600;
+    font-family: inherit;
+    letter-spacing: 0.5px;
+    text-align: center;
+    transition: all 0.2s;
+  }
+
+  #knowledge-explorer .explorer-detail-btn:hover {
+    background: rgba(196, 92, 74, 0.07);
+    border-color: rgba(196, 92, 74, 0.2);
+    color: #c45c4a;
+  }
+
+  #knowledge-explorer .explorer-detail-deselect {
+    padding: 8px 14px;
+    border-top: 1px solid #1a1f2e;
+    flex-shrink: 0;
+  }
+</style>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+(function() {
+  "use strict";
+
+  var data = {= graph_json =};
+  if (!data || !data.nodes || !data.nodes.length) return;
+
+  var container = document.getElementById("knowledge-explorer");
+  var canvasEl = container.querySelector(".explorer-canvas");
+  var svg = d3.select("#explorer-svg");
+  var width = canvasEl.clientWidth || 600;
+  var height = canvasEl.clientHeight || 500;
+
+  svg.attr("viewBox", [0, 0, width, height]);
+
+  // ── OA config ─────────────────────────────────────
+  var OA = {
+    open:     { color: "#22c55e", label: "OPEN ACCESS", dash: null },
+    preprint: { color: "#eab308", label: "PREPRINT",    dash: null },
+    closed:   { color: "#64748b", label: "PAYWALLED",   dash: "2,2" }
+  };
+
+  // ── Build node lookup & derive paper colors from authorship ──
+  var nodeMap = {};
+  data.nodes.forEach(function(n) { nodeMap[n.id] = n; });
+
+  // Pre-compute paper -> researcher color via authorship edges
+  data.links.forEach(function(l) {
+    if (l.type === "authorship") {
+      var tid = l.target.id !== undefined ? l.target.id : l.target;
+      var sid = l.source.id !== undefined ? l.source.id : l.source;
+      var tNode = nodeMap[tid];
+      var sNode = nodeMap[sid];
+      if (tNode && sNode && tNode.type === "paper") {
+        tNode._authorColor = sNode.color;
+      }
+    }
+  });
+
+  // ── Edge style ────────────────────────────────────
+  function edgeStyle(d) {
+    if (d.type === "authorship") {
+      var src = nodeMap[d.source.id || d.source];
+      return { stroke: src ? src.color : "#5a6580", dash: null, width: 1, opacity: 0.12 };
+    }
+    if (d.type === "citation") {
+      return { stroke: "#475569", dash: "3,3", width: 0.8, opacity: 0.1 };
+    }
+    if (d.type === "semantic") {
+      var score = (d.metadata && d.metadata.score) || 0.5;
+      return { stroke: "#c45c4a", dash: "5,3", width: 0.8 + score * 2, opacity: 0.1 + score * 0.35 };
+    }
+    return { stroke: "#333", dash: null, width: 0.8, opacity: 0.08 };
+  }
+
+  // ── Defs: gradients + glow filter ─────────────────
+  var defs = svg.append("defs");
+  data.nodes.forEach(function(n) {
+    var c = n.type === "paper" ? (n._authorColor || n.color) : n.color;
+    var gr = defs.append("radialGradient").attr("id", "ng-" + n.id.replace(/[^a-zA-Z0-9]/g, "_")).attr("cx", "35%").attr("cy", "35%");
+    gr.append("stop").attr("offset", "0%").attr("stop-color", c).attr("stop-opacity", 0.28);
+    gr.append("stop").attr("offset", "100%").attr("stop-color", c).attr("stop-opacity", 0.04);
+  });
+  var glow = defs.append("filter").attr("id", "glow").attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
+  glow.append("feGaussianBlur").attr("stdDeviation", "4").attr("result", "b");
+  var gm = glow.append("feMerge");
+  gm.append("feMergeNode").attr("in", "b");
+  gm.append("feMergeNode").attr("in", "SourceGraphic");
+
+  // ── Root group + zoom ─────────────────────────────
+  var root = svg.append("g");
+  svg.call(d3.zoom().scaleExtent([0.35, 2.5]).on("zoom", function(e) { root.attr("transform", e.transform); }));
+
+  // ── Ambient halos ─────────────────────────────────
+  root.append("g").attr("class", "explorer-halos").selectAll("circle")
+    .data(data.nodes.filter(function(n) { return n.type !== "paper"; }))
+    .join("circle")
+    .attr("r", function(d) { return d.size * 2.2; })
+    .attr("fill", function(d) { return d.color; })
+    .attr("opacity", 0.015);
+
+  // ── Links ─────────────────────────────────────────
+  var linkG = root.append("g");
+  var link = linkG.selectAll("line").data(data.links).join("line")
+    .each(function(d) {
+      var s = edgeStyle(d);
+      d3.select(this).attr("stroke", s.stroke).attr("stroke-width", s.width).attr("opacity", s.opacity);
+      if (s.dash) d3.select(this).attr("stroke-dasharray", s.dash);
+    });
+
+  // Score labels on semantic edges
+  var scoreLabels = linkG.selectAll("text")
+    .data(data.links.filter(function(l) { return l.type === "semantic" && l.metadata && l.metadata.score > 0.3; }))
+    .join("text")
+    .text(function(d) { return Math.round(d.metadata.score * 100) + "%"; })
+    .attr("font-size", "7px").attr("fill", "#c45c4a").attr("opacity", 0)
+    .attr("text-anchor", "middle").attr("font-family", "inherit")
+    .style("pointer-events", "none");
+
+  // ── Nodes ─────────────────────────────────────────
+  var nodeG = root.append("g");
+  var node = nodeG.selectAll("g").data(data.nodes).join("g").style("cursor", "pointer");
+
+  // OA rings
+  node.filter(function(d) { return d.type === "paper"; }).append("circle")
+    .attr("class", "oa-ring")
+    .attr("r", function(d) { return d.size + 2.5; })
+    .attr("fill", "none")
+    .each(function(d) {
+      var oa = (d.metadata && d.metadata.oa_status) || "closed";
+      var cfg = OA[oa] || OA.closed;
+      d3.select(this).attr("stroke", cfg.color).attr("stroke-width", 1.5).attr("opacity", 0.5);
+      if (cfg.dash) d3.select(this).attr("stroke-dasharray", cfg.dash);
+    });
+
+  // Researcher outer ring
+  node.filter(function(d) { return d.type === "researcher"; }).append("circle")
+    .attr("class", "outer-ring")
+    .attr("r", function(d) { return d.size + 3; })
+    .attr("fill", "none").attr("stroke", function(d) { return d.color; })
+    .attr("stroke-width", 0.4).attr("opacity", 0.15);
+
+  // Main body (radial gradient fill)
+  node.append("circle").attr("class", "body")
+    .attr("r", function(d) { return d.size; })
+    .attr("fill", function(d) { return "url(#ng-" + d.id.replace(/[^a-zA-Z0-9]/g, "_") + ")"; })
+    .attr("stroke", function(d) { return d.type === "query" ? "#c45c4a" : (d._authorColor || d.color); })
+    .attr("stroke-width", function(d) { return d.type === "researcher" ? 1.5 : d.type === "query" ? 1.2 : 0.8; })
+    .attr("stroke-dasharray", function(d) { return d.type === "query" ? "3,2" : null; })
+    .attr("opacity", 0.9)
+    .attr("filter", function(d) { return (d.type === "researcher" || d.type === "query") ? "url(#glow)" : null; });
+
+  // Icons inside researcher/query nodes
+  node.filter(function(d) { return d.type === "researcher"; }).append("text")
+    .text("\u25CE").attr("text-anchor", "middle").attr("dy", 4)
+    .attr("font-size", "12px").attr("fill", function(d) { return d.color; }).attr("opacity", 0.3)
+    .style("pointer-events", "none");
+  node.filter(function(d) { return d.type === "query"; }).append("text")
+    .text("\u2299").attr("text-anchor", "middle").attr("dy", 4)
+    .attr("font-size", "10px").attr("fill", "#c45c4a").attr("opacity", 0.35)
+    .style("pointer-events", "none");
+
+  // Labels (above node)
+  node.append("text").attr("class", "label")
+    .text(function(d) { return d.label.length > 24 ? d.label.slice(0, 22) + "\u2026" : d.label; })
+    .attr("text-anchor", "middle").attr("dy", function(d) { return -d.size - 6; })
+    .attr("font-size", function(d) { return d.type === "researcher" ? "9px" : d.type === "query" ? "8px" : "6.5px"; })
+    .attr("font-weight", function(d) { return (d.type === "researcher" || d.type === "query") ? 600 : 400; })
+    .attr("fill", function(d) { return d.type === "query" ? "#c45c4a" : d.type === "researcher" ? d.color : "#6a7590"; })
+    .attr("letter-spacing", function(d) { return d.type === "researcher" ? "0.8px" : "0.2px"; })
+    .attr("font-family", "inherit")
+    .style("pointer-events", "none");
+
+  // Sub-labels (below node, hidden by default)
+  node.append("text").attr("class", "sub-label")
+    .text(function(d) {
+      if (d.type === "researcher") { var m = d.metadata || {}; return "h-index: " + (m.h_index || "?") + " \u00B7 " + ((m.affiliations && m.affiliations[0]) || ""); }
+      if (d.type === "paper") { var m2 = d.metadata || {}; return (m2.year || "") + " \u00B7 " + (m2.citations || 0) + " cites"; }
+      return "";
+    })
+    .attr("text-anchor", "middle").attr("dy", function(d) { return d.size + 12; })
+    .attr("font-size", "6px").attr("fill", "#4a5568").attr("opacity", 0)
+    .attr("font-family", "inherit").style("pointer-events", "none");
+
+  // Field tags (paper only, hidden by default)
+  node.filter(function(d) { return d.type === "paper"; }).append("text").attr("class", "field-tag")
+    .text(function(d) { return (d.metadata && d.metadata.fields && d.metadata.fields[0]) || ""; })
+    .attr("text-anchor", "middle").attr("dy", function(d) { return d.size + 22; })
+    .attr("font-size", "5.5px").attr("fill", function(d) { return d._authorColor || d.color; }).attr("opacity", 0)
+    .attr("font-family", "inherit").style("pointer-events", "none");
+
+  // ── Drag ──────────────────────────────────────────
+  node.call(d3.drag()
+    .on("start", function(ev, d) { d.fx = d.x; d.fy = d.y; })
+    .on("drag", function(ev, d) {
+      d.fx = ev.x; d.fy = ev.y;
+      simulation.alphaTarget(0.02).restart();
+    })
+    .on("end", function(ev, d) {
+      d.fx = null; d.fy = null;
+      simulation.alphaTarget(0);
+    })
+  );
+
+  // ── Hover (no simulation restart) ─────────────────
+  var selectedNode = null;
+
+  node.on("mouseenter", function(ev, d) {
+    if (selectedNode) return;
+    var conn = getConnected(d.id);
+
+    node.transition().duration(250).ease(d3.easeCubicOut)
+      .attr("opacity", function(n) { return conn.has(n.id) ? 1 : 0.15; });
+    node.selectAll(".body").transition().duration(250).ease(d3.easeCubicOut)
+      .attr("r", function(n) { return n.id === d.id ? n.size + 3 : n.size; });
+    node.selectAll(".sub-label").transition().duration(250)
+      .attr("opacity", function(n) { return n.id === d.id ? 0.7 : 0; });
+    node.selectAll(".field-tag").transition().duration(250)
+      .attr("opacity", function(n) { return conn.has(n.id) ? 0.5 : 0; });
+
+    link.transition().duration(250).ease(d3.easeCubicOut)
+      .attr("opacity", function(l) { return isConnectedLink(l, d.id) ? 0.6 : 0.03; })
+      .attr("stroke-width", function(l) {
+        if (!isConnectedLink(l, d.id)) return edgeStyle(l).width;
+        return l.type === "semantic" ? 1.5 + ((l.metadata && l.metadata.score) || 0) * 3 : 2;
+      });
+
+    scoreLabels.transition().duration(250)
+      .attr("opacity", function(l) { return isConnectedLink(l, d.id) ? 0.7 : 0; });
+  });
+
+  node.on("mouseleave", function(ev, d) {
+    if (selectedNode) return;
+    resetVisuals();
+  });
+
+  // ── Click / Selection ─────────────────────────────
+  var detailEl = document.getElementById("explorer-detail");
+
+  node.on("click", function(ev, d) {
+    ev.stopPropagation();
+    if (selectedNode && selectedNode.id === d.id) {
+      selectedNode = null;
+      resetVisuals();
+      detailEl.classList.remove("explorer-detail-open");
+      return;
+    }
+    selectedNode = d;
+    applySelection(d);
+    showDetail(d);
+  });
+
+  svg.on("click", function() {
+    selectedNode = null;
+    resetVisuals();
+    detailEl.classList.remove("explorer-detail-open");
+  });
+
+  // ── Visual helpers ────────────────────────────────
+  function getConnected(nodeId) {
+    var ids = new Set([nodeId]);
+    data.links.forEach(function(l) {
+      var s = l.source.id !== undefined ? l.source.id : l.source;
+      var t = l.target.id !== undefined ? l.target.id : l.target;
+      if (s === nodeId) ids.add(t);
+      if (t === nodeId) ids.add(s);
+    });
+    return ids;
+  }
+
+  function isConnectedLink(l, nodeId) {
+    var s = l.source.id !== undefined ? l.source.id : l.source;
+    var t = l.target.id !== undefined ? l.target.id : l.target;
+    return s === nodeId || t === nodeId;
+  }
+
+  function resetVisuals() {
+    node.transition().duration(350).ease(d3.easeCubicOut).attr("opacity", 1);
+    node.selectAll(".body").transition().duration(350).ease(d3.easeCubicOut)
+      .attr("r", function(d) { return d.size; });
+    node.selectAll(".sub-label").transition().duration(250).attr("opacity", 0);
+    node.selectAll(".field-tag").transition().duration(250).attr("opacity", 0);
+    link.transition().duration(350).ease(d3.easeCubicOut)
+      .each(function(l) {
+        var s = edgeStyle(l);
+        d3.select(this).attr("opacity", s.opacity).attr("stroke-width", s.width);
+      });
+    scoreLabels.transition().duration(250).attr("opacity", 0);
+  }
+
+  function applySelection(d) {
+    var conn = getConnected(d.id);
+    node.transition().duration(300).ease(d3.easeCubicOut)
+      .attr("opacity", function(n) { return conn.has(n.id) ? 1 : 0.1; });
+    node.selectAll(".body").transition().duration(300).ease(d3.easeCubicOut)
+      .attr("r", function(n) { return n.id === d.id ? n.size + 4 : n.size; });
+    node.selectAll(".sub-label").transition().duration(300)
+      .attr("opacity", function(n) { return conn.has(n.id) ? 0.7 : 0; });
+    node.selectAll(".field-tag").transition().duration(300)
+      .attr("opacity", function(n) { return conn.has(n.id) ? 0.55 : 0; });
+
+    link.transition().duration(300).ease(d3.easeCubicOut)
+      .attr("opacity", function(l) { return isConnectedLink(l, d.id) ? 0.65 : 0.02; })
+      .attr("stroke-width", function(l) {
+        if (!isConnectedLink(l, d.id)) return l.type === "citation" ? 0.8 : 1;
+        return l.type === "semantic" ? 2 + ((l.metadata && l.metadata.score) || 0) * 3 : 2.5;
+      });
+
+    scoreLabels.transition().duration(300)
+      .attr("opacity", function(l) { return isConnectedLink(l, d.id) ? 0.8 : 0; });
+  }
+
+  // ── Detail panel ──────────────────────────────────
+  function showDetail(d) {
+    var m = d.metadata || {};
+    var c = d._authorColor || d.color;
+    var oa = (m.oa_status && OA[m.oa_status]) || null;
+    var html = '';
+
+    // Header
+    html += '<div class="explorer-detail-header">';
+    html += '<div class="explorer-detail-type">';
+    html += '<span class="explorer-detail-type-dot" style="background:' + c + ';opacity:0.7"></span>';
+    html += '<span class="explorer-detail-type-label" style="color:' + c + '">' + d.type.toUpperCase() + '</span>';
+    if (oa) {
+      html += '<span class="explorer-detail-oa-badge" style="color:' + oa.color + ';background:' + oa.color + '10;border-color:' + oa.color + '25">' + oa.label + '</span>';
+    }
+    html += '</div>';
+    html += '<div class="explorer-detail-title">' + esc(d.label) + '</div>';
+    // Sub-line
+    if (d.type === "paper") html += '<div class="explorer-detail-sub">' + (m.year || "") + " \u00B7 " + ((m.citations || 0) + " citations") + '</div>';
+    if (d.type === "researcher") html += '<div class="explorer-detail-sub">h-index: ' + (m.h_index || "?") + " \u00B7 " + ((m.affiliations && m.affiliations[0]) || "") + '</div>';
+    html += '</div>';
+
+    // Body
+    html += '<div class="explorer-detail-body">';
+
+    if (d.type === "researcher") {
+      html += '<div>';
+      html += '<span class="explorer-detail-stat"><div class="explorer-detail-field-label">H-INDEX</div><div class="explorer-detail-stat-value" style="color:' + c + '">' + (m.h_index || "?") + '</div></span>';
+      html += '<span class="explorer-detail-stat"><div class="explorer-detail-field-label">WORKS</div><div class="explorer-detail-stat-value" style="color:' + c + '">' + (m.works_count || "?") + '</div></span>';
+      html += '</div>';
+      if (m.fields && m.fields.length) {
+        html += '<div>';
+        m.fields.forEach(function(f) {
+          html += '<span class="explorer-detail-tag" style="color:' + c + ';background:' + c + '0c;border-color:' + c + '18">' + esc(f) + '</span> ';
+        });
+        html += '</div>';
+      }
+      html += '<div style="display:flex;flex-direction:column;gap:3px;margin-top:4px">';
+      html += '<button class="explorer-detail-btn" style="color:' + c + '">LOAD ALL PAPERS</button>';
+      html += '<button class="explorer-detail-btn">CO-AUTHOR NETWORK</button>';
+      html += '<button class="explorer-detail-btn">VIEW PROFILE \u2192</button>';
+      html += '</div>';
+    }
+
+    if (d.type === "paper") {
+      if (m.fields && m.fields.length) {
+        html += '<div>';
+        m.fields.forEach(function(f) {
+          html += '<span class="explorer-detail-tag" style="color:' + c + ';background:' + c + '0c;border-color:' + c + '18">' + esc(f) + '</span> ';
+        });
+        html += '</div>';
+      }
+      if (m.abstract) {
+        html += '<div><div class="explorer-detail-field-label">TLDR</div><div class="explorer-detail-field-value">' + esc(m.abstract) + '</div></div>';
+      }
+      if (m.doi) {
+        html += '<div><div class="explorer-detail-field-label">DOI</div><div style="font-size:7px;color:#5a7eaa;word-break:break-all">' + esc(m.doi) + '</div></div>';
+      }
+      html += '<div style="display:flex;flex-direction:column;gap:3px;margin-top:4px">';
+      if (m.oa_status === "open") html += '<button class="explorer-detail-btn" style="color:#22c55e">\u2193 DOWNLOAD PDF</button>';
+      else if (m.oa_status === "preprint") html += '<button class="explorer-detail-btn" style="color:#eab308">\u2193 GET PREPRINT</button>';
+      else html += '<div style="font-size:7px;color:#5a6580;text-align:center;padding:5px;background:rgba(255,255,255,0.01);border-radius:4px;border:1px solid #1a1f2e">\uD83D\uDD12 Abstract + metadata only</div>';
+      html += '<button class="explorer-detail-btn">EXPAND CITATIONS \u2192</button>';
+      html += '<button class="explorer-detail-btn">FIND SIMILAR PAPERS</button>';
+      html += '</div>';
+    }
+
+    if (d.type === "query") {
+      html += '<div class="explorer-detail-field-value">Dashed edges show semantic similarity. Percentage = cosine similarity score.</div>';
+    }
+
+    html += '</div>';
+
+    // Deselect button
+    html += '<div class="explorer-detail-deselect"><button class="explorer-detail-btn" onclick="document.getElementById(\'explorer-detail\').classList.remove(\'explorer-detail-open\')">DESELECT</button></div>';
+
+    detailEl.querySelector(".explorer-detail-content").innerHTML = html;
+    detailEl.classList.add("explorer-detail-open");
+  }
+
+  function esc(str) {
+    var d = document.createElement("div");
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  // Close button
+  detailEl.querySelector(".explorer-detail-close").addEventListener("click", function(e) {
+    e.stopPropagation();
+    selectedNode = null;
+    resetVisuals();
+    detailEl.classList.remove("explorer-detail-open");
+  });
+
+  // ── Search ────────────────────────────────────────
+  var searchInput = container.querySelector(".explorer-search");
+  var searchBtn = container.querySelector(".explorer-search-btn");
+
+  function doSearch() {
+    var q = searchInput.value.trim().toLowerCase();
+    if (!q) {
+      node.transition().duration(300).attr("opacity", 1);
+      link.each(function(l) { var s = edgeStyle(l); d3.select(this).transition().duration(300).attr("opacity", s.opacity); });
+      return;
+    }
+    node.transition().duration(300).attr("opacity", function(d) {
+      return d.label.toLowerCase().indexOf(q) !== -1 ? 1 : 0.08;
+    });
+    link.transition().duration(300).attr("opacity", function(l) {
+      var s = l.source.id !== undefined ? l.source.id : l.source;
+      var t = l.target.id !== undefined ? l.target.id : l.target;
+      var sm = nodeMap[s] && nodeMap[s].label.toLowerCase().indexOf(q) !== -1;
+      var tm = nodeMap[t] && nodeMap[t].label.toLowerCase().indexOf(q) !== -1;
+      return (sm || tm) ? edgeStyle(l).opacity * 2 : 0.02;
+    });
+  }
+
+  searchBtn.addEventListener("click", doSearch);
+  searchInput.addEventListener("keydown", function(e) { if (e.key === "Enter") doSearch(); });
+
+  // ── Suggestion pills ──────────────────────────────
+  var suggestionsEl = document.getElementById("explorer-suggestions");
+  ["urban space capitalism", "right to the city", "gender power spatial"].forEach(function(q) {
+    var pill = document.createElement("button");
+    pill.className = "explorer-suggestion-pill";
+    pill.textContent = q;
+    pill.addEventListener("click", function() {
+      searchInput.value = q;
+      doSearch();
+    });
+    suggestionsEl.appendChild(pill);
+  });
+
+  // ── Simulation ────────────────────────────────────
+  var simulation = d3.forceSimulation(data.nodes)
+    .force("link", d3.forceLink(data.links).id(function(d) { return d.id; })
+      .distance(function(d) {
+        if (d.type === "authorship") return 55 + ((nodeMap[d.target.id || d.target] || {}).size || 10) * 2;
+        if (d.type === "semantic") return 100;
+        return 140;
+      })
+      .strength(function(d) {
+        if (d.type === "authorship") return 0.6;
+        if (d.type === "citation") return 0.08;
+        if (d.type === "semantic") return (d.metadata && d.metadata.score || 0.3) * 0.4;
+        return 0.2;
+      }))
+    .force("charge", d3.forceManyBody().strength(function(d) {
+      return d.type === "researcher" ? -280 : d.type === "query" ? -200 : -50;
+    }))
+    .force("center", d3.forceCenter(width / 2, height / 2).strength(0.03))
+    .force("collision", d3.forceCollide().radius(function(d) { return d.size + 8; }).strength(0.7))
+    .alpha(0.8)
+    .alphaDecay(0.04)
+    .velocityDecay(0.55)
+    .on("tick", function() {
+      link.attr("x1", function(d) { return d.source.x; }).attr("y1", function(d) { return d.source.y; })
+          .attr("x2", function(d) { return d.target.x; }).attr("y2", function(d) { return d.target.y; });
+      scoreLabels
+        .attr("x", function(d) { return (d.source.x + d.target.x) / 2; })
+        .attr("y", function(d) { return (d.source.y + d.target.y) / 2 - 4; });
+      node.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+      root.select(".explorer-halos").selectAll("circle")
+        .data(data.nodes.filter(function(n) { return n.type !== "paper"; }))
+        .attr("cx", function(d) { return d.x; }).attr("cy", function(d) { return d.y; });
+    });
+})();
+</script>

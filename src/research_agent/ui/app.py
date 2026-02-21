@@ -13,6 +13,8 @@ from pathlib import Path
 
 import gradio as gr
 
+from research_agent.explorer import ExplorerRenderer, GraphBuilder, get_mock_graph_data
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,168 +29,329 @@ def create_app(agent=None):
         Gradio Blocks app
     """
 
+    # ── Dark theme matching the knowledge explorer ──────────────────
+    explorer_theme = gr.themes.Base(
+        primary_hue=gr.themes.colors.red,
+        neutral_hue=gr.themes.colors.slate,
+        font=gr.themes.GoogleFont("IBM Plex Mono"),
+        font_mono=gr.themes.GoogleFont("IBM Plex Mono"),
+    ).set(
+        # Background
+        body_background_fill="#0a0d13",
+        body_background_fill_dark="#0a0d13",
+        background_fill_primary="#0e1219",
+        background_fill_primary_dark="#0e1219",
+        background_fill_secondary="#0a0d13",
+        background_fill_secondary_dark="#0a0d13",
+        # Text
+        body_text_color="#c8d0e0",
+        body_text_color_dark="#c8d0e0",
+        body_text_color_subdued="#5a6580",
+        body_text_color_subdued_dark="#5a6580",
+        # Blocks / panels
+        block_background_fill="#0e1219",
+        block_background_fill_dark="#0e1219",
+        block_border_color="#1a1f2e",
+        block_border_color_dark="#1a1f2e",
+        block_label_background_fill="#0e1219",
+        block_label_background_fill_dark="#0e1219",
+        block_label_text_color="#5a6580",
+        block_label_text_color_dark="#5a6580",
+        block_title_text_color="#c8d0e0",
+        block_title_text_color_dark="#c8d0e0",
+        block_title_background_fill="#0e1219",
+        block_title_background_fill_dark="#0e1219",
+        block_shadow="none",
+        block_shadow_dark="none",
+        # Borders
+        border_color_accent="#c45c4a",
+        border_color_accent_dark="#c45c4a",
+        border_color_primary="#1a1f2e",
+        border_color_primary_dark="#1a1f2e",
+        color_accent="#c45c4a",
+        color_accent_soft="#c45c4a15",
+        color_accent_soft_dark="#c45c4a15",
+        # Input
+        input_background_fill="#0a0e16",
+        input_background_fill_dark="#0a0e16",
+        input_border_color="#1a1f2e",
+        input_border_color_dark="#1a1f2e",
+        input_border_color_focus="#c45c4a40",
+        input_border_color_focus_dark="#c45c4a40",
+        input_placeholder_color="#3e4a64",
+        input_placeholder_color_dark="#3e4a64",
+        input_shadow="none",
+        input_shadow_dark="none",
+        input_shadow_focus="none",
+        input_shadow_focus_dark="none",
+        # Buttons
+        button_primary_background_fill="#c45c4a",
+        button_primary_background_fill_dark="#c45c4a",
+        button_primary_text_color="white",
+        button_primary_text_color_dark="white",
+        button_primary_background_fill_hover="#d4705f",
+        button_primary_background_fill_hover_dark="#d4705f",
+        button_primary_border_color="#c45c4a",
+        button_primary_border_color_dark="#c45c4a",
+        button_primary_shadow="none",
+        button_primary_shadow_dark="none",
+        button_secondary_background_fill="#1a1f2e",
+        button_secondary_background_fill_dark="#1a1f2e",
+        button_secondary_text_color="#c8d0e0",
+        button_secondary_text_color_dark="#c8d0e0",
+        button_secondary_border_color="#1a1f2e",
+        button_secondary_border_color_dark="#1a1f2e",
+        button_secondary_shadow="none",
+        button_secondary_shadow_dark="none",
+        # Shadows
+        shadow_drop="none",
+        shadow_drop_lg="none",
+        shadow_spread="0px",
+        shadow_spread_dark="0px",
+        # Panel
+        panel_background_fill="#0e1219",
+        panel_background_fill_dark="#0e1219",
+        panel_border_color="#1a1f2e",
+        panel_border_color_dark="#1a1f2e",
+        # Table
+        table_border_color="#1a1f2e",
+        table_border_color_dark="#1a1f2e",
+        table_even_background_fill="#0e1219",
+        table_even_background_fill_dark="#0e1219",
+        table_odd_background_fill="#0a0d13",
+        table_odd_background_fill_dark="#0a0d13",
+        table_text_color="#c8d0e0",
+        table_text_color_dark="#c8d0e0",
+        # Accordion
+        accordion_text_color="#5a6580",
+        accordion_text_color_dark="#5a6580",
+        # Checkbox
+        checkbox_shadow="none",
+        checkbox_label_shadow="none",
+    )
+
+    explorer_css = """
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+
+    .gradio-container {
+        max-width: 100% !important;
+        padding: 0 8px !important;
+    }
+
+    /* ── Top bar: compact single line ──────────────── */
+    #top-bar {
+        background: #0e1219 !important;
+        border: 1px solid #1a1f2e !important;
+        border-radius: 6px !important;
+        padding: 6px 14px !important;
+        gap: 10px !important;
+        margin-bottom: 4px !important;
+        min-height: auto !important;
+        align-items: center !important;
+    }
+    #top-bar > div {
+        padding: 0 !important;
+        min-height: 0 !important;
+        border: none !important;
+        background: none !important;
+    }
+    #top-bar input, #top-bar .wrap {
+        font-size: 11px !important;
+        padding: 6px 10px !important;
+        min-height: 0 !important;
+        line-height: 1.3 !important;
+        background: #0a0d13 !important;
+        border: 1px solid #1a1f2e !important;
+        border-radius: 6px !important;
+        color: #c8d0e0 !important;
+    }
+    #top-bar input:focus, #top-bar .wrap:focus-within {
+        border-color: #c45c4a40 !important;
+    }
+    #top-bar .wrap .icon-wrap, #top-bar .wrap svg {
+        color: #3e4a64 !important;
+        width: 14px !important;
+        height: 14px !important;
+    }
+
+    /* ── Split pane ────────────────────────────────── */
+    #split-pane {
+        gap: 4px !important;
+    }
+    #split-pane > div {
+        border: 1px solid #1a1f2e !important;
+        border-radius: 6px !important;
+        overflow: hidden;
+    }
+
+    /* ── Chat pane ─────────────────────────────────── */
+    #chat-col {
+        background: #0e1219 !important;
+        padding: 0 !important;
+    }
+    #chat-col .chatbot {
+        border: none !important;
+        border-radius: 0 !important;
+        background: #0e1219 !important;
+    }
+    #chat-input {
+        padding: 8px 12px !important;
+        border-top: 1px solid #1a1f2e !important;
+        gap: 6px !important;
+        background: #0e1219 !important;
+    }
+    #chat-input > div {
+        border: none !important;
+        background: none !important;
+        padding: 0 !important;
+        min-height: 0 !important;
+    }
+    #chat-input input {
+        font-size: 11px !important;
+        padding: 8px 12px !important;
+        background: #0a0e16 !important;
+        border: 1px solid #1a1f2e !important;
+        border-radius: 6px !important;
+        color: #c8d0e0 !important;
+    }
+    #chat-input input:focus {
+        border-color: #c45c4a40 !important;
+    }
+    #chat-input button {
+        font-size: 9px !important;
+        letter-spacing: 0.5px !important;
+        padding: 8px 14px !important;
+        border-radius: 6px !important;
+        min-height: 0 !important;
+    }
+    #clear-row {
+        padding: 0 12px 6px !important;
+    }
+    #clear-row > button {
+        font-size: 8px !important;
+        padding: 4px 10px !important;
+        border-radius: 4px !important;
+        min-height: 0 !important;
+    }
+
+    /* ── Explorer pane ─────────────────────────────── */
+    #explorer-col {
+        padding: 0 !important;
+        background: #0a0d13 !important;
+    }
+    #explorer-col > div {
+        border: none !important;
+        padding: 0 !important;
+    }
+
+    /* ── Knowledge Management accordion ────────────── */
+    #km-accordion {
+        margin-top: 4px !important;
+        border: 1px solid #1a1f2e !important;
+        border-radius: 6px !important;
+    }
+    #km-accordion .label-wrap {
+        font-size: 10px !important;
+        letter-spacing: 0.8px !important;
+        padding: 8px 14px !important;
+    }
+    """
+
     with gr.Blocks(
         title="Research Assistant",
     ) as app:
+        app._explorer_theme = explorer_theme
+        app._explorer_css = explorer_css
         # Shared state
         context_state = gr.State({"researcher": None, "paper_id": None})
         _query_state = gr.State({"query": None, "chunks": []})
 
-        # ── TOP BAR ──────────────────────────────────────────────────────
-        with gr.Row(equal_height=True):
+        # ── TOP BAR ────────────────────────────────────────────────────
+        with gr.Row(equal_height=True, elem_id="top-bar"):
+            topbar_researcher = gr.Textbox(
+                placeholder="Researcher (press Enter to look up)",
+                show_label=False,
+                container=False,
+                scale=2,
+                min_width=140,
+            )
+            kb_view_btn = gr.Button("KB", variant="secondary", scale=0, min_width=50)
             model_dropdown = gr.Dropdown(
                 choices=["Loading..."],
                 value="Loading...",
-                label="Model",
-                scale=3,
-                interactive=True,
-                min_width=160,
-            )
-            kb_status_display = gr.Textbox(
-                value="KB: — chunks  ● Loading",
-                label=None,
-                container=False,
-                interactive=False,
-                scale=3,
                 show_label=False,
+                container=False,
+                scale=2,
+                interactive=True,
+                min_width=140,
             )
-            refresh_models_btn = gr.Button("↺", scale=1, min_width=42, variant="secondary")
-            settings_toggle_btn = gr.Button("⚙ Settings", scale=1, min_width=100, variant="secondary")
+            topic_search = gr.Textbox(
+                placeholder="Topic / search...",
+                show_label=False,
+                container=False,
+                scale=3,
+                min_width=180,
+            )
 
-        # Hidden current_model_display for event-handler compat
+        # Hidden components (keep for event-handler compat)
         current_model_display = gr.Textbox(visible=False, interactive=False, label="Current Model")
+        kb_status_display = gr.Textbox(visible=False)
+        refresh_models_btn = gr.Button(visible=False)
+        settings_toggle_btn = gr.Button(visible=False)
+        settings_accordion = gr.Group(visible=False)
+        year_from_chat = gr.Slider(minimum=1900, maximum=2030, value=1900, visible=False)
+        year_to_chat = gr.Slider(minimum=1900, maximum=2030, value=2030, visible=False)
+        min_citations_chat = gr.Slider(minimum=0, maximum=1000, value=0, visible=False)
+        search_depth = gr.Slider(minimum=1, maximum=20, value=5, visible=False)
+        auto_ingest = gr.Checkbox(value=False, visible=False)
+        reranker_enable_chat = gr.Checkbox(value=False, visible=False)
+        rerank_topk_chat = gr.Slider(minimum=1, maximum=50, value=10, visible=False)
+        rerank_status_chat = gr.Textbox(visible=False)
+        current_researcher = gr.Dropdown(visible=False, choices=[], allow_custom_value=True)
+        current_paper_id = gr.Textbox(visible=False)
+        refresh_context_btn = gr.Button(visible=False)
+        analyze_current_researcher_btn = gr.Button(visible=False)
+        analyze_current_paper_btn = gr.Button(visible=False)
+        ctx_kb_btn = gr.Button(visible=False)
+        ctx_researcher_btn = gr.Button(visible=False)
+        ctx_query_btn = gr.Button(visible=False)
+        ctx_citations_btn = gr.Button(visible=False)
+        context_map_plot = gr.Plot(visible=False)
+        context_map_status = gr.Textbox(visible=False)
 
-        # ── SETTINGS ACCORDION (collapsed by default) ─────────────────────
-        with gr.Accordion("⚙  Settings", open=False, visible=True) as settings_accordion:
-            with gr.Row():
-                with gr.Column(scale=2):
-                    gr.Markdown("### Search Settings")
-                    with gr.Row():
-                        search_depth = gr.Slider(
-                            minimum=1,
-                            maximum=20,
-                            value=5,
-                            step=1,
-                            label="Max external results per source",
-                        )
-                        auto_ingest = gr.Checkbox(
-                            label="Automatically add high-quality sources to knowledge base",
-                            value=False,
-                        )
-
-                    gr.Markdown("### Search Filters")
-                    with gr.Row():
-                        year_from_chat = gr.Slider(
-                            minimum=1900,
-                            maximum=2030,
-                            value=1900,
-                            step=1,
-                            label="From Year",
-                            info="Use 1900 for no lower bound",
-                        )
-                        year_to_chat = gr.Slider(
-                            minimum=1900,
-                            maximum=2030,
-                            value=2030,
-                            step=1,
-                            label="To Year",
-                            info="Use 2030 for no upper bound",
-                        )
-                    min_citations_chat = gr.Slider(
-                        minimum=0,
-                        maximum=1000,
-                        value=0,
-                        step=10,
-                        label="Min citations",
-                        info="0 to disable",
-                    )
-
-                with gr.Column(scale=1):
-                    gr.Markdown("### Reranker (Retrieval)")
-                    with gr.Row():
-                        reranker_enable_chat = gr.Checkbox(
-                            label="Enable reranker (BGE)",
-                            value=False,
-                            info="Improves ranking of retrieved chunks",
-                        )
-                        rerank_topk_chat = gr.Slider(
-                            minimum=1,
-                            maximum=50,
-                            value=10,
-                            step=1,
-                            label="Rerank top-k",
-                            info="How many results to rerank",
-                        )
-                    rerank_status_chat = gr.Textbox(
-                        label="Reranker Status",
-                        interactive=False,
-                        placeholder="Using config defaults",
-                    )
-
-        # ── CONTEXT ROW ───────────────────────────────────────────────────
-        with gr.Row():
-            current_researcher = gr.Dropdown(
-                choices=[],
-                label="Researcher",
-                interactive=True,
-                value=None,
-                allow_custom_value=True,
-                scale=3,
-            )
-            current_paper_id = gr.Textbox(
-                label="Paper ID",
-                interactive=True,
-                placeholder="Current paper context",
-                scale=3,
-            )
-            refresh_context_btn = gr.Button("↺", scale=1, min_width=42)
-            analyze_current_researcher_btn = gr.Button(
-                "Analyze Researcher",
-                variant="secondary",
-                scale=1,
-            )
-            analyze_current_paper_btn = gr.Button(
-                "Analyze Paper",
-                variant="secondary",
-                scale=1,
+        # ── SPLIT PANE: Chat (left) + Explorer (right) ───────────────────
+        with gr.Row(equal_height=False, elem_id="split-pane"):
+          # LEFT PANE: Chat
+          with gr.Column(scale=2, min_width=340, elem_id="chat-col"):
+            chatbot = gr.Chatbot(
+                height=560,
+                placeholder="Ask about your research topic...",
             )
 
-        # ── CHAT ──────────────────────────────────────────────────────────
-        chatbot = gr.Chatbot(
-            height=460,
-            placeholder="Ask me about your research topic...",
-        )
+            with gr.Row(elem_id="chat-input"):
+                msg = gr.Textbox(
+                    placeholder="Ask the research agent...",
+                    show_label=False,
+                    container=False,
+                    scale=5,
+                )
+                submit = gr.Button("SEND", variant="primary", scale=1)
 
-        with gr.Row():
-            msg = gr.Textbox(
-                placeholder="What are the key theories in urban anthropology?",
-                label="Your question",
-                scale=5,
+            with gr.Row(elem_id="clear-row"):
+                clear = gr.Button("Clear", variant="secondary", size="sm")
+
+          # RIGHT PANE: Knowledge Explorer
+          with gr.Column(scale=3, elem_id="explorer-col"):
+            _renderer = ExplorerRenderer()
+            explorer_html = gr.HTML(
+                value=_renderer.render(get_mock_graph_data())
             )
-            submit = gr.Button("Send", variant="primary", scale=1)
-
-        with gr.Row():
-            clear = gr.Button("Clear Chat")
-
-        # ── CONTEXT MAP ───────────────────────────────────────────────────
-        with gr.Group():
-            gr.Markdown("### Context Map")
-            with gr.Row():
-                ctx_kb_btn = gr.Button("KB Graph", variant="secondary", scale=1)
-                ctx_researcher_btn = gr.Button("Researcher", variant="secondary", scale=1)
-                ctx_query_btn = gr.Button("Query", variant="secondary", scale=1)
-                ctx_citations_btn = gr.Button("Citations", variant="secondary", scale=1)
-            context_map_plot = gr.Plot(label="Context Map", show_label=False)
-            context_map_status = gr.Textbox(
-                interactive=False,
-                placeholder="Select a view above to generate the context map.",
-                label=None,
-                container=False,
-                show_label=False,
+            explorer_callback = gr.Textbox(
+                visible=False, elem_id="explorer-callback"
             )
 
-        # ── KNOWLEDGE MANAGEMENT (accordion, collapsed) ────────────────────
-        with gr.Accordion("Knowledge Management", open=False):
+        # ── KNOWLEDGE MANAGEMENT (collapsed) ───────────────────────────
+        with gr.Accordion("Knowledge Management", open=False, elem_id="km-accordion"):
             with gr.Tabs() as main_tabs:
 
                 # ── Knowledge Base tab ────────────────────────────────────
@@ -3047,18 +3210,8 @@ def create_app(agent=None):
             outputs=[cm_plot, cm_status],
         )
 
-        # ── Settings accordion toggle ──────────────────────────────────────
+        # Settings toggle (hidden, kept for compat)
         settings_is_open = gr.State(False)
-
-        def _toggle_settings(is_open):
-            new_open = not bool(is_open)
-            return gr.update(open=new_open), new_open
-
-        settings_toggle_btn.click(
-            _toggle_settings,
-            inputs=[settings_is_open],
-            outputs=[settings_accordion, settings_is_open],
-        )
 
         # ── KB status display (top bar) ────────────────────────────────────
         def _get_kb_status():
@@ -3128,6 +3281,136 @@ def create_app(agent=None):
             outputs=[context_map_plot, context_map_status],
         )
 
+        # ── Explorer callback stub (for future JS->Python communication) ──
+        explorer_callback.change(
+            lambda x: None, inputs=[explorer_callback], outputs=[]
+        )
+
+        # ── Top bar: researcher lookup → explorer graph ──────────────────
+        def lookup_and_build_explorer(researcher_name, state):
+            """Look up researcher via APIs, build graph, update explorer."""
+            logger.info(f"[Explorer] lookup_and_build_explorer called with: '{researcher_name}'")
+            print(f"[Explorer] lookup_and_build_explorer called with: '{researcher_name}'", flush=True)
+            if not researcher_name or not researcher_name.strip():
+                # Cleared field → show mock graph
+                renderer = ExplorerRenderer()
+                return renderer.render(get_mock_graph_data()), state
+
+            name = researcher_name.strip()
+
+            try:
+                # 1. Lookup researcher (async → sync bridge)
+                from research_agent.tools.researcher_lookup import ResearcherLookup
+                from research_agent.tools.researcher_registry import get_researcher_registry
+                import concurrent.futures
+
+                lookup = ResearcherLookup(
+                    use_openalex=True,
+                    use_semantic_scholar=True,
+                    use_web_search=False,
+                    request_delay=0.3,
+                )
+
+                async def _do_lookup():
+                    try:
+                        return await lookup.lookup_researcher(
+                            name, fetch_papers=True, papers_limit=10
+                        )
+                    finally:
+                        await lookup.close()
+
+                print(f"[Explorer] Starting API lookup for '{name}'...", flush=True)
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    profile = pool.submit(asyncio.run, _do_lookup()).result()
+
+                print(f"[Explorer] Lookup done: {profile.name}, {profile.citations_count} cites, {len(profile.top_papers)} papers", flush=True)
+
+                if not profile:
+                    return gr.update(), state
+
+                # 2. Store in registry
+                registry = get_researcher_registry()
+                registry.add(profile)
+
+                # 3. Build graph
+                gb = GraphBuilder()
+                researcher_id = gb.add_researcher(profile.to_dict())
+
+                for paper in (profile.top_papers or []):
+                    paper_id = gb.add_paper(paper)
+                    gb.add_authorship_edge(researcher_id, paper_id)
+
+                graph_data = gb.to_dict()
+                print(f"[Explorer] Graph built: {len(graph_data['nodes'])} nodes, {len(graph_data['links'])} links", flush=True)
+
+                # 4. Render
+                renderer = ExplorerRenderer()
+                html = renderer.render(graph_data)
+                print(f"[Explorer] Rendered HTML: {len(html)} chars", flush=True)
+
+                # 5. Update context
+                new_state = dict(state or {})
+                new_state["researcher"] = profile.name
+
+                return html, new_state
+
+            except Exception as e:
+                print(f"[Explorer] ERROR: {type(e).__name__}: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+                raise
+
+        topbar_researcher.submit(
+            lookup_and_build_explorer,
+            inputs=[topbar_researcher, context_state],
+            outputs=[explorer_html, context_state],
+        )
+
+        def build_kb_explorer(state):
+            """Build KB graph with optional researcher overlay."""
+            store, _, _ = _get_kb_resources()
+            papers = store.list_papers_detailed(limit=200)
+
+            gb = GraphBuilder()
+
+            # Add all KB papers as nodes
+            for p in papers:
+                gb.add_paper({
+                    "id": p["paper_id"],
+                    "title": p["title"],
+                    "year": p.get("year"),
+                    "citations": p.get("citations") or 0,
+                    "fields": p.get("fields", "").split(", ") if p.get("fields") else [],
+                    "venue": p.get("venue", ""),
+                    "doi": p.get("doi", ""),
+                    "authors": p.get("authors", ""),
+                })
+
+            # Overlay researcher if one is selected
+            researcher_name = (state or {}).get("researcher")
+            if researcher_name:
+                from research_agent.tools.researcher_registry import get_researcher_registry
+                registry = get_researcher_registry()
+                profile = registry.get(researcher_name)
+
+                if profile:
+                    rid = gb.add_researcher(profile.to_dict())
+                    # Connect researcher to matching KB papers
+                    for p in papers:
+                        authors = (p.get("authors") or "").lower()
+                        if profile.normalized_name in authors:
+                            pid = f"paper:{p['paper_id']}"
+                            gb.add_authorship_edge(rid, pid)
+
+            renderer = ExplorerRenderer()
+            return renderer.render(gb.to_dict())
+
+        kb_view_btn.click(
+            build_kb_explorer,
+            inputs=[context_state],
+            outputs=[explorer_html],
+        )
+
     return app
 
 
@@ -3142,7 +3425,13 @@ def launch_app(agent=None, port: int = 7860, share: bool = False, host: str = No
         host: Server hostname/IP to bind to (default: 127.0.0.1, use 0.0.0.0 for Docker)
     """
     app = create_app(agent)
-    kwargs = {"server_port": port, "share": share, "show_error": True, "theme": gr.themes.Soft()}
+    kwargs = {
+        "server_port": port,
+        "share": share,
+        "show_error": True,
+        "theme": getattr(app, "_explorer_theme", None),
+        "css": getattr(app, "_explorer_css", None),
+    }
     if host:
         kwargs["server_name"] = host
     app.launch(**kwargs)
