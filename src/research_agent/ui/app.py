@@ -29,7 +29,6 @@ def create_app(agent=None):
 
     with gr.Blocks(
         title="Research Assistant",
-        theme=gr.themes.Soft(),
     ) as app:
         # Shared state
         context_state = gr.State({"researcher": None, "paper_id": None})
@@ -158,7 +157,6 @@ def create_app(agent=None):
         chatbot = gr.Chatbot(
             height=460,
             placeholder="Ask me about your research topic...",
-            type="messages",
         )
 
         with gr.Row():
@@ -703,13 +701,27 @@ def create_app(agent=None):
             # Return: dropdown choices, dropdown value, current model display
             return gr.update(choices=models, value=current), current
 
-        def respond(message, history, year_from, year_to, min_citations, context_state):
-            """Handle chat messages with optional context from selected researcher/paper."""
+        def add_user_message(message, history):
+            """Immediately show the user message in chat."""
+            history.append({"role": "user", "content": message})
+            return "", history
+
+        def generate_response(history, year_from, year_to, min_citations, context_state):
+            """Process the last user message and generate a response."""
+            # Extract the last user message (Gradio 6 may use structured content)
+            raw_content = history[-1]["content"] if history else ""
+            if isinstance(raw_content, list):
+                # Gradio 6 structured content: [{"type": "text", "text": "..."}]
+                message = " ".join(
+                    block.get("text", "") if isinstance(block, dict) else str(block)
+                    for block in raw_content
+                ).strip() or ""
+            else:
+                message = str(raw_content)
+
             if agent is None:
-                # Demo mode
                 response = f"[Demo mode] You asked: {message}\n\nThe agent is not loaded. Run with a real agent to get responses."
             else:
-                # Real mode - call the agent
                 try:
                     filters = {
                         "year_from": int(year_from) if year_from else None,
@@ -733,6 +745,41 @@ def create_app(agent=None):
                     )
                     response = result.get("answer", "No response generated")
 
+                    # Append source attribution section if sources exist
+                    sources = result.get("sources", [])
+                    named_sources = [
+                        s for s in sources
+                        if s.get("title") and s.get("title") != "Unknown"
+                    ]
+                    if named_sources:
+                        source_labels = {
+                            "local_kb": "Knowledge Base",
+                            "local_note": "Research Note",
+                            "local_web": "Saved Web Source",
+                            "semantic_scholar": "Semantic Scholar",
+                            "openalex": "OpenAlex",
+                            "web": "Web",
+                        }
+                        response += "\n\n---\n**Sources:**\n"
+                        seen_titles = set()
+                        idx = 0
+                        for s in named_sources:
+                            title = s["title"]
+                            if title in seen_titles:
+                                continue
+                            seen_titles.add(title)
+                            idx += 1
+                            source_type = source_labels.get(s.get("source", ""), s.get("source", ""))
+                            line = f"- **[{idx}]** {title}"
+                            authors = s.get("authors", "")
+                            if authors and authors != "User Note":
+                                line += f" -- {authors}"
+                            year = s.get("year")
+                            if year:
+                                line += f" ({year})"
+                            line += f" *[{source_type}]*"
+                            response += line + "\n"
+
                     # Add context indicator if context was used
                     if current_researcher or current_paper_id:
                         context_info = []
@@ -743,12 +790,16 @@ def create_app(agent=None):
                         response = f"*[Context: {', '.join(context_info)}]*\n\n{response}"
 
                 except Exception as e:
-                    response = f"Error: {str(e)}"
+                    error_msg = str(e)
+                    if "401" in error_msg:
+                        response = f"**API Authentication Error:** Your API key may be invalid or expired. Please check your API key configuration in `configs/config.yaml`.\n\n*Details: {error_msg}*"
+                    elif "429" in error_msg:
+                        response = f"**Rate Limit Reached:** Too many API requests. Please wait a moment and try again.\n\n*Details: {error_msg}*"
+                    else:
+                        response = f"**Error:** {error_msg}"
 
-            # Append in Gradio's message format
-            history.append({"role": "user", "content": message})
             history.append({"role": "assistant", "content": response})
-            return "", history
+            return history
 
         vector_store = None
         embedder = None
@@ -2496,14 +2547,22 @@ def create_app(agent=None):
 
         # Wire up events
         msg.submit(
-            respond,
-            [msg, chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
+            add_user_message,
             [msg, chatbot],
+            [msg, chatbot],
+        ).then(
+            generate_response,
+            [chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
+            [chatbot],
         )
         submit.click(
-            respond,
-            [msg, chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
+            add_user_message,
             [msg, chatbot],
+            [msg, chatbot],
+        ).then(
+            generate_response,
+            [chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
+            [chatbot],
         )
         clear.click(lambda: [], outputs=[chatbot])
         refresh_btn.click(

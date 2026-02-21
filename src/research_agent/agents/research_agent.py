@@ -428,19 +428,34 @@ class ResearchAgent:
             return {**state, "error": "No query provided", "query_type": "general"}
 
         # Fast pre-check: detect obvious casual/greeting messages without calling the LLM
-        query_lower = query.lower().strip()
-        casual_patterns = [
-            "hi", "hello", "hey", "how are you", "good morning", "good evening",
-            "good afternoon", "thanks", "thank you", "bye", "goodbye", "ok", "okay",
-            "sure", "yes", "no", "help", "what can you do", "who are you",
-        ]
-        if any(query_lower == p or query_lower.startswith(p + " ") or query_lower.startswith(p + "!") or query_lower.startswith(p + ",") for p in casual_patterns):
+        query_lower = query.lower().strip().rstrip("!?.,")
+        casual_exact = {
+            "hi", "hello", "hey", "howdy", "yo", "sup", "heya", "hiya",
+            "how are you", "how r u", "how's it going", "hows it going",
+            "whats up", "what's up", "wassup",
+            "good morning", "good evening", "good afternoon", "good night",
+            "thanks", "thank you", "thx", "ty", "appreciate it",
+            "bye", "goodbye", "see you", "later", "cya",
+            "ok", "okay", "k", "cool", "nice", "great", "awesome",
+            "sure", "yes", "no", "yep", "nope", "yeah", "nah",
+            "help", "what can you do", "who are you", "what are you",
+            "how do you work", "what is this",
+        }
+        casual_prefixes = (
+            "hi ", "hey ", "hello ", "thanks ", "thank you ",
+            "good morning", "good evening", "good afternoon",
+        )
+        is_casual = (
+            query_lower in casual_exact
+            or any(query_lower.startswith(p) for p in casual_prefixes)
+            or len(query_lower) <= 3
+        )
+        if is_casual:
             logger.info("Query classified as: general (casual pattern match)")
-            search_query = self._extract_search_keywords(query)
             return {
                 **state,
                 "query_type": "general",
-                "search_query": search_query,
+                "search_query": "",
                 "should_search_external": False,
             }
 
@@ -456,9 +471,10 @@ Categories:
 - general: Greetings, casual conversation, administrative questions, anything NOT about research content
 
 Rules:
-- If the query asks about what a paper/report says, classify as "factual" or "literature_review"
-- If the query is a greeting like "hi", "hello", "how are you", classify as "general"
-- When in doubt about research vs casual, prefer "factual"
+- If the query asks about what a paper/report says, classify as "literature_review" or "factual"
+- If the query is a greeting, small talk, or asks about YOUR capabilities, classify as "general"
+- If the query does not reference any specific research topic, paper, theory, or data, classify as "general"
+- Only classify as "factual" or "literature_review" if the query clearly asks about academic/research content
 
 Respond with ONLY the category name, nothing else."""
 
@@ -533,14 +549,12 @@ Respond with ONLY the category name, nothing else."""
 
         Uses LLM when available, otherwise falls back to simple truncation.
         """
-        # If already short enough, use as-is
-        if len(query) <= max_len:
-            return query
-
-        # Try LLM extraction
+        # Always try LLM extraction for better search queries
         if self.model:
             try:
                 prompt = f"""Extract 3-8 concise academic search keywords from this research query.
+Focus on the research TOPIC, not filler words like "key concepts" or "work".
+If a researcher name is mentioned, include their name as a keyword.
 Return ONLY the keywords separated by spaces, nothing else.
 
 Query: {query}
@@ -553,7 +567,9 @@ Keywords:"""
             except Exception as e:
                 logger.warning(f"LLM keyword extraction failed: {e}")
 
-        # Fallback: take first max_len chars, break at last space
+        # Fallback: use query as-is if short, otherwise truncate
+        if len(query) <= max_len:
+            return query
         truncated = query[:max_len]
         last_space = truncated.rfind(" ")
         if last_space > max_len // 2:
@@ -564,6 +580,11 @@ Keywords:"""
         """Search local vector store for relevant documents across all collections."""
         query = state.get("current_query", "")
         local_results = []
+
+        # Skip vector search for casual messages (search_query is "" for casual)
+        if state.get("query_type") == "general" and not state.get("search_query"):
+            logger.info("Skipping local search for casual/general message")
+            return {**state, "local_results": [], "should_search_external": False}
 
         # Extract context for boosting
         current_researcher = state.get("current_researcher")
@@ -654,11 +675,13 @@ Keywords:"""
                     else 1.0
                 )
 
+                raw_authors = metadata.get("authors", "")
+                authors_str = ", ".join(raw_authors) if isinstance(raw_authors, list) else (raw_authors or "")
                 local_results.append(
                     {
                         "content": doc,
                         "title": metadata.get("title", "Unknown"),
-                        "authors": metadata.get("authors", ""),
+                        "authors": authors_str,
                         "year": metadata.get("year"),
                         "paper_id": metadata.get("paper_id", ""),
                         "source": "local_kb",
@@ -722,10 +745,16 @@ Keywords:"""
             if current_researcher or current_paper_id:
                 boost_amount = 0.15  # Boost by 15% for context matches
 
+                def _str_authors(val):
+                    """Coerce authors to string (may be list from ChromaDB metadata)."""
+                    if isinstance(val, list):
+                        return ", ".join(str(a) for a in val)
+                    return str(val) if val else ""
+
                 for result in local_results:
                     # Boost papers by the current researcher
                     if current_researcher:
-                        authors = result.get("authors", "").lower()
+                        authors = _str_authors(result.get("authors", "")).lower()
                         researcher_lower = current_researcher.lower()
                         # Check if researcher name appears in authors
                         if researcher_lower in authors:
@@ -742,8 +771,8 @@ Keywords:"""
                             result["context_match"] = "selected_paper"
                         # Papers with similar authors get a boost
                         elif context_paper.get("metadata", {}).get("authors"):
-                            context_authors = context_paper["metadata"]["authors"].lower()
-                            result_authors = result.get("authors", "").lower()
+                            context_authors = _str_authors(context_paper["metadata"]["authors"]).lower()
+                            result_authors = _str_authors(result.get("authors", "")).lower()
                             # Check for author overlap
                             if any(author.strip() in result_authors for author in context_authors.split(",") if len(author.strip()) > 3):
                                 result["relevance_score"] = min(1.0, result["relevance_score"] + boost_amount * 0.5)
@@ -797,6 +826,17 @@ Keywords:"""
         if not state.get("should_search_external", True):
             logger.info("Skipping external search - sufficient local results")
             return {**state, "external_results": []}
+
+        # Safety guard: skip external search for very short or empty queries
+        if len(query.strip()) < 8:
+            logger.info("Skipping external search - query too short for meaningful API search")
+            return {**state, "external_results": []}
+
+        # If a researcher context is set, ensure their name is in the search query
+        current_researcher = state.get("current_researcher")
+        if current_researcher and isinstance(current_researcher, str) and current_researcher.lower() not in query.lower():
+            query = f"{current_researcher} {query}"
+            logger.info(f"Added researcher context to search query: {query}")
 
         # Search academic databases
         if self.academic_search:
@@ -921,6 +961,13 @@ Keywords:"""
         # Combine all results
         all_results = local_results + external_results
 
+        # For casual/general queries with no sources, respond without calling the LLM
+        if query_type == "general" and not all_results:
+            return {
+                **state,
+                "final_answer": "Hello! I'm your research assistant. I can help you search your knowledge base, find academic papers, and analyze research topics. What would you like to explore?",
+            }
+
         if not all_results and not self.model:
             return {
                 **state,
@@ -959,6 +1006,14 @@ Keywords:"""
         current_paper_id: Optional[str] = None,
     ) -> str:
         """Build a prompt for synthesizing results based on query type."""
+
+        # For general/casual queries with no sources, use a simple conversational prompt
+        if query_type == "general" and not results:
+            return f"""You are a helpful research assistant. The user has sent a casual or general message. Respond naturally and conversationally. Do NOT mention sources, papers, or search results. If appropriate, briefly mention that you can help with research questions, finding papers, or analyzing their knowledge base.
+
+User: {query}
+
+Response:"""
 
         # Map source types to human-readable labels
         source_labels = {
@@ -1033,7 +1088,9 @@ Provide a comprehensive literature review based on the source content:
 3. Notable contributions from each relevant source
 4. Research gaps or future directions
 
-Cite sources by their title using [1], [2], etc."""
+Cite sources by their title using [1], [2], etc.
+
+MANDATORY: If sources are provided below, you MUST reference their content in your answer. Start by addressing the question using the source excerpts. Do NOT say "no information found" or "not mentioned" when sources are present."""
 
         elif query_type == "factual":
             instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
@@ -1046,7 +1103,9 @@ CRITICAL INSTRUCTIONS:
 
 Provide a precise, factual answer based on the source content.
 Be specific and cite your sources using [1], [2], etc.
-If sources conflict, note the disagreement."""
+If sources conflict, note the disagreement.
+
+MANDATORY: If sources are provided below, you MUST reference their content in your answer. Start by addressing the question using the source excerpts. Do NOT say "no information found" or "not mentioned" when sources are present."""
 
         elif query_type == "analysis":
             instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
@@ -1059,19 +1118,15 @@ CRITICAL INSTRUCTIONS:
 
 Provide a critical analysis based on the source content.
 Compare different perspectives, evaluate evidence, and draw conclusions.
-Cite sources using [1], [2], etc."""
+Cite sources using [1], [2], etc.
 
-        else:  # general
-            instruction = """You are a helpful research assistant with access to a personal knowledge base of ingested papers.
+MANDATORY: If sources are provided below, you MUST reference their content in your answer. Start by addressing the question using the source excerpts. Do NOT say "no information found" or "not mentioned" when sources are present."""
 
-CRITICAL INSTRUCTIONS:
-- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
-- Answer based on the CONTENT of the chunks provided, not by matching title strings.
-- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
-- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
+        else:  # general — but we have sources (casual w/o sources handled above)
+            instruction = """You are a helpful research assistant. The user asked a general question and some potentially relevant sources were found in the knowledge base.
 
-Answer the question based on the available source content.
-Be informative and cite sources where relevant using [1], [2], etc."""
+If the sources below are relevant to the question, use them to inform your answer and cite using [1], [2], etc.
+If they are not relevant to the question, answer directly using your own knowledge and ignore the sources."""
 
         prompt = f"""{instruction}{context_section}
 
@@ -1195,6 +1250,7 @@ Response:"""
                     self.config.min_citations = 0
 
         # Initialize state
+        logger.info(f"DEBUG _run_async: user_query type={type(user_query).__name__}, researcher type={type(current_researcher).__name__}, researcher={current_researcher}")
         initial_state: ResearchState = {
             "messages": [],
             "current_query": user_query,
@@ -1238,8 +1294,10 @@ Response:"""
             result["sources"] = [
                 {
                     "title": s.get("title"),
+                    "authors": s.get("authors", ""),
                     "source": s.get("source"),
                     "year": s.get("year"),
+                    "url": s.get("url", ""),
                 }
                 for s in all_sources[:10]
             ]
