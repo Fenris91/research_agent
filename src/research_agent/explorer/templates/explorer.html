@@ -15,12 +15,20 @@
       <span class="explorer-oa-dot" style="border-color:#22c55e"></span><span>OA</span>
       <span class="explorer-oa-dot" style="border-color:#eab308"></span><span>PREPRINT</span>
       <span class="explorer-oa-dot" style="border-color:#64748b"></span><span>PAYWALLED</span>
+      <span class="explorer-legend-sep"></span>
+      <svg width="8" height="8"><circle cx="4" cy="4" r="3" fill="none" stroke="#2e5a88" stroke-width="1" opacity="0.5"/></svg>
+      <span>FIELD</span>
+      <svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="none" stroke="#555" stroke-width="0.5" opacity="0.3" stroke-dasharray="2,2"/></svg>
+      <span>DOMAIN</span>
     </div>
+    <!-- CTX toggle replaced by SOC/AUTH/CHAT layer buttons -->
   </div>
   <div class="explorer-canvas">
     <svg id="explorer-svg"></svg>
-    <div class="explorer-suggestions" id="explorer-suggestions">
-      <span class="explorer-suggestions-label">TRY:</span>
+    <div class="explorer-layers" id="explorer-layers">
+      <button class="explorer-layer-btn" data-layer="soc">SOC</button>
+      <button class="explorer-layer-btn" data-layer="auth">AUTH</button>
+      <button class="explorer-layer-btn" data-layer="chat">CHAT</button>
     </div>
   </div>
   <div id="explorer-detail" class="explorer-detail">
@@ -32,10 +40,29 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 
+  /* Dark scrollbars inside iframe */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1a1f2e #0a0d13;
+  }
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-track { background: #0a0d13; }
+  *::-webkit-scrollbar-thumb { background: #1a1f2e; border-radius: 3px; }
+  *::-webkit-scrollbar-thumb:hover { background: #2a3048; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #0a0d13;
+  }
+
   #knowledge-explorer {
     position: relative;
     width: 100%;
-    height: 640px;
+    height: 100%;
     background: #0a0d13;
     border-radius: 6px;
     overflow: hidden;
@@ -133,40 +160,52 @@
     display: block;
   }
 
-  /* ── Suggestion pills ─────────────────────────── */
-  #knowledge-explorer .explorer-suggestions {
+  /* ── Layer selector buttons ────────────────────── */
+  #knowledge-explorer .explorer-layers {
     position: absolute;
     bottom: 14px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
-    gap: 5px;
+    gap: 4px;
     align-items: center;
     z-index: 5;
   }
 
-  #knowledge-explorer .explorer-suggestions-label {
-    font-size: 7px;
-    color: #2e3648;
-  }
-
-  #knowledge-explorer .explorer-suggestion-pill {
-    background: rgba(10, 13, 19, 0.8);
+  #knowledge-explorer .explorer-layer-btn {
+    background: rgba(10, 13, 19, 0.85);
     border: 1px solid #1a1f2e;
-    border-radius: 10px;
-    padding: 3px 9px;
+    border-radius: 4px;
+    padding: 3px 10px;
     cursor: pointer;
-    color: #5a6580;
+    color: #2e3648;
     font-size: 7px;
+    font-weight: 600;
     font-family: inherit;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.8px;
     backdrop-filter: blur(8px);
     transition: all 0.2s;
   }
 
-  #knowledge-explorer .explorer-suggestion-pill:hover {
-    border-color: rgba(196, 92, 74, 0.25);
+  #knowledge-explorer .explorer-layer-btn:hover {
+    border-color: rgba(196, 92, 74, 0.3);
+    color: #5a6580;
+  }
+
+  #knowledge-explorer .explorer-layer-btn.active {
+    border-color: rgba(196, 92, 74, 0.5);
     color: #c45c4a;
+    background: rgba(196, 92, 74, 0.06);
+  }
+
+  /* ── Chat highlight glow ─────────────────────── */
+  @keyframes explorer-highlight-pulse {
+    0%, 100% { filter: drop-shadow(0 0 3px var(--glow-color, #c45c4a)); }
+    50% { filter: drop-shadow(0 0 10px var(--glow-color, #c45c4a)); }
+  }
+
+  #knowledge-explorer .node-highlighted .body {
+    animation: explorer-highlight-pulse 2s ease-in-out infinite;
   }
 
   /* ── Detail panel ─────────────────────────────── */
@@ -326,6 +365,32 @@
     border-top: 1px solid #1a1f2e;
     flex-shrink: 0;
   }
+
+  /* ── CTX toggle ────────────────────────────────── */
+  #knowledge-explorer .explorer-ctx-toggle {
+    background: transparent;
+    border: 1px solid #1a1f2e;
+    border-radius: 4px;
+    color: #2e3648;
+    padding: 3px 7px;
+    cursor: pointer;
+    font-size: 7px;
+    font-weight: 600;
+    font-family: inherit;
+    letter-spacing: 0.5px;
+    transition: all 0.2s;
+    margin-left: 4px;
+    flex-shrink: 0;
+  }
+  #knowledge-explorer .explorer-ctx-toggle.active {
+    border-color: rgba(46, 90, 136, 0.4);
+    color: #2e5a88;
+    background: rgba(46, 90, 136, 0.05);
+  }
+  #knowledge-explorer .explorer-ctx-toggle:hover {
+    border-color: rgba(46, 90, 136, 0.5);
+    color: #2e5a88;
+  }
 </style>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -381,6 +446,12 @@
       var score = (d.metadata && d.metadata.score) || 0.5;
       return { stroke: "#c45c4a", dash: "5,3", width: 0.8 + score * 2, opacity: 0.1 + score * 0.35 };
     }
+    if (d.type === "field_membership") {
+      return { stroke: "#2e5a88", dash: "2,3", width: 0.5, opacity: 0.06 };
+    }
+    if (d.type === "domain_mapping") {
+      return { stroke: "#555", dash: "3,5", width: 0.4, opacity: 0.04 };
+    }
     return { stroke: "#333", dash: null, width: 0.8, opacity: 0.08 };
   }
 
@@ -404,11 +475,11 @@
 
   // ── Ambient halos ─────────────────────────────────
   root.append("g").attr("class", "explorer-halos").selectAll("circle")
-    .data(data.nodes.filter(function(n) { return n.type !== "paper"; }))
+    .data(data.nodes.filter(function(n) { return n.type !== "paper" && n.type !== "field"; }))
     .join("circle")
-    .attr("r", function(d) { return d.size * 2.2; })
+    .attr("r", function(d) { return d.type === "domain" ? d.size * 4 : d.size * 2.2; })
     .attr("fill", function(d) { return d.color; })
-    .attr("opacity", 0.015);
+    .attr("opacity", function(d) { return d.type === "domain" ? 0.008 : 0.015; });
 
   // ── Links ─────────────────────────────────────────
   var linkG = root.append("g");
@@ -451,14 +522,37 @@
     .attr("fill", "none").attr("stroke", function(d) { return d.color; })
     .attr("stroke-width", 0.4).attr("opacity", 0.15);
 
+  // Domain outer ring (large dashed, very faint)
+  node.filter(function(d) { return d.type === "domain"; }).append("circle")
+    .attr("class", "outer-ring")
+    .attr("r", function(d) { return d.size + 5; })
+    .attr("fill", "none").attr("stroke", function(d) { return d.color; })
+    .attr("stroke-width", 0.6).attr("opacity", 0.12)
+    .attr("stroke-dasharray", "4,3");
+
+  // Field outer ring
+  node.filter(function(d) { return d.type === "field"; }).append("circle")
+    .attr("class", "outer-ring")
+    .attr("r", function(d) { return d.size + 2; })
+    .attr("fill", "none").attr("stroke", function(d) { return d.color; })
+    .attr("stroke-width", 0.5).attr("opacity", 0.2);
+
   // Main body (radial gradient fill)
   node.append("circle").attr("class", "body")
     .attr("r", function(d) { return d.size; })
     .attr("fill", function(d) { return "url(#ng-" + d.id.replace(/[^a-zA-Z0-9]/g, "_") + ")"; })
     .attr("stroke", function(d) { return d.type === "query" ? "#c45c4a" : (d._authorColor || d.color); })
-    .attr("stroke-width", function(d) { return d.type === "researcher" ? 1.5 : d.type === "query" ? 1.2 : 0.8; })
-    .attr("stroke-dasharray", function(d) { return d.type === "query" ? "3,2" : null; })
-    .attr("opacity", 0.9)
+    .attr("stroke-width", function(d) {
+      if (d.type === "domain") return 0.4;
+      if (d.type === "field") return 0.6;
+      return d.type === "researcher" ? 1.5 : d.type === "query" ? 1.2 : 0.8;
+    })
+    .attr("stroke-dasharray", function(d) { return d.type === "query" ? "3,2" : d.type === "domain" ? "4,3" : null; })
+    .attr("opacity", function(d) {
+      if (d.type === "domain") return 0.25;
+      if (d.type === "field") return 0.5;
+      return 0.9;
+    })
     .attr("filter", function(d) { return (d.type === "researcher" || d.type === "query") ? "url(#glow)" : null; });
 
   // Icons inside researcher/query nodes
@@ -470,15 +564,38 @@
     .text("\u2299").attr("text-anchor", "middle").attr("dy", 4)
     .attr("font-size", "10px").attr("fill", "#c45c4a").attr("opacity", 0.35)
     .style("pointer-events", "none");
+  node.filter(function(d) { return d.type === "field"; }).append("text")
+    .text("\u25C7").attr("text-anchor", "middle").attr("dy", 4)
+    .attr("font-size", "9px").attr("fill", function(d) { return d.color; }).attr("opacity", 0.25)
+    .style("pointer-events", "none");
+  node.filter(function(d) { return d.type === "domain"; }).append("text")
+    .text("\u2B21").attr("text-anchor", "middle").attr("dy", 5)
+    .attr("font-size", "14px").attr("fill", function(d) { return d.color; }).attr("opacity", 0.15)
+    .style("pointer-events", "none");
 
   // Labels (above node)
   node.append("text").attr("class", "label")
     .text(function(d) { return d.label.length > 24 ? d.label.slice(0, 22) + "\u2026" : d.label; })
     .attr("text-anchor", "middle").attr("dy", function(d) { return -d.size - 6; })
-    .attr("font-size", function(d) { return d.type === "researcher" ? "9px" : d.type === "query" ? "8px" : "6.5px"; })
-    .attr("font-weight", function(d) { return (d.type === "researcher" || d.type === "query") ? 600 : 400; })
-    .attr("fill", function(d) { return d.type === "query" ? "#c45c4a" : d.type === "researcher" ? d.color : "#6a7590"; })
-    .attr("letter-spacing", function(d) { return d.type === "researcher" ? "0.8px" : "0.2px"; })
+    .attr("font-size", function(d) {
+      if (d.type === "domain") return "10px";
+      if (d.type === "field") return "7.5px";
+      return d.type === "researcher" ? "9px" : d.type === "query" ? "8px" : "6.5px";
+    })
+    .attr("font-weight", function(d) {
+      return (d.type === "researcher" || d.type === "query" || d.type === "domain") ? 600 : d.type === "field" ? 500 : 400;
+    })
+    .attr("fill", function(d) {
+      if (d.type === "domain") return d.color;
+      if (d.type === "field") return d.color;
+      return d.type === "query" ? "#c45c4a" : d.type === "researcher" ? d.color : "#6a7590";
+    })
+    .attr("opacity", function(d) {
+      if (d.type === "domain") return 0.25;
+      if (d.type === "field") return 0.45;
+      return 1;
+    })
+    .attr("letter-spacing", function(d) { return (d.type === "researcher" || d.type === "domain") ? "0.8px" : "0.2px"; })
     .attr("font-family", "inherit")
     .style("pointer-events", "none");
 
@@ -487,6 +604,7 @@
     .text(function(d) {
       if (d.type === "researcher") { var m = d.metadata || {}; return "h-index: " + (m.h_index || "?") + " \u00B7 " + ((m.affiliations && m.affiliations[0]) || ""); }
       if (d.type === "paper") { var m2 = d.metadata || {}; return (m2.year || "") + " \u00B7 " + (m2.citations || 0) + " cites"; }
+      if (d.type === "field" || d.type === "domain") { var conn = getConnected(d.id); return (conn.size - 1) + " connected"; }
       return "";
     })
     .attr("text-anchor", "middle").attr("dy", function(d) { return d.size + 12; })
@@ -692,6 +810,43 @@
       html += '<div class="explorer-detail-field-value">Dashed edges show semantic similarity. Percentage = cosine similarity score.</div>';
     }
 
+    if (d.type === "field") {
+      var fConn = getConnected(d.id);
+      var fPapers = 0, fResearchers = 0, fDomains = [];
+      fConn.forEach(function(cid) {
+        var cn = nodeMap[cid];
+        if (cn && cn.type === "paper") fPapers++;
+        if (cn && cn.type === "researcher") fResearchers++;
+        if (cn && cn.type === "domain") fDomains.push(cn.label);
+      });
+      html += '<div><div class="explorer-detail-field-label">CONNECTIONS</div>';
+      html += '<div class="explorer-detail-field-value">' + fPapers + ' papers, ' + fResearchers + ' researchers</div></div>';
+      if (fDomains.length) {
+        html += '<div><div class="explorer-detail-field-label">DOMAIN</div>';
+        fDomains.forEach(function(dl) {
+          html += '<span class="explorer-detail-tag" style="color:' + c + ';background:' + c + '0c;border-color:' + c + '18">' + esc(dl) + '</span> ';
+        });
+        html += '</div>';
+      }
+    }
+
+    if (d.type === "domain") {
+      var dConn = getConnected(d.id);
+      var dFields = [];
+      dConn.forEach(function(cid) {
+        var cn = nodeMap[cid];
+        if (cn && cn.type === "field") dFields.push(cn.label);
+      });
+      if (dFields.length) {
+        html += '<div><div class="explorer-detail-field-label">FIELDS IN THIS DOMAIN</div>';
+        dFields.forEach(function(fl) {
+          html += '<span class="explorer-detail-tag" style="color:' + c + ';background:' + c + '0c;border-color:' + c + '18">' + esc(fl) + '</span> ';
+        });
+        html += '</div>';
+      }
+      html += '<div class="explorer-detail-field-value" style="margin-top:6px">Structural scaffold node representing a broad societal domain.</div>';
+    }
+
     html += '</div>';
 
     // Deselect button
@@ -741,34 +896,151 @@
   searchBtn.addEventListener("click", doSearch);
   searchInput.addEventListener("keydown", function(e) { if (e.key === "Enter") doSearch(); });
 
-  // ── Suggestion pills ──────────────────────────────
-  var suggestionsEl = document.getElementById("explorer-suggestions");
-  ["urban space capitalism", "right to the city", "gender power spatial"].forEach(function(q) {
-    var pill = document.createElement("button");
-    pill.className = "explorer-suggestion-pill";
-    pill.textContent = q;
-    pill.addEventListener("click", function() {
-      searchInput.value = q;
-      doSearch();
+  // ── Layer emphasis system ───────────────────────────
+  var layersEl = document.getElementById("explorer-layers");
+  var layerBtns = layersEl.querySelectorAll(".explorer-layer-btn");
+  var activeLayer = data.active_layer || "soc";
+
+  function setActiveLayerBtn(layer) {
+    layerBtns.forEach(function(b) { b.classList.remove("active"); });
+    layerBtns.forEach(function(b) {
+      if (b.getAttribute("data-layer") === layer) b.classList.add("active");
     });
-    suggestionsEl.appendChild(pill);
+  }
+
+  function applyLayerEmphasis(layer) {
+    activeLayer = layer;
+    var ht = data.highlight_terms || [];
+
+    // Node emphasis
+    node.transition().duration(400).attr("opacity", function(d) {
+      if (layer === "soc") {
+        if (d.type === "domain") return 0.9;
+        if (d.type === "field") return 1;
+        if (d.type === "researcher") return 0.15;
+        if (d.type === "paper") return 0.1;
+        if (d.type === "query") return 0.2;
+        return 0.2;
+      } else if (layer === "auth") {
+        if (d.type === "researcher") return 1;
+        if (d.type === "paper") return 1;
+        if (d.type === "query") return 0.8;
+        if (d.type === "field") return 0.2;
+        if (d.type === "domain") return 0.1;
+        return 0.5;
+      } else if (layer === "chat") {
+        var label = d.label.toLowerCase();
+        var matched = ht.length > 0 && ht.some(function(t) {
+          return label.indexOf(t.toLowerCase()) !== -1;
+        });
+        if (matched) return 1;
+        if (d.type === "researcher") return 0.6;
+        if (d.type === "paper") return 0.2;
+        return 0.1;
+      }
+      return 1;
+    });
+
+    // Edge emphasis
+    link.transition().duration(400).attr("opacity", function(l) {
+      var base = edgeStyle(l).opacity;
+      if (layer === "soc") {
+        if (l.type === "field_membership" || l.type === "domain_mapping") return Math.min(base * 3, 0.8);
+        return base * 0.1;
+      } else if (layer === "auth") {
+        if (l.type === "authorship" || l.type === "citation" || l.type === "semantic") return Math.min(base * 2, 0.8);
+        return base * 0.2;
+      } else if (layer === "chat") {
+        return base * 0.5;
+      }
+      return base;
+    });
+
+    // Domain halos
+    root.select(".explorer-halos").selectAll("circle")
+      .filter(function(d) { return d.type === "domain"; })
+      .transition().duration(400)
+      .attr("opacity", layer === "soc" ? 0.04 : 0.003);
+
+    // Highlight glow per layer
+    node.each(function(d) {
+      var el = d3.select(this);
+      var highlighted = false;
+      var glowColor = d._authorColor || d.color || "#c45c4a";
+
+      if (layer === "soc") {
+        // SOC: highlight fields and domains
+        if (d.type === "domain" || d.type === "field") {
+          highlighted = true;
+          glowColor = d.color || "#2e5a88";
+        }
+      } else if (layer === "auth") {
+        // AUTH: highlight researcher and papers
+        if (d.type === "researcher" || d.type === "paper") {
+          highlighted = true;
+        }
+      } else if (layer === "chat") {
+        // CHAT: highlight keyword-matched nodes
+        if (ht.length > 0) {
+          var label = d.label.toLowerCase();
+          highlighted = ht.some(function(t) { return label.indexOf(t.toLowerCase()) !== -1; });
+        }
+      }
+
+      el.classed("node-highlighted", highlighted);
+      if (highlighted) el.style("--glow-color", glowColor);
+      // Boost body opacity for highlighted structural nodes so glow is visible
+      el.select(".body").transition().duration(400)
+        .attr("opacity", highlighted ? 0.85 : (d.type === "domain" ? 0.25 : d.type === "field" ? 0.5 : 0.9));
+    });
+  }
+
+  // Set initial button state
+  setActiveLayerBtn(activeLayer);
+
+  // Bottom button clicks
+  layerBtns.forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var layer = btn.getAttribute("data-layer");
+      setActiveLayerBtn(layer);
+      applyLayerEmphasis(layer);
+      parent.postMessage({type: "explorer-layer", layer: layer}, "*");
+    });
+  });
+
+  // Listen for layer changes from parent (top-bar buttons)
+  window.addEventListener("message", function(e) {
+    if (e.data && e.data.type === "set-layer") {
+      setActiveLayerBtn(e.data.layer);
+      applyLayerEmphasis(e.data.layer);
+    }
+    if (e.data && e.data.type === "set-highlights") {
+      data.highlight_terms = e.data.terms;
+      if (activeLayer === "chat") applyLayerEmphasis("chat");
+    }
   });
 
   // ── Simulation ────────────────────────────────────
   var simulation = d3.forceSimulation(data.nodes)
     .force("link", d3.forceLink(data.links).id(function(d) { return d.id; })
       .distance(function(d) {
+        if (d.type === "domain_mapping") return 80;
+        if (d.type === "field_membership") return 65;
         if (d.type === "authorship") return 55 + ((nodeMap[d.target.id || d.target] || {}).size || 10) * 2;
         if (d.type === "semantic") return 100;
         return 140;
       })
       .strength(function(d) {
+        if (d.type === "domain_mapping") return 0.15;
+        if (d.type === "field_membership") return 0.12;
         if (d.type === "authorship") return 0.6;
         if (d.type === "citation") return 0.08;
         if (d.type === "semantic") return (d.metadata && d.metadata.score || 0.3) * 0.4;
         return 0.2;
       }))
     .force("charge", d3.forceManyBody().strength(function(d) {
+      if (d.type === "domain") return -500;
+      if (d.type === "field") return -120;
       return d.type === "researcher" ? -280 : d.type === "query" ? -200 : -50;
     }))
     .force("center", d3.forceCenter(width / 2, height / 2).strength(0.03))
@@ -784,8 +1056,11 @@
         .attr("y", function(d) { return (d.source.y + d.target.y) / 2 - 4; });
       node.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
       root.select(".explorer-halos").selectAll("circle")
-        .data(data.nodes.filter(function(n) { return n.type !== "paper"; }))
+        .data(data.nodes.filter(function(n) { return n.type !== "paper" && n.type !== "field"; }))
         .attr("cx", function(d) { return d.x; }).attr("cy", function(d) { return d.y; });
     });
+
+  // ── Apply initial layer emphasis after short delay ────
+  setTimeout(function() { applyLayerEmphasis(activeLayer); }, 600);
 })();
 </script>

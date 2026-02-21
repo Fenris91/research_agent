@@ -41,8 +41,13 @@ class ExplorerRenderer:
         # Wrap in a full HTML document inside an iframe
         # Escape quotes for the srcdoc attribute
         escaped = raw_html.replace("&", "&amp;").replace('"', "&quot;")
+        # Wrapper div with position:relative so the iframe can
+        # use position:absolute to fill the space reliably
+        # (height:100% on iframe fails when parent lacks explicit height).
         return (
+            f'<div style="position:relative;width:100%;height:100%;flex:1;min-height:0;">'
             f'<iframe srcdoc="{escaped}" '
-            f'style="width:100%;height:660px;border:none;background:#0a0d13;" '
+            f'style="position:absolute;inset:0;width:100%;height:100%;border:none;background:#0a0d13;" '
             f'sandbox="allow-scripts allow-same-origin"></iframe>'
+            f'</div>'
         )
