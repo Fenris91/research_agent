@@ -47,6 +47,9 @@ class ResearchState(TypedDict):
     # Context from UI selection
     current_researcher: Optional[str]
     current_paper_id: Optional[str]
+    # Context items from pill strip
+    auth_context_items: Optional[List[str]]
+    chat_context_items: Optional[List[str]]
 
 
 @dataclass
@@ -1043,6 +1046,13 @@ Response:"""
                     context_parts.append(f"The user is currently focused on the paper: \"{paper_title}\"")
                 else:
                     context_parts.append(f"The user has selected a specific paper (ID: {current_paper_id[:20]}...)")
+            # Add pinned/active context items if available
+            auth_items = state.get("auth_context_items") or []
+            chat_items = state.get("chat_context_items") or []
+            if auth_items:
+                context_parts.append(f"The user has pinned these topics: {', '.join(auth_items)}")
+            if chat_items:
+                context_parts.append(f"Recent conversation topics include: {', '.join(chat_items)}")
             context_section = "\n\nContext: " + ". ".join(context_parts) + ". Prioritize information relevant to this context."
 
         # Format sources
@@ -1232,6 +1242,8 @@ Response:"""
         context = context or {}
         current_researcher = context.get("researcher")
         current_paper_id = context.get("paper_id")
+        auth_context_items = context.get("auth_items", [])
+        chat_context_items = context.get("chat_items", [])
 
         # Apply search filters to config
         if search_filters:
@@ -1267,6 +1279,8 @@ Response:"""
             "error": None,
             "current_researcher": current_researcher,
             "current_paper_id": current_paper_id,
+            "auth_context_items": auth_context_items,
+            "chat_context_items": chat_context_items,
         }
 
         result = {

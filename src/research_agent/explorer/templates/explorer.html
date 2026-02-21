@@ -923,8 +923,14 @@
         if (d.type === "query") return 0.2;
         return 0.2;
       } else if (layer === "auth") {
+        var ai = (data.context_items && data.context_items.auth) || [];
+        var authLabels = ai.map(function(it) { return (it.label || it).toLowerCase(); });
         if (d.type === "researcher") return 1;
         if (d.type === "paper") return 1;
+        if (authLabels.length > 0) {
+          var lbl = d.label.toLowerCase();
+          if (authLabels.some(function(t) { return lbl.indexOf(t) !== -1; })) return 1;
+        }
         if (d.type === "query") return 0.8;
         if (d.type === "field") return 0.2;
         if (d.type === "domain") return 0.1;
@@ -976,9 +982,15 @@
           glowColor = d.color || "#2e5a88";
         }
       } else if (layer === "auth") {
-        // AUTH: highlight researcher and papers
+        // AUTH: highlight researcher, papers, and pinned items
         if (d.type === "researcher" || d.type === "paper") {
           highlighted = true;
+        } else {
+          var ai2 = (data.context_items && data.context_items.auth) || [];
+          var lbl2 = d.label.toLowerCase();
+          if (ai2.some(function(it) { return lbl2.indexOf((it.label || it).toLowerCase()) !== -1; })) {
+            highlighted = true;
+          }
         }
       } else if (layer === "chat") {
         // CHAT: highlight keyword-matched nodes
@@ -1018,6 +1030,10 @@
     if (e.data && e.data.type === "set-highlights") {
       data.highlight_terms = e.data.terms;
       if (activeLayer === "chat") applyLayerEmphasis("chat");
+    }
+    if (e.data && e.data.type === "set-context-items") {
+      data.context_items = e.data.items;
+      applyLayerEmphasis(activeLayer);
     }
   });
 

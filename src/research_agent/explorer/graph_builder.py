@@ -406,7 +406,22 @@ class GraphBuilder:
             for fid in field_ids:
                 self.add_domain_mapping_edge(fid, domain_id)
 
-    def to_dict(self, active_layer: str = "soc", highlight_terms: list | None = None) -> dict:
+    def get_structural_items(self) -> list[dict]:
+        """Return field and domain labels for SOC context pills."""
+        items = []
+        for node in self._nodes.values():
+            if node["type"] == "field":
+                items.append({"label": node["label"], "type": "field", "auto": True})
+            elif node["type"] == "domain":
+                items.append({"label": node["label"], "type": "domain", "auto": True})
+        return items
+
+    def to_dict(
+        self,
+        active_layer: str = "soc",
+        highlight_terms: list | None = None,
+        context_items: dict | None = None,
+    ) -> dict:
         """Return D3-compatible dict with nodes, links, and layer metadata."""
         result = {
             "nodes": list(self._nodes.values()),
@@ -415,6 +430,8 @@ class GraphBuilder:
         }
         if highlight_terms:
             result["highlight_terms"] = highlight_terms
+        if context_items:
+            result["context_items"] = context_items
         return result
 
     def to_json(self, active_layer: str = "soc", highlight_terms: list | None = None) -> str:

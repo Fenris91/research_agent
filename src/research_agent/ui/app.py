@@ -262,6 +262,54 @@ def create_app(agent=None):
         background: rgba(196, 92, 74, 0.06) !important;
     }
 
+    /* ── Context pill strip ─────────────────────── */
+    #ctx-pills-row {
+        flex: 0 0 auto;
+        margin-bottom: 2px;
+        min-height: 0;
+    }
+    #ctx-pills-row > div { padding: 0; border: none; background: none; }
+    #ctx-pills-container { padding: 0; min-height: 0; }
+    #ctx-pills-container > div { min-height: 0; }
+    .ctx-pills-wrap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 3px 8px;
+        background: #0e1219;
+        border: 1px solid #1a1f2e;
+        border-radius: 4px;
+        max-height: 48px;
+        overflow: hidden;
+    }
+    .ctx-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 7px;
+        border-radius: 10px;
+        font-size: 8px;
+        font-family: 'IBM Plex Mono', monospace;
+        letter-spacing: 0.3px;
+        border: 1px solid;
+        white-space: nowrap;
+        max-width: 200px;
+    }
+    .ctx-pill-label { overflow: hidden; text-overflow: ellipsis; }
+    .ctx-pill-keyword    { color: #c45c4a; border-color: rgba(196,92,74,0.3);  background: rgba(196,92,74,0.06); }
+    .ctx-pill-paper_title { color: #5098ab; border-color: rgba(80,152,171,0.3); background: rgba(80,152,171,0.06); }
+    .ctx-pill-field      { color: #2e5a88; border-color: rgba(46,90,136,0.3);  background: rgba(46,90,136,0.06); }
+    .ctx-pill-domain     { color: #d4a04a; border-color: rgba(212,160,74,0.3); background: rgba(212,160,74,0.06); }
+    .ctx-pill-researcher { color: #4a90d9; border-color: rgba(74,144,217,0.3); background: rgba(74,144,217,0.06); }
+    .ctx-pill-pinned     { color: #7c5cbf; border-color: rgba(124,92,191,0.3); background: rgba(124,92,191,0.06); }
+    .ctx-pill-close, .ctx-pill-pin, .ctx-pill-lock {
+        background: none; border: none; cursor: pointer;
+        padding: 0 1px; font-size: 9px; line-height: 1;
+        opacity: 0.5; color: inherit;
+    }
+    .ctx-pill-lock { cursor: default; font-size: 7px; }
+    .ctx-pill-close:hover, .ctx-pill-pin:hover { opacity: 1; }
+
     /* ── Split pane ──────────────────────────────── */
     #split-pane {
         flex: 1 1 0 !important;                 /* override Svelte row height */
@@ -421,6 +469,32 @@ def create_app(agent=None):
         });
       }
     });
+    /* Context pill command bus — JS→Python bridge */
+    function ctxCommand(cmd) {
+      var bus = document.querySelector("#ctx-command-bus textarea, #ctx-command-bus input");
+      if (bus) {
+        var setter = Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype, 'value'
+        ).set || Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype, 'value'
+        ).set;
+        setter.call(bus, cmd + ":" + Date.now());
+        bus.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    /* Send highlight items to explorer iframe (avoids full re-render) */
+    function sendHighlightsToExplorer(terms) {
+      var iframe = document.querySelector("#explorer-col iframe");
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage({type: "set-highlights", terms: terms}, "*");
+      }
+    }
+    function sendContextItemsToExplorer(items) {
+      var iframe = document.querySelector("#explorer-col iframe");
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage({type: "set-context-items", items: items}, "*");
+      }
+    }
     </script>
     """
 
@@ -434,6 +508,7 @@ def create_app(agent=None):
         context_state = gr.State({
             "researcher": None, "paper_id": None,
             "active_layer": "soc", "chat_context": None,
+            "soc_items": [], "auth_items": [], "chat_items": [],
         })
         _query_state = gr.State({"query": None, "chunks": []})
 
@@ -472,6 +547,12 @@ def create_app(agent=None):
                 "CHAT", variant="secondary", scale=0, min_width=40,
                 elem_classes=["ctx-layer-btn"],
             )
+
+        # ── CONTEXT PILL STRIP (row 2, collapses when empty) ─────────
+        with gr.Row(visible=False, elem_id="ctx-pills-row") as ctx_pills_row:
+            ctx_pills_html = gr.HTML(value="", elem_id="ctx-pills-container")
+        # Hidden command bus for pill ✕/pin JS→Python bridge
+        ctx_command_bus = gr.Textbox(value="", visible=False, elem_id="ctx-command-bus")
 
         # Hidden components (needed by event handlers wired elsewhere)
         with gr.Group(visible=False):
@@ -1039,6 +1120,33 @@ def create_app(agent=None):
             history.append({"role": "user", "content": message})
             return "", history
 
+        def _render_context_pills(state: dict) -> str:
+            """Render HTML pill strip for the active layer's context items."""
+            import html as html_mod
+            layer = state.get("active_layer", "soc")
+            items = state.get(f"{layer}_items", [])
+            if not items:
+                return ""
+            pills = []
+            for item in items:
+                label = item["label"]
+                itype = item.get("type", "keyword")
+                auto = item.get("auto", True)
+                escaped = html_mod.escape(label)
+                # Escape label for JS string (handle quotes/backslashes)
+                js_label = label.replace("\\", "\\\\").replace("'", "\\'")
+                pill = f'<span class="ctx-pill ctx-pill-{itype}">'
+                pill += f'<span class="ctx-pill-label">{escaped}</span>'
+                if layer == "chat":
+                    pill += f'<button class="ctx-pill-pin" onclick="ctxCommand(\'pin:{js_label}\')" title="Pin to AUTH">&#x1F4CC;</button>'
+                if layer == "chat" or (layer == "auth" and not auto):
+                    pill += f'<button class="ctx-pill-close" onclick="ctxCommand(\'remove:{layer}:{js_label}\')">&#x00D7;</button>'
+                if layer == "auth" and auto:
+                    pill += '<span class="ctx-pill-lock" title="Auto (researcher lookup)">&#x1F512;</span>'
+                pill += '</span>'
+                pills.append(pill)
+            return f'<div class="ctx-pills-wrap">{" ".join(pills)}</div>'
+
         def _extract_chat_keywords(response_text, sources):
             """Extract keywords from agent response for CHAT layer highlighting."""
             import re
@@ -1110,13 +1218,15 @@ def create_app(agent=None):
                     current_researcher = context.get("researcher")
                     current_paper_id = context.get("paper_id")
 
-                    # Pass context to agent
+                    # Pass context to agent (include pinned/active items)
                     result = agent.run(
                         message,
                         search_filters=filters,
                         context={
                             "researcher": current_researcher,
                             "paper_id": current_paper_id,
+                            "auth_items": [it["label"] for it in context.get("auth_items", [])],
+                            "chat_items": [it["label"] for it in context.get("chat_items", [])],
                         }
                     )
                     response = result.get("answer", "No response generated")
@@ -1156,6 +1266,16 @@ def create_app(agent=None):
                     # Extract chat keywords for CHAT layer
                     chat_ctx = _extract_chat_keywords(response, sources)
                     new_state["chat_context"] = chat_ctx
+                    # Build typed chat_items for pills
+                    title_set = set(chat_ctx.get("paper_titles", []))
+                    chat_items = []
+                    for kw in chat_ctx.get("keywords", []):
+                        chat_items.append({
+                            "label": kw,
+                            "type": "paper_title" if kw in title_set else "keyword",
+                            "auto": True,
+                        })
+                    new_state["chat_items"] = chat_items
 
                     # Auto-switch to CHAT layer if keywords found
                     if chat_ctx["keywords"]:
@@ -1199,7 +1319,10 @@ def create_app(agent=None):
                         response = f"**Error:** {error_msg}"
 
             history.append({"role": "assistant", "content": response})
-            return history, new_state, explorer_update, *layer_updates
+            pills_html = _render_context_pills(new_state)
+            layer = new_state.get("active_layer", "soc")
+            has_items = bool(new_state.get(f"{layer}_items", []))
+            return history, new_state, explorer_update, *layer_updates, pills_html, gr.update(visible=has_items)
 
         vector_store = None
         embedder = None
@@ -2961,7 +3084,8 @@ def create_app(agent=None):
             generate_response,
             [chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
             [chatbot, context_state, explorer_html,
-             layer_soc_btn, layer_auth_btn, layer_chat_btn],
+             layer_soc_btn, layer_auth_btn, layer_chat_btn,
+             ctx_pills_html, ctx_pills_row],
         )
         submit.click(
             add_user_message,
@@ -2971,7 +3095,8 @@ def create_app(agent=None):
             generate_response,
             [chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
             [chatbot, context_state, explorer_html,
-             layer_soc_btn, layer_auth_btn, layer_chat_btn],
+             layer_soc_btn, layer_auth_btn, layer_chat_btn,
+             ctx_pills_html, ctx_pills_row],
         )
         clear.click(lambda: [], outputs=[chatbot])
         refresh_btn.click(
@@ -3535,6 +3660,49 @@ def create_app(agent=None):
             outputs=[context_map_plot, context_map_status],
         )
 
+        # ── Context pill command handler ───────────────────────────────
+        def _handle_ctx_command(cmd_raw, state):
+            """Handle pill strip commands: remove:<layer>:<label>, pin:<label>."""
+            if not cmd_raw:
+                return state, gr.update(), gr.update()
+            # Strip timestamp suffix
+            parts = cmd_raw.rsplit(":", 1)
+            cmd = parts[0] if len(parts) > 1 and parts[-1].isdigit() else cmd_raw
+
+            new_state = dict(state or {})
+
+            if cmd.startswith("remove:chat:"):
+                label = cmd[len("remove:chat:"):]
+                new_state["chat_items"] = [
+                    it for it in new_state.get("chat_items", [])
+                    if it["label"] != label
+                ]
+            elif cmd.startswith("remove:auth:"):
+                label = cmd[len("remove:auth:"):]
+                new_state["auth_items"] = [
+                    it for it in new_state.get("auth_items", [])
+                    if it["label"] != label or it.get("auto", False)
+                ]
+            elif cmd.startswith("pin:"):
+                # Strip timestamp from pin command too
+                pin_parts = cmd[len("pin:"):].rsplit(":", 1)
+                label = pin_parts[0] if len(pin_parts) > 1 and pin_parts[-1].isdigit() else cmd[len("pin:"):]
+                auth_items = list(new_state.get("auth_items", []))
+                if not any(it["label"] == label for it in auth_items):
+                    auth_items.append({"label": label, "type": "pinned", "auto": False})
+                new_state["auth_items"] = auth_items
+
+            pills_html = _render_context_pills(new_state)
+            layer = new_state.get("active_layer", "soc")
+            has_items = bool(new_state.get(f"{layer}_items", []))
+            return new_state, pills_html, gr.update(visible=has_items)
+
+        ctx_command_bus.input(
+            _handle_ctx_command,
+            inputs=[ctx_command_bus, context_state],
+            outputs=[context_state, ctx_pills_html, ctx_pills_row],
+        )
+
         # ── Layer switching ────────────────────────────────────────────
         def _layer_btn_classes(layer):
             """Return elem_classes updates for the 3 layer buttons."""
@@ -3549,24 +3717,29 @@ def create_app(agent=None):
             new_state = dict(state or {})
             new_state["active_layer"] = layer
             soc, auth, chat = _layer_btn_classes(layer)
-            return new_state, soc, auth, chat
+            pills_html = _render_context_pills(new_state)
+            has_items = bool(new_state.get(f"{layer}_items", []))
+            return new_state, soc, auth, chat, pills_html, gr.update(visible=has_items)
 
         layer_soc_btn.click(
             lambda s: switch_layer_top("soc", s),
             inputs=[context_state],
-            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn],
+            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn,
+                     ctx_pills_html, ctx_pills_row],
             js="() => { sendLayerToExplorer('soc'); }",
         )
         layer_auth_btn.click(
             lambda s: switch_layer_top("auth", s),
             inputs=[context_state],
-            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn],
+            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn,
+                     ctx_pills_html, ctx_pills_row],
             js="() => { sendLayerToExplorer('auth'); }",
         )
         layer_chat_btn.click(
             lambda s: switch_layer_top("chat", s),
             inputs=[context_state],
-            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn],
+            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn,
+                     ctx_pills_html, ctx_pills_row],
             js="() => { sendLayerToExplorer('chat'); }",
         )
 
@@ -3585,6 +3758,7 @@ def create_app(agent=None):
                 reset_state = {
                     "researcher": None, "paper_id": None,
                     "active_layer": "soc", "chat_context": None,
+                    "soc_items": [], "auth_items": [], "chat_items": [],
                 }
                 choices = _get_researcher_choices()
                 dd = gr.update(choices=choices, value=None)
@@ -3598,6 +3772,7 @@ def create_app(agent=None):
                     gr.update(value="GO"),                  # go button reset
                     dd, dd, dd, stats, table,
                     soc, auth, chat,
+                    "", gr.update(visible=False),
                 )
 
             name = researcher_name.strip()
@@ -3626,7 +3801,7 @@ def create_app(agent=None):
                     profile = pool.submit(asyncio.run, _do_lookup()).result()
 
                 if not profile:
-                    return (gr.update(),) * 12
+                    return (gr.update(),) * 14
 
                 # Store in registry
                 registry = get_researcher_registry()
@@ -3648,6 +3823,18 @@ def create_app(agent=None):
                 new_state["researcher"] = profile.name
                 new_state["active_layer"] = "auth"
 
+                # Build auth_items: researcher (auto) + preserved pinned items
+                auth_items = [
+                    {"label": profile.name, "type": "researcher", "auto": True},
+                ]
+                for it in (state or {}).get("auth_items", []):
+                    if not it.get("auto", False) and it["label"] != profile.name:
+                        auth_items.append(it)
+                new_state["auth_items"] = auth_items
+
+                # Build soc_items from graph field/domain nodes
+                new_state["soc_items"] = gb.get_structural_items()
+
                 choices = _get_researcher_choices()
                 if profile.name not in choices:
                     choices.insert(0, profile.name)
@@ -3657,12 +3844,15 @@ def create_app(agent=None):
                 )
 
                 soc, auth, chat = _layer_btn_classes("auth")
+                pills_html = _render_context_pills(new_state)
+                has_items = bool(new_state.get("auth_items", []))
                 return (
                     html, new_state,
                     gr.update(value=profile.name, elem_classes=["researcher-active"]),
                     gr.update(value="\u00d7"),              # GO → ×
                     dd, dd, dd, stats, table,
                     soc, auth, chat,
+                    pills_html, gr.update(visible=has_items),
                 )
 
             except Exception as e:
@@ -3678,6 +3868,7 @@ def create_app(agent=None):
             citation_ui["researcher_dropdown"],
             kb_stats, papers_table,
             layer_soc_btn, layer_auth_btn, layer_chat_btn,
+            ctx_pills_html, ctx_pills_row,
         ]
 
         def activate_chip_loading(name):
