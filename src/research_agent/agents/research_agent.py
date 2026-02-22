@@ -1065,7 +1065,7 @@ Response:"""
             title = result.get("title", "Unknown")
             authors = result.get("authors", "")
             year = result.get("year", "")
-            content = result.get("content", "")[:800]  # Truncate content
+            content = str(result.get("content") or "")[:800]
             source = result.get("source", "unknown")
             source_label = source_labels.get(source, source)
             tags = result.get("tags", "")
@@ -1155,9 +1155,12 @@ Response:"""
         return prompt
 
     def _format_results_without_llm(self, query: str, results: List[Dict]) -> str:
-        """Format results when no LLM is available."""
+        """Format retrieved results when no LLM is available for synthesis."""
         if not results:
-            return "No relevant results found for your query."
+            return (
+                "No retrieved sources are available for this query. "
+                "(LLM synthesis is currently unavailable.)"
+            )
 
         # Map source types to human-readable labels
         source_labels = {
@@ -1169,7 +1172,11 @@ Response:"""
             "web": "Web Search",
         }
 
-        response = f"**Results for:** {query}\n\n"
+        response = (
+            "I retrieved relevant sources, but an LLM is not available to synthesize "
+            "them into a narrative answer right now. Here are the top retrieved "
+            f"results for: **{query}**\n\n"
+        )
 
         for i, result in enumerate(results[:10], 1):
             title = result.get("title", "Unknown")
@@ -1177,7 +1184,7 @@ Response:"""
             year = result.get("year", "")
             source = result.get("source", "")
             source_label = source_labels.get(source, source)
-            content = result.get("content", "")[:200]
+            content = str(result.get("content", ""))[:200]
             tags = result.get("tags", "")
             url = result.get("url", "")
 

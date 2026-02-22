@@ -188,7 +188,7 @@ class TestSynthesis:
         agent = ResearchAgent(use_ollama=False)
         formatted = agent._format_results_without_llm("test query", [])
 
-        assert "No relevant results" in formatted
+        assert "No retrieved sources" in formatted
 
 
 @pytest.mark.unit
