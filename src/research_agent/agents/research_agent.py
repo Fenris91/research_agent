@@ -983,6 +983,8 @@ Keywords:"""
             query, query_type, all_results,
             current_researcher=current_researcher,
             current_paper_id=current_paper_id,
+            auth_context_items=state.get("auth_context_items"),
+            chat_context_items=state.get("chat_context_items"),
         )
 
         # Generate response
@@ -1008,6 +1010,8 @@ Keywords:"""
         results: List[Dict],
         current_researcher: Optional[str] = None,
         current_paper_id: Optional[str] = None,
+        auth_context_items: Optional[List[str]] = None,
+        chat_context_items: Optional[List[str]] = None,
     ) -> str:
         """Build a prompt for synthesizing results based on query type."""
 
@@ -1047,8 +1051,8 @@ Response:"""
                 else:
                     context_parts.append(f"The user has selected a specific paper (ID: {current_paper_id[:20]}...)")
             # Add pinned/active context items if available
-            auth_items = state.get("auth_context_items") or []
-            chat_items = state.get("chat_context_items") or []
+            auth_items = auth_context_items or []
+            chat_items = chat_context_items or []
             if auth_items:
                 context_parts.append(f"The user has pinned these topics: {', '.join(auth_items)}")
             if chat_items:

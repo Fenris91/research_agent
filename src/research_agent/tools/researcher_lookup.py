@@ -20,7 +20,7 @@ from typing import List, Dict, Optional, Any
 import httpx
 
 from research_agent.tools.academic_search import RateLimiter, retry_with_backoff
-from research_agent.utils.cache import TTLCache, make_cache_key
+from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,7 @@ class ResearcherLookup:
         use_semantic_scholar: bool = True,
         use_web_search: bool = True,
         s2_rate_limiter: Optional[RateLimiter] = None,
+        persistent_cache_dir: Optional[str] = None,
     ):
         """
         Initialize researcher lookup.
@@ -148,12 +149,14 @@ class ResearcherLookup:
             use_semantic_scholar: Enable Semantic Scholar lookup
             use_web_search: Enable web search
             s2_rate_limiter: Optional shared rate limiter for Semantic Scholar
+            persistent_cache_dir: Directory for disk-backed cache (survives restarts)
         """
         self.email = email
         self.request_delay = request_delay
         self.use_openalex = use_openalex
         self.use_semantic_scholar = use_semantic_scholar
         self.use_web_search = use_web_search
+        self._persistent_cache_dir = persistent_cache_dir
 
         # HTTP client (initialized lazily)
         self._client: Optional[httpx.AsyncClient] = None
@@ -165,8 +168,16 @@ class ResearcherLookup:
             window_seconds=300,
         )
 
-        # Response cache (longer TTL for researcher data - 24 hours)
-        self._cache = TTLCache(default_ttl=86400, max_size=500)
+        # Response cache — disk-backed if persistent_cache_dir provided
+        if persistent_cache_dir:
+            self._cache = PersistentCache(
+                cache_dir=persistent_cache_dir,
+                name="researcher_lookup",
+                default_ttl=86400,
+                max_size=500,
+            )
+        else:
+            self._cache = TTLCache(default_ttl=86400, max_size=500)
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
@@ -179,10 +190,12 @@ class ResearcherLookup:
         return self._client
 
     async def close(self):
-        """Close HTTP client."""
+        """Close HTTP client and persistent cache."""
         if self._client:
             await self._client.aclose()
             self._client = None
+        if self._cache and hasattr(self._cache, "close"):
+            self._cache.close()
 
     async def search_openalex_author(self, name: str) -> Optional[dict]:
         """

@@ -189,9 +189,9 @@ def create_app(agent=None):
         background: #0e1219;
         border: 1px solid #1a1f2e;
         border-radius: 4px;
-        padding: 3px 8px;
-        gap: 6px;
-        margin-bottom: 2px;
+        padding: 2px 6px;
+        gap: 4px;
+        margin-bottom: 1px;
         min-height: 0;
         align-items: center;
         flex: 0 0 auto;
@@ -211,7 +211,7 @@ def create_app(agent=None):
     #top-bar input,
     #top-bar .wrap {
         font-size: 10px;
-        padding: 4px 8px;
+        padding: 3px 6px;
         line-height: 1.2;
         background: #0e1219;
         border: 1px solid #1a1f2e !important;
@@ -230,23 +230,31 @@ def create_app(agent=None):
     }
     #top-bar button {
         font-size: 9px;
-        padding: 4px 10px;
+        padding: 3px 8px;
         line-height: 1.2;
         border-radius: 4px;
     }
-    /* Researcher chip: active (selected) state */
-    #top-bar .researcher-active input {
-        background: #1a1f2e !important;
-        border-color: #c45c4a40 !important;
-        color: #e0d0c8 !important;
-        font-weight: 600 !important;
+    /* Clear (×) button — tight, no Gradio bloat */
+    #top-bar .topbar-clear-btn {
+        font-size: 14px;
+        padding: 0 4px;
+        min-width: 20px;
+        max-width: 24px;
+        width: 24px;
+        height: 28px;
+        line-height: 28px;
+        border: none;
+        background: transparent;
+        opacity: 0.4;
+        transition: opacity 0.2s, color 0.2s;
+        box-shadow: none;
+        flex-grow: 0;
+        flex-shrink: 0;
     }
-    /* GO/× button sizing */
-    #top-bar .researcher-go-btn {
-        font-size: 8px !important;
-        padding: 4px 8px !important;
-        min-width: 28px !important;
-        letter-spacing: 0.5px;
+    #top-bar .topbar-clear-btn:hover {
+        opacity: 1;
+        color: #c45c4a;
+        background: transparent;
     }
     /* Context layer buttons */
     #top-bar .ctx-layer-btn {
@@ -274,19 +282,17 @@ def create_app(agent=None):
     .ctx-pills-wrap {
         display: flex;
         flex-wrap: wrap;
-        gap: 4px;
-        padding: 3px 8px;
+        gap: 3px;
+        padding: 2px 6px;
         background: #0e1219;
         border: 1px solid #1a1f2e;
         border-radius: 4px;
-        max-height: 48px;
-        overflow: hidden;
     }
     .ctx-pill {
         display: inline-flex;
         align-items: center;
         gap: 3px;
-        padding: 2px 7px;
+        padding: 1px 6px;
         border-radius: 10px;
         font-size: 8px;
         font-family: 'IBM Plex Mono', monospace;
@@ -302,6 +308,8 @@ def create_app(agent=None):
     .ctx-pill-domain     { color: #d4a04a; border-color: rgba(212,160,74,0.3); background: rgba(212,160,74,0.06); }
     .ctx-pill-researcher { color: #4a90d9; border-color: rgba(74,144,217,0.3); background: rgba(74,144,217,0.06); }
     .ctx-pill-pinned     { color: #7c5cbf; border-color: rgba(124,92,191,0.3); background: rgba(124,92,191,0.06); }
+    .ctx-pill-metric     { color: #7a9a5a; border-color: rgba(122,154,90,0.3); background: rgba(122,154,90,0.06); }
+    .ctx-pill-affiliation { color: #8a7ab5; border-color: rgba(138,122,181,0.3); background: rgba(138,122,181,0.06); }
     .ctx-pill-close, .ctx-pill-pin, .ctx-pill-lock {
         background: none; border: none; cursor: pointer;
         padding: 0 1px; font-size: 9px; line-height: 1;
@@ -309,6 +317,8 @@ def create_app(agent=None):
     }
     .ctx-pill-lock { cursor: default; font-size: 7px; }
     .ctx-pill-close:hover, .ctx-pill-pin:hover { opacity: 1; }
+    .ctx-pill-disabled { opacity: 0.3; text-decoration: line-through; }
+    .ctx-pill-disabled:hover { opacity: 0.5; }
 
     /* ── Split pane ──────────────────────────────── */
     #split-pane {
@@ -460,15 +470,34 @@ def create_app(agent=None):
     /* Listen for layer changes FROM explorer iframe (bottom buttons) */
     window.addEventListener("message", function(e) {
       if (e.data && e.data.type === "explorer-layer") {
-        /* Sync top-bar button classes */
+        /* Click the matching top-bar button to trigger full Gradio handler (pills, state, etc.) */
         var layer = e.data.layer;
-        document.querySelectorAll(".ctx-layer-btn").forEach(function(btn) {
-          var classes = btn.className.split(" ").filter(function(c) { return c !== "ctx-active"; });
-          if (btn.textContent.trim() === layer.toUpperCase()) classes.push("ctx-active");
-          btn.className = classes.join(" ");
+        var btns = document.querySelectorAll(".ctx-layer-btn");
+        btns.forEach(function(btn) {
+          if (btn.textContent.trim() === layer.toUpperCase()) btn.click();
         });
       }
+      /* Route explorer detail-panel button actions to Python via hidden bus */
+      if (e.data && e.data.type === "explorer-action") {
+        var bus = document.querySelector("#explorer-action-bus textarea, #explorer-action-bus input");
+        if (bus) {
+          var setter = Object.getOwnPropertyDescriptor(
+            window.HTMLTextAreaElement.prototype, 'value'
+          ).set || Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          ).set;
+          setter.call(bus, JSON.stringify(e.data.payload) + ":" + Date.now());
+          bus.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
     });
+    /* Send action result back to explorer iframe */
+    function sendActionResultToExplorer(result) {
+      var iframe = document.querySelector("#explorer-col iframe");
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage({type: "action-result", result: result}, "*");
+      }
+    }
     /* Context pill command bus — JS→Python bridge */
     function ctxCommand(cmd) {
       var bus = document.querySelector("#ctx-command-bus textarea, #ctx-command-bus input");
@@ -495,6 +524,13 @@ def create_app(agent=None):
         iframe.contentWindow.postMessage({type: "set-context-items", items: items}, "*");
       }
     }
+    /* Incremental graph update — sends node/edge delta to avoid iframe flash */
+    function sendGraphDelta(delta) {
+      var iframe = document.querySelector("#explorer-col iframe");
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage({type: "update-graph", delta: delta}, "*");
+      }
+    }
     </script>
     """
 
@@ -504,28 +540,38 @@ def create_app(agent=None):
         app._explorer_theme = explorer_theme
         app._explorer_css = explorer_css
         app._pwa_head = _pwa_head
+        # Build initial soc_items from mock graph nodes
+        _mock_data = get_mock_graph_data()
+        _initial_soc = [
+            {"label": n["label"], "type": n["type"], "auto": True, "enabled": True}
+            for n in _mock_data.get("nodes", [])
+            if n["type"] in ("field", "domain")
+        ]
         # Shared state
         context_state = gr.State({
             "researcher": None, "paper_id": None,
             "active_layer": "soc", "chat_context": None,
-            "soc_items": [], "auth_items": [], "chat_items": [],
+            "soc_items": _initial_soc, "auth_items": [], "chat_items": [],
         })
         _query_state = gr.State({"query": None, "chunks": []})
 
         # ── TOP BAR ────────────────────────────────────────────────────
         with gr.Row(equal_height=True, elem_id="top-bar"):
-            topbar_researcher = gr.Textbox(
-                placeholder="Researcher (press Enter to look up)",
+            topbar_researcher = gr.Dropdown(
+                choices=[],
+                value=None,
+                allow_custom_value=True,
                 show_label=False,
                 container=False,
                 scale=2,
-                min_width=140,
+                min_width=200,
+                elem_id="topbar-researcher",
             )
-            topbar_go_btn = gr.Button(
-                "GO", variant="secondary", scale=0, min_width=32,
-                elem_classes=["researcher-go-btn"],
+            topbar_clear_btn = gr.Button(
+                "\u00d7", variant="secondary", scale=0, min_width=20,
+                elem_classes=["topbar-clear-btn"],
+                visible=False,
             )
-            kb_view_btn = gr.Button("KB", variant="secondary", scale=0, min_width=50)
             model_dropdown = gr.Dropdown(
                 choices=["Loading..."],
                 value="Loading...",
@@ -549,10 +595,30 @@ def create_app(agent=None):
             )
 
         # ── CONTEXT PILL STRIP (row 2, collapses when empty) ─────────
-        with gr.Row(visible=False, elem_id="ctx-pills-row") as ctx_pills_row:
-            ctx_pills_html = gr.HTML(value="", elem_id="ctx-pills-container")
-        # Hidden command bus for pill ✕/pin JS→Python bridge
+        _has_initial_pills = bool(_initial_soc)
+        # Pre-render initial SOC pills
+        if _has_initial_pills:
+            import html as _html_mod
+            _init_pills = []
+            for _it in _initial_soc:
+                _esc = _html_mod.escape(_it["label"])
+                _jsl = _it["label"].replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+                _init_pills.append(
+                    f'<span class="ctx-pill ctx-pill-{_it["type"]}" '
+                    f'onclick="ctxCommand(\'toggle:soc:{_jsl}\')" style="cursor:pointer">'
+                    f'<span class="ctx-pill-label">{_esc}</span></span>'
+                )
+            _init_pills_html = f'<div class="ctx-pills-wrap">{" ".join(_init_pills)}</div>'
+        else:
+            _init_pills_html = ""
+        with gr.Row(visible=_has_initial_pills, elem_id="ctx-pills-row") as ctx_pills_row:
+            ctx_pills_html = gr.HTML(value=_init_pills_html, elem_id="ctx-pills-container")
+        # Hidden command bus for pill ✕/pin/toggle JS→Python bridge
         ctx_command_bus = gr.Textbox(value="", visible=False, elem_id="ctx-command-bus")
+        ctx_items_json = gr.Textbox(value="", visible=False, elem_id="ctx-items-json")
+        # Hidden action bus for explorer detail-panel buttons (iframe → Python → iframe)
+        explorer_action_bus = gr.Textbox(value="", visible=False, elem_id="explorer-action-bus")
+        explorer_action_result = gr.Textbox(value="", visible=False, elem_id="explorer-action-result")
 
         # Hidden components (needed by event handlers wired elsewhere)
         with gr.Group(visible=False):
@@ -597,8 +663,9 @@ def create_app(agent=None):
           # RIGHT PANE: Knowledge Explorer
           with gr.Column(scale=3, elem_id="explorer-col"):
             _renderer = ExplorerRenderer()
+            _mock_data["context_items"] = {"soc": _initial_soc, "auth": [], "chat": []}
             explorer_html = gr.HTML(
-                value=_renderer.render(get_mock_graph_data())
+                value=_renderer.render(_mock_data)
             )
 
         # ── KNOWLEDGE MANAGEMENT (collapsed) ───────────────────────────
@@ -1132,16 +1199,20 @@ def create_app(agent=None):
                 label = item["label"]
                 itype = item.get("type", "keyword")
                 auto = item.get("auto", True)
+                enabled = item.get("enabled", True)
                 escaped = html_mod.escape(label)
                 # Escape label for JS string (handle quotes/backslashes)
-                js_label = label.replace("\\", "\\\\").replace("'", "\\'")
-                pill = f'<span class="ctx-pill ctx-pill-{itype}">'
+                js_label = label.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+                disabled_cls = "" if enabled else " ctx-pill-disabled"
+                pill = f'<span class="ctx-pill ctx-pill-{itype}{disabled_cls}" '
+                pill += f'onclick="ctxCommand(\'toggle:{layer}:{js_label}\')" '
+                pill += f'style="cursor:pointer">'
                 pill += f'<span class="ctx-pill-label">{escaped}</span>'
                 if layer == "chat":
-                    pill += f'<button class="ctx-pill-pin" onclick="ctxCommand(\'pin:{js_label}\')" title="Pin to AUTH">&#x1F4CC;</button>'
+                    pill += f'<button class="ctx-pill-pin" onclick="event.stopPropagation();ctxCommand(\'pin:{js_label}\')" title="Pin to AUTH">&#x1F4CC;</button>'
                 if layer == "chat" or (layer == "auth" and not auto):
-                    pill += f'<button class="ctx-pill-close" onclick="ctxCommand(\'remove:{layer}:{js_label}\')">&#x00D7;</button>'
-                if layer == "auth" and auto:
+                    pill += f'<button class="ctx-pill-close" onclick="event.stopPropagation();ctxCommand(\'remove:{layer}:{js_label}\')">&#x00D7;</button>'
+                if layer == "auth" and auto and itype == "researcher":
                     pill += '<span class="ctx-pill-lock" title="Auto (researcher lookup)">&#x1F512;</span>'
                 pill += '</span>'
                 pills.append(pill)
@@ -1274,6 +1345,7 @@ def create_app(agent=None):
                             "label": kw,
                             "type": "paper_title" if kw in title_set else "keyword",
                             "auto": True,
+                            "enabled": True,
                         })
                     new_state["chat_items"] = chat_items
 
@@ -1294,9 +1366,15 @@ def create_app(agent=None):
                                     pid = gb.add_paper(paper)
                                     gb.add_authorship_edge(rid, pid)
                                 gb.build_structural_context()
+                                ctx_items = {
+                                    "soc": new_state.get("soc_items", []),
+                                    "auth": new_state.get("auth_items", []),
+                                    "chat": chat_items,
+                                }
                                 explorer_update = renderer.render(
                                     gb.to_dict(active_layer="chat",
-                                               highlight_terms=chat_ctx["keywords"])
+                                               highlight_terms=chat_ctx["keywords"],
+                                               context_items=ctx_items)
                                 )
                             else:
                                 gd = get_mock_graph_data()
@@ -1310,6 +1388,7 @@ def create_app(agent=None):
                             explorer_update = renderer.render(gd)
 
                 except Exception as e:
+                    logger.error(f"[Chat] generate_response error: {e}", exc_info=True)
                     error_msg = str(e)
                     if "401" in error_msg:
                         response = f"**API Authentication Error:** Your API key may be invalid or expired. Please check your API key configuration in `configs/config.yaml`.\n\n*Details: {error_msg}*"
@@ -1715,7 +1794,11 @@ def create_app(agent=None):
             return [r.name for r in researchers if r.name]
 
         def refresh_context_choices(state):
-            """Refresh shared researcher dropdown choices."""
+            """Refresh shared researcher dropdown choices.
+
+            Also syncs the topbar dropdown + clear button so that on page
+            refresh a previously-selected researcher is shown immediately.
+            """
             choices = _get_researcher_choices()
             value = None
             if state and state.get("researcher") in choices:
@@ -1724,7 +1807,12 @@ def create_app(agent=None):
                 value = choices[0]
             new_state = dict(state or {})
             new_state["researcher"] = value
-            return new_state, gr.update(choices=choices, value=value)
+            return (
+                new_state,
+                gr.update(choices=choices, value=value),
+                gr.update(choices=choices, value=value),   # topbar dropdown
+                gr.update(visible=bool(value)),             # clear btn
+            )
 
         def sync_researcher_context(name: str, state):
             """Update shared context when a researcher is selected."""
@@ -1746,11 +1834,6 @@ def create_app(agent=None):
             stats, table = refresh_stats_and_table(
                 year_from, year_to, min_citations, new_state
             )
-            topbar_update = gr.update(
-                value=name or "",
-                elem_classes=["researcher-active"] if name else [],
-            )
-            go_btn_update = gr.update(value="\u00d7" if name else "GO")
             return (
                 new_state,
                 current_update,
@@ -1758,8 +1841,6 @@ def create_app(agent=None):
                 citation_update,
                 stats,
                 table,
-                topbar_update,
-                go_btn_update,
             )
 
         def sync_paper_context(paper_id: str, state):
@@ -3220,7 +3301,8 @@ def create_app(agent=None):
         refresh_context_btn.click(
             refresh_context_choices,
             inputs=[context_state],
-            outputs=[context_state, current_researcher],
+            outputs=[context_state, current_researcher,
+                     topbar_researcher, topbar_clear_btn],
         )
 
         researcher_select.change(
@@ -3239,8 +3321,6 @@ def create_app(agent=None):
                 citation_ui["researcher_dropdown"],
                 kb_stats,
                 papers_table,
-                topbar_researcher,
-                topbar_go_btn,
             ],
         )
 
@@ -3260,8 +3340,6 @@ def create_app(agent=None):
                 citation_ui["researcher_dropdown"],
                 kb_stats,
                 papers_table,
-                topbar_researcher,
-                topbar_go_btn,
             ],
         )
 
@@ -3281,8 +3359,6 @@ def create_app(agent=None):
                 citation_ui["researcher_dropdown"],
                 kb_stats,
                 papers_table,
-                topbar_researcher,
-                topbar_go_btn,
             ],
         )
 
@@ -3366,7 +3442,8 @@ def create_app(agent=None):
         app.load(
             refresh_context_choices,
             inputs=[context_state],
-            outputs=[context_state, current_researcher],
+            outputs=[context_state, current_researcher,
+                     topbar_researcher, topbar_clear_btn],
         )
 
         # Reranker toggle syncing (Chat + KB share state)
@@ -3491,8 +3568,6 @@ def create_app(agent=None):
                 citation_ui["researcher_dropdown"],
                 kb_stats,
                 papers_table,
-                topbar_researcher,
-                topbar_go_btn,
             ],
         )
 
@@ -3662,16 +3737,28 @@ def create_app(agent=None):
 
         # ── Context pill command handler ───────────────────────────────
         def _handle_ctx_command(cmd_raw, state):
-            """Handle pill strip commands: remove:<layer>:<label>, pin:<label>."""
+            """Handle pill strip commands: remove/pin/toggle."""
+            import json as _json
             if not cmd_raw:
-                return state, gr.update(), gr.update()
+                return state, gr.update(), gr.update(), ""
             # Strip timestamp suffix
             parts = cmd_raw.rsplit(":", 1)
             cmd = parts[0] if len(parts) > 1 and parts[-1].isdigit() else cmd_raw
 
             new_state = dict(state or {})
 
-            if cmd.startswith("remove:chat:"):
+            if cmd.startswith("toggle:"):
+                # toggle:soc:Feminist Theory or toggle:auth:h-index: 14
+                rest = cmd[len("toggle:"):]
+                layer_prefix, label = rest.split(":", 1)
+                items_key = f"{layer_prefix}_items"
+                # Deep-copy items list to avoid mutating original state
+                new_state[items_key] = [dict(it) for it in new_state.get(items_key, [])]
+                for it in new_state[items_key]:
+                    if it["label"] == label:
+                        it["enabled"] = not it.get("enabled", True)
+                        break
+            elif cmd.startswith("remove:chat:"):
                 label = cmd[len("remove:chat:"):]
                 new_state["chat_items"] = [
                     it for it in new_state.get("chat_items", [])
@@ -3684,23 +3771,209 @@ def create_app(agent=None):
                     if it["label"] != label or it.get("auto", False)
                 ]
             elif cmd.startswith("pin:"):
-                # Strip timestamp from pin command too
-                pin_parts = cmd[len("pin:"):].rsplit(":", 1)
-                label = pin_parts[0] if len(pin_parts) > 1 and pin_parts[-1].isdigit() else cmd[len("pin:"):]
+                label = cmd[len("pin:"):]
                 auth_items = list(new_state.get("auth_items", []))
                 if not any(it["label"] == label for it in auth_items):
-                    auth_items.append({"label": label, "type": "pinned", "auto": False})
+                    auth_items.append({"label": label, "type": "pinned", "auto": False, "enabled": True})
                 new_state["auth_items"] = auth_items
 
             pills_html = _render_context_pills(new_state)
             layer = new_state.get("active_layer", "soc")
             has_items = bool(new_state.get(f"{layer}_items", []))
-            return new_state, pills_html, gr.update(visible=has_items)
+            items_json = _json.dumps({
+                "soc": new_state.get("soc_items", []),
+                "auth": new_state.get("auth_items", []),
+                "chat": new_state.get("chat_items", []),
+            })
+            return new_state, pills_html, gr.update(visible=has_items), items_json
 
         ctx_command_bus.input(
             _handle_ctx_command,
             inputs=[ctx_command_bus, context_state],
-            outputs=[context_state, ctx_pills_html, ctx_pills_row],
+            outputs=[context_state, ctx_pills_html, ctx_pills_row, ctx_items_json],
+        ).then(
+            fn=None, inputs=[ctx_items_json], outputs=[],
+            js="(json) => { try { sendContextItemsToExplorer(JSON.parse(json)); } catch(e) {} }",
+        )
+
+        # ── Explorer action bus (detail-panel buttons) ──────────────
+        async def _handle_explorer_action(action_raw, state):
+            """Handle action requests from explorer iframe detail-panel buttons."""
+            import json as _json
+
+            if not action_raw:
+                return "", state
+
+            # Strip timestamp suffix (same pattern as ctx_command_bus)
+            parts = action_raw.rsplit(":", 1)
+            payload_str = parts[0] if len(parts) > 1 and parts[-1].isdigit() else action_raw
+
+            try:
+                payload = _json.loads(payload_str)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid explorer action payload: {action_raw}")
+                return _json.dumps({"success": False, "error": "Invalid request"}), state
+
+            action = payload.get("action", "")
+            node_id = payload.get("nodeId", "")
+            researcher_name = payload.get("researcherName", "")
+            layer = payload.get("layer", "auth")
+
+            new_state = dict(state or {})
+
+            try:
+                if action == "load-papers":
+                    result = await _action_load_papers(node_id, researcher_name, new_state)
+                elif action == "discover-related":
+                    result = await _action_discover_related(node_id, researcher_name, new_state)
+                else:
+                    result = {"success": False, "error": f"Not yet implemented: {action}"}
+            except Exception as e:
+                logger.error(f"Explorer action '{action}' failed: {e}", exc_info=True)
+                result = {"success": False, "error": str(e)[:60]}
+
+            return _json.dumps(result), new_state
+
+        async def _action_load_papers(node_id, researcher_name, state):
+            """AUTH mode: Fetch all papers for a researcher, return graph delta."""
+            from research_agent.tools.researcher_registry import get_researcher_registry
+            from research_agent.tools.researcher_lookup import ResearcherLookup
+
+            registry = get_researcher_registry()
+            profile = registry.get(researcher_name)
+
+            if not profile:
+                return {"success": False, "error": f"'{researcher_name}' not in registry"}
+
+            oa_id = profile.openalex_id
+            s2_id = profile.semantic_scholar_id
+
+            if not oa_id and not s2_id:
+                return {"success": False, "error": "No API IDs for this researcher"}
+
+            # Fetch papers from APIs
+            lookup = ResearcherLookup()
+            try:
+                papers = []
+                if s2_id:
+                    papers = await lookup.fetch_author_papers_semantic_scholar(s2_id, limit=20)
+                if len(papers) < 10 and oa_id:
+                    oa_papers = await lookup.fetch_author_papers_openalex(oa_id, limit=20)
+                    existing_dois = {p.doi for p in papers if p.doi}
+                    existing_titles = {(p.title or "").lower() for p in papers}
+                    for p in oa_papers:
+                        if p.doi and p.doi in existing_dois:
+                            continue
+                        if (p.title or "").lower() in existing_titles:
+                            continue
+                        papers.append(p)
+                papers.sort(key=lambda p: p.citation_count or 0, reverse=True)
+                papers = papers[:20]
+            finally:
+                await lookup.close()
+
+            if not papers:
+                return {"success": False, "error": "No papers found via APIs"}
+
+            return _build_paper_delta(node_id, papers, state, edge_type="authorship")
+
+        async def _action_discover_related(node_id, researcher_name, state):
+            """CHAT mode: Discover related papers via semantic search, return delta."""
+            from research_agent.tools.academic_search import AcademicSearchTools
+
+            # Build query from researcher name + chat context keywords
+            chat_items = state.get("chat_items", [])
+            keywords = [it.get("label", "") for it in chat_items if it.get("label")]
+            query = f"{researcher_name} {' '.join(keywords)}".strip() if keywords else researcher_name
+
+            search = AcademicSearchTools()
+            try:
+                papers = await search.search_all(query, limit_per_source=8)
+            finally:
+                await search.close()
+
+            if not papers:
+                return {"success": False, "error": "No related papers found"}
+
+            return _build_paper_delta(node_id, papers[:12], state, edge_type="semantic")
+
+        def _build_paper_delta(anchor_node_id, papers, state, edge_type="authorship"):
+            """Build a graph delta from new papers connected to an anchor node.
+
+            Args:
+                anchor_node_id: Existing node to connect new papers to
+                papers: List of AuthorPaper or Paper objects
+                state: Current context_state (must contain _prev_graph)
+                edge_type: "authorship" or "semantic"
+
+            Returns:
+                dict with success, delta, paperCount
+            """
+            prev_graph = state.get("_prev_graph")
+            if not prev_graph:
+                return {"success": False, "error": "No graph state (try reloading)"}
+
+            existing_ids = {n["id"] for n in prev_graph.get("nodes", [])}
+            existing_link_keys = set()
+            for l in prev_graph.get("links", []):
+                s = l["source"]["id"] if isinstance(l["source"], dict) else l["source"]
+                t = l["target"]["id"] if isinstance(l["target"], dict) else l["target"]
+                existing_link_keys.add((s, t, l.get("type", "")))
+
+            # Build mini-graph for new papers only
+            gb = GraphBuilder()
+            new_paper_ids = []
+            for paper in papers:
+                pid = gb.add_paper(paper)
+                if pid not in existing_ids:
+                    new_paper_ids.append(pid)
+
+            if not new_paper_ids:
+                return {"success": True, "delta": {"addNodes": [], "addLinks": []}, "paperCount": 0}
+
+            # Add connecting edges
+            for pid in new_paper_ids:
+                if edge_type == "authorship":
+                    gb.add_authorship_edge(anchor_node_id, pid)
+                else:
+                    gb.add_semantic_edge(anchor_node_id, pid, score=0.7)
+
+            # Build structural context for new papers' fields
+            gb.build_structural_context()
+            mini = gb.to_dict()
+
+            # Filter to truly new nodes and links
+            add_nodes = [n for n in mini["nodes"] if n["id"] not in existing_ids]
+            add_links = []
+            for l in mini["links"]:
+                s = l["source"]["id"] if isinstance(l["source"], dict) else l["source"]
+                t = l["target"]["id"] if isinstance(l["target"], dict) else l["target"]
+                if (s, t, l.get("type", "")) not in existing_link_keys:
+                    add_links.append(l)
+
+            delta = {
+                "addNodes": add_nodes,
+                "removeNodes": [],
+                "addLinks": add_links,
+                "removeLinks": [],
+            }
+
+            # Update stored graph state
+            prev_graph["nodes"].extend(add_nodes)
+            prev_graph["links"].extend(add_links)
+
+            paper_count = len([n for n in add_nodes if n.get("type") == "paper"])
+            return {"success": True, "delta": delta, "paperCount": paper_count}
+
+        explorer_action_bus.input(
+            _handle_explorer_action,
+            inputs=[explorer_action_bus, context_state],
+            outputs=[explorer_action_result, context_state],
+        ).then(
+            fn=None,
+            inputs=[explorer_action_result],
+            outputs=[],
+            js="(result) => { try { sendActionResultToExplorer(JSON.parse(result)); } catch(e) {} }",
         )
 
         # ── Layer switching ────────────────────────────────────────────
@@ -3754,11 +4027,17 @@ def create_app(agent=None):
                 renderer = ExplorerRenderer()
                 mock_data = get_mock_graph_data()
                 mock_data["active_layer"] = "soc"
+                mock_soc = [
+                    {"label": n["label"], "type": n["type"], "auto": True, "enabled": True}
+                    for n in mock_data.get("nodes", [])
+                    if n["type"] in ("field", "domain")
+                ]
+                mock_data["context_items"] = {"soc": mock_soc, "auth": [], "chat": []}
                 mock_html = renderer.render(mock_data)
                 reset_state = {
                     "researcher": None, "paper_id": None,
                     "active_layer": "soc", "chat_context": None,
-                    "soc_items": [], "auth_items": [], "chat_items": [],
+                    "soc_items": mock_soc, "auth_items": [], "chat_items": [],
                 }
                 choices = _get_researcher_choices()
                 dd = gr.update(choices=choices, value=None)
@@ -3766,13 +4045,14 @@ def create_app(agent=None):
                     year_from, year_to, min_citations, reset_state
                 )
                 soc, auth, chat = _layer_btn_classes("soc")
+                pills_html = _render_context_pills(reset_state)
                 return (
                     mock_html, reset_state,
-                    gr.update(value="", elem_classes=[]),   # topbar chip reset
-                    gr.update(value="GO"),                  # go button reset
+                    gr.update(value=None, choices=choices),  # topbar dropdown reset
+                    gr.update(visible=False),                # hide clear btn
                     dd, dd, dd, stats, table,
                     soc, auth, chat,
-                    "", gr.update(visible=False),
+                    pills_html, gr.update(visible=bool(mock_soc)),
                 )
 
             name = researcher_name.strip()
@@ -3782,11 +4062,17 @@ def create_app(agent=None):
                 from research_agent.tools.researcher_registry import get_researcher_registry
                 import concurrent.futures
 
+                explorer_cfg = (_load_config() or {}).get("explorer", {})
+                cache_dir = explorer_cfg.get("cache_dir", "./cache/explorer")
+                explorer_email = explorer_cfg.get("email")
+
                 lookup = ResearcherLookup(
+                    email=explorer_email,
                     use_openalex=True,
                     use_semantic_scholar=True,
                     use_web_search=False,
                     request_delay=0.3,
+                    persistent_cache_dir=cache_dir,
                 )
 
                 async def _do_lookup():
@@ -3801,11 +4087,51 @@ def create_app(agent=None):
                     profile = pool.submit(asyncio.run, _do_lookup()).result()
 
                 if not profile:
+                    logger.warning(f"[Explorer] No results for '{name}'")
+                    gr.Warning(f"Researcher '{name}' not found — try a different name or spelling.")
                     return (gr.update(),) * 14
 
                 # Store in registry
                 registry = get_researcher_registry()
                 registry.add(profile)
+
+                # ── Enrich papers with live API data ──────────────
+                from research_agent.tools.academic_search import AcademicSearchTools
+
+                async def _enrich_papers(papers, cfg):
+                    search = AcademicSearchTools(
+                        email=cfg.get("email"),
+                        persistent_cache_dir=cfg.get("cache_dir", "./cache/explorer"),
+                    )
+                    try:
+                        # OA status from Unpaywall
+                        await search.enrich_papers_oa_status(papers)
+
+                        # SPECTER2 embeddings + TLDRs from S2
+                        s2_ids = [p.paper_id if hasattr(p, "paper_id") else p.id
+                                  for p in papers
+                                  if (hasattr(p, "paper_id") and p.paper_id) or (hasattr(p, "id") and p.id)]
+                        embeddings = await search.get_paper_embeddings(s2_ids) if s2_ids else {}
+
+                        # CrossRef citation gap-filling
+                        dois = [p.doi for p in papers if p.doi]
+                        ref_map = {}
+                        for doi in dois:
+                            refs = await search.get_crossref_references(doi)
+                            if refs:
+                                ref_map[doi] = refs
+
+                        return embeddings, ref_map
+                    finally:
+                        await search.close()
+
+                try:
+                    embeddings, ref_map = pool.submit(
+                        asyncio.run, _enrich_papers(profile.top_papers or [], explorer_cfg)
+                    ).result()
+                except Exception as enrich_err:
+                    logger.warning(f"[Explorer] Enrichment partial failure: {enrich_err}")
+                    embeddings, ref_map = {}, {}
 
                 # Build graph
                 gb = GraphBuilder()
@@ -3815,25 +4141,46 @@ def create_app(agent=None):
                     gb.add_authorship_edge(researcher_id, paper_id)
                 gb.build_structural_context()
 
-                renderer = ExplorerRenderer()
-                html = renderer.render(gb.to_dict(active_layer="auth"))
+                # Inject embeddings + compute semantic edges
+                if embeddings:
+                    gb.inject_embeddings(embeddings)
+                    # Also inject TLDRs from papers that have them
+                    tldrs = {}
+                    for p in (profile.top_papers or []):
+                        pid = p.paper_id if hasattr(p, "paper_id") else p.id
+                        tldr = p.tldr if hasattr(p, "tldr") else None
+                        if pid and tldr:
+                            tldrs[pid] = tldr
+                    if tldrs:
+                        gb.inject_tldrs(tldrs)
+                    gb.compute_semantic_edges(threshold=0.65)
+
+                # Fill citation gaps from CrossRef
+                if ref_map:
+                    gb.fill_citation_gaps(ref_map)
 
                 # Sync all surfaces
                 new_state = dict(state or {})
                 new_state["researcher"] = profile.name
                 new_state["active_layer"] = "auth"
 
-                # Build auth_items: researcher (auto) + preserved pinned items
-                auth_items = [
-                    {"label": profile.name, "type": "researcher", "auto": True},
-                ]
-                for it in (state or {}).get("auth_items", []):
-                    if not it.get("auto", False) and it["label"] != profile.name:
-                        auth_items.append(it)
-                new_state["auth_items"] = auth_items
+                new_state["auth_items"] = _build_auth_items(profile, state)
 
                 # Build soc_items from graph field/domain nodes
                 new_state["soc_items"] = gb.get_structural_items()
+
+                renderer = ExplorerRenderer()
+                ctx_items = {
+                    "soc": new_state["soc_items"],
+                    "auth": new_state["auth_items"],
+                    "chat": new_state.get("chat_items", []),
+                }
+                graph_data = gb.to_dict(active_layer="auth", context_items=ctx_items)
+
+                # Store graph data for incremental updates
+                new_state["_prev_graph"] = graph_data
+
+                html = renderer.render(graph_data)
 
                 choices = _get_researcher_choices()
                 if profile.name not in choices:
@@ -3848,22 +4195,21 @@ def create_app(agent=None):
                 has_items = bool(new_state.get("auth_items", []))
                 return (
                     html, new_state,
-                    gr.update(value=profile.name, elem_classes=["researcher-active"]),
-                    gr.update(value="\u00d7"),              # GO → ×
+                    gr.update(value=profile.name, choices=choices),  # topbar dropdown
+                    gr.update(visible=True),                         # show clear btn
                     dd, dd, dd, stats, table,
                     soc, auth, chat,
                     pills_html, gr.update(visible=has_items),
                 )
 
             except Exception as e:
-                logger.error(f"[Explorer] {type(e).__name__}: {e}")
-                import traceback
-                traceback.print_exc()
-                raise
+                logger.error(f"[Explorer] {type(e).__name__}: {e}", exc_info=True)
+                gr.Warning(f"Lookup failed: {e}")
+                return (gr.update(),) * 14
 
         _lookup_outputs = [
             explorer_html, context_state, topbar_researcher,
-            topbar_go_btn,
+            topbar_clear_btn,
             current_researcher, researcher_select,
             citation_ui["researcher_dropdown"],
             kb_stats, papers_table,
@@ -3871,33 +4217,177 @@ def create_app(agent=None):
             ctx_pills_html, ctx_pills_row,
         ]
 
-        def activate_chip_loading(name):
-            """Immediately show chip state while lookup runs."""
-            if name and name.strip():
-                return gr.update(elem_classes=["researcher-active"]), gr.update(value="...")
-            return gr.update(elem_classes=[]), gr.update(value="GO")
+        def _instant_clear(state):
+            """Instantly reset explorer to mock data — no API calls."""
+            renderer = ExplorerRenderer()
+            mock = get_mock_graph_data()
+            mock["active_layer"] = "soc"
+            mock_soc_items = [
+                {"label": n["label"], "type": n["type"], "auto": True, "enabled": True}
+                for n in mock.get("nodes", [])
+                if n["type"] in ("field", "domain")
+            ]
+            mock["context_items"] = {"soc": mock_soc_items, "auth": [], "chat": []}
+            reset_state = {
+                "researcher": None, "paper_id": None,
+                "active_layer": "soc", "chat_context": None,
+                "soc_items": mock_soc_items, "auth_items": [], "chat_items": [],
+                "_prev_graph": mock,
+            }
+            choices = _get_researcher_choices()
+            dd = gr.update(choices=choices, value=None)
+            soc, auth, chat = _layer_btn_classes("soc")
+            pills_html = _render_context_pills(reset_state)
+            has_items = bool(mock_soc_items)
+            return (
+                renderer.render(mock), reset_state,
+                gr.update(value=None, choices=choices),  # topbar dropdown reset
+                gr.update(visible=False),                # hide clear btn
+                dd, dd, dd,
+                gr.update(), gr.update(),  # stats/table unchanged
+                soc, auth, chat,
+                pills_html, gr.update(visible=has_items),
+            )
 
-        topbar_researcher.submit(
-            activate_chip_loading,
-            inputs=[topbar_researcher],
-            outputs=[topbar_researcher, topbar_go_btn],
-        ).then(
-            lookup_and_build_explorer,
+        def _build_auth_items(profile, state):
+            """Build auth_items list with researcher metadata pills."""
+            items = [
+                {"label": profile.name, "type": "researcher", "auto": True, "enabled": True},
+            ]
+            if profile.h_index:
+                items.append({"label": f"h-index: {profile.h_index}", "type": "metric", "auto": True, "enabled": True})
+            if profile.citations_count:
+                c = profile.citations_count
+                cite_str = f"{c:,}" if c < 100_000 else f"{c // 1000}k"
+                items.append({"label": f"{cite_str} citations", "type": "metric", "auto": True, "enabled": True})
+            if profile.top_papers:
+                items.append({"label": f"{len(profile.top_papers)} papers", "type": "metric", "auto": True, "enabled": True})
+            if profile.affiliations:
+                items.append({"label": profile.affiliations[0], "type": "affiliation", "auto": True, "enabled": True})
+            # Preserve manually pinned items
+            for it in (state or {}).get("auth_items", []):
+                if not it.get("auto", False) and it["label"] != profile.name:
+                    items.append(it)
+            return items
+
+        def _build_from_registry_full(name, state):
+            """Build explorer from registry, returning all 14 _lookup_outputs.
+
+            Instant — no API calls. Returns None if researcher not in registry.
+            """
+            from research_agent.tools.researcher_registry import get_researcher_registry
+
+            registry = get_researcher_registry()
+            profile = registry.get(name.strip())
+            if not profile:
+                return None
+
+            gb = GraphBuilder()
+            researcher_id = gb.add_researcher(profile.to_dict())
+
+            for paper in (profile.top_papers or []):
+                paper_id = gb.add_paper(paper)
+                gb.add_authorship_edge(researcher_id, paper_id)
+
+            gb.build_structural_context()
+
+            new_state = dict(state or {})
+            new_state["active_layer"] = "auth"
+            new_state["researcher"] = profile.name
+            new_state["auth_items"] = _build_auth_items(profile, state)
+            new_state["soc_items"] = gb.get_structural_items()
+
+            renderer = ExplorerRenderer()
+            ctx_items = {
+                "soc": new_state["soc_items"],
+                "auth": new_state["auth_items"],
+                "chat": new_state.get("chat_items", []),
+            }
+            graph_data = gb.to_dict(active_layer="auth", context_items=ctx_items)
+            new_state["_prev_graph"] = graph_data
+            html = renderer.render(graph_data)
+
+            choices = _get_researcher_choices()
+            dd = gr.update(choices=choices, value=profile.name)
+            soc, auth, chat = _layer_btn_classes("auth")
+            pills_html = _render_context_pills(new_state)
+            has_items = bool(new_state.get("auth_items", []))
+
+            return (
+                html, new_state,
+                gr.update(value=profile.name, choices=choices),
+                gr.update(visible=True),
+                dd, dd, dd,
+                gr.update(), gr.update(),  # stats/table unchanged
+                soc, auth, chat,
+                pills_html, gr.update(visible=has_items),
+            )
+
+        def _on_researcher_dropdown_select(evt: gr.SelectData, state, yf, yt, mc):
+            """Handle picking a researcher from the combobox dropdown.
+
+            Fast path: if already in registry, build graph instantly.
+            Slow path: otherwise, do full API lookup.
+            """
+            name = evt.value
+            if not name or not name.strip():
+                return _instant_clear(state)
+
+            # Try instant build from registry first
+            result = _build_from_registry_full(name, state)
+            if result is not None:
+                return result
+
+            # Not in registry — full API lookup
+            return lookup_and_build_explorer(name, state, yf, yt, mc)
+
+        topbar_researcher.select(
+            _on_researcher_dropdown_select,
+            inputs=[context_state,
+                    year_from_kb, year_to_kb, min_citations_kb],
+            outputs=_lookup_outputs,
+        )
+
+        def _on_researcher_input(value, state, yf, yt, mc):
+            """Handle combobox value change (typing + Enter, or programmatic).
+
+            Guards against double-triggering when .select() already handled it:
+            1. Empty + no current researcher → init no-op
+            2. Same as current researcher → already loaded, skip
+            3. Known choice → .select() handled it, skip
+            4. In registry → instant build (no API)
+            5. Otherwise → custom value, full API lookup
+            """
+            _noop = tuple(gr.update() for _ in _lookup_outputs)
+            if not value or not value.strip():
+                if not (state or {}).get("researcher"):
+                    return _noop
+                return _instant_clear(state)
+            name = value.strip()
+            # Already showing this researcher → skip
+            if name == (state or {}).get("researcher", ""):
+                return _noop
+            # Known dropdown choice → .select() already fired, skip
+            choices = _get_researcher_choices()
+            if name in choices:
+                return _noop
+            # Try instant build from registry (e.g. typed a known name)
+            result = _build_from_registry_full(name, state)
+            if result is not None:
+                return result
+            # Truly new name: full API lookup
+            return lookup_and_build_explorer(value, state, yf, yt, mc)
+
+        topbar_researcher.change(
+            _on_researcher_input,
             inputs=[topbar_researcher, context_state,
                     year_from_kb, year_to_kb, min_citations_kb],
             outputs=_lookup_outputs,
         )
 
-        def topbar_go_or_clear(btn_value, researcher_name, state, yf, yt, mc):
-            """GO triggers lookup, × triggers clear."""
-            if btn_value in ("\u00d7", "..."):
-                return lookup_and_build_explorer("", state, yf, yt, mc)
-            return lookup_and_build_explorer(researcher_name, state, yf, yt, mc)
-
-        topbar_go_btn.click(
-            topbar_go_or_clear,
-            inputs=[topbar_go_btn, topbar_researcher, context_state,
-                    year_from_kb, year_to_kb, min_citations_kb],
+        topbar_clear_btn.click(
+            _instant_clear,
+            inputs=[context_state],
             outputs=_lookup_outputs,
         )
 
@@ -3910,7 +4400,14 @@ def create_app(agent=None):
             """
             if not name or not name.strip():
                 renderer = ExplorerRenderer()
-                return renderer.render(get_mock_graph_data()), state
+                mock = get_mock_graph_data()
+                new_s = dict(state or {})
+                new_s["_prev_graph"] = mock
+                soc, auth, chat = _layer_btn_classes(new_s.get("active_layer", "soc"))
+                pills_html = _render_context_pills(new_s)
+                layer = new_s.get("active_layer", "soc")
+                has_items = bool(new_s.get(f"{layer}_items", []))
+                return renderer.render(mock), new_s, pills_html, gr.update(visible=has_items), soc, auth, chat
 
             from research_agent.tools.researcher_registry import get_researcher_registry
 
@@ -3919,7 +4416,14 @@ def create_app(agent=None):
 
             if not profile:
                 renderer = ExplorerRenderer()
-                return renderer.render(get_mock_graph_data()), state
+                mock = get_mock_graph_data()
+                new_s = dict(state or {})
+                new_s["_prev_graph"] = mock
+                soc, auth, chat = _layer_btn_classes(new_s.get("active_layer", "soc"))
+                pills_html = _render_context_pills(new_s)
+                layer = new_s.get("active_layer", "soc")
+                has_items = bool(new_s.get(f"{layer}_items", []))
+                return renderer.render(mock), new_s, pills_html, gr.update(visible=has_items), soc, auth, chat
 
             gb = GraphBuilder()
             researcher_id = gb.add_researcher(profile.to_dict())
@@ -3929,18 +4433,34 @@ def create_app(agent=None):
                 gb.add_authorship_edge(researcher_id, paper_id)
 
             gb.build_structural_context()
-            renderer = ExplorerRenderer()
-            html = renderer.render(gb.to_dict(active_layer="auth"))
 
             new_state = dict(state or {})
             new_state["active_layer"] = "auth"
             new_state["researcher"] = profile.name
-            return html, new_state
+            new_state["auth_items"] = _build_auth_items(profile, state)
+            new_state["soc_items"] = gb.get_structural_items()
+
+            renderer = ExplorerRenderer()
+            ctx_items = {
+                "soc": new_state["soc_items"],
+                "auth": new_state["auth_items"],
+                "chat": new_state.get("chat_items", []),
+            }
+            graph_data = gb.to_dict(active_layer="auth", context_items=ctx_items)
+            new_state["_prev_graph"] = graph_data
+            html = renderer.render(graph_data)
+
+            pills_html = _render_context_pills(new_state)
+            has_items = bool(new_state.get("auth_items", []))
+            soc, auth, chat = _layer_btn_classes("auth")
+            return html, new_state, pills_html, gr.update(visible=has_items), soc, auth, chat
 
         researcher_select.change(
             build_explorer_from_registry,
             inputs=[researcher_select, context_state],
-            outputs=[explorer_html, context_state],
+            outputs=[explorer_html, context_state,
+                     ctx_pills_html, ctx_pills_row,
+                     layer_soc_btn, layer_auth_btn, layer_chat_btn],
         )
 
         def build_kb_explorer(state):
@@ -3981,13 +4501,13 @@ def create_app(agent=None):
 
             gb.build_structural_context()
             renderer = ExplorerRenderer()
-            return renderer.render(gb.to_dict())
+            new_state = dict(state or {})
+            graph_data = gb.to_dict()
+            new_state["_prev_graph"] = graph_data
+            return renderer.render(graph_data), new_state
 
-        kb_view_btn.click(
-            build_kb_explorer,
-            inputs=[context_state],
-            outputs=[explorer_html],
-        )
+        # KB view can be triggered programmatically if needed;
+        # button was removed from top bar in combobox redesign.
 
     return app
 
