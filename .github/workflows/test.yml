@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [master, "feature/**"]
+    branches: [master, "feature/**", "chore/**"]
   pull_request:
     branches: [master]
   schedule:
@@ -10,46 +10,42 @@ on:
   workflow_dispatch:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Lint with ruff
+        run: uv run --extra dev ruff check src/ tests/ --select E,F,I --ignore E501,E402
+
   unit-tests:
     runs-on: ubuntu-latest
+    needs: lint
     strategy:
       matrix:
         python-version: ["3.11"]
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]" || pip install -e .
-          pip install pytest pytest-asyncio pytest-cov pytest-timeout
-      - name: Lint with ruff
-        run: |
-          pip install ruff
-          ruff check src/ tests/ --select E,F,W --ignore E501,E402
-        continue-on-error: true
+        run: uv sync --extra dev
       - name: Run unit tests
         run: |
-          pytest -m "not integration and not slow" --timeout=30 --cov=research_agent --cov-fail-under=20 -q
+          uv run pytest -m "not integration and not slow" --timeout=30 --cov=research_agent --cov-fail-under=20 -q
 
   integration-tests:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]" || pip install -e .
-          pip install pytest pytest-asyncio pytest-timeout
+        run: uv sync --extra dev
       - name: Run integration tests
         run: |
-          pytest -m "integration" --timeout=120 -q
+          uv run pytest -m "integration" --timeout=120 -q
         continue-on-error: true
