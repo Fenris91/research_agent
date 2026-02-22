@@ -8,6 +8,7 @@ from research_agent.utils.cache import (
     get_persistent_cache,
 )
 from research_agent.utils.config import load_config, clear_config_cache
+from research_agent.utils.retry import retry_with_backoff
 
 __all__ = [
     "TTLCache",
@@ -17,4 +18,5 @@ __all__ = [
     "get_persistent_cache",
     "load_config",
     "clear_config_cache",
+    "retry_with_backoff",
 ]

@@ -862,7 +862,7 @@ Keywords:"""
                             if paper.authors
                             else "",
                             "year": paper.year,
-                            "paper_id": paper.id,
+                            "paper_id": paper.paper_id,
                             "doi": paper.doi,
                             "citation_count": citation_count,
                             "url": paper.url,
@@ -892,7 +892,7 @@ Keywords:"""
                             if paper.authors
                             else "",
                             "year": paper.year,
-                            "paper_id": paper.id,
+                            "paper_id": paper.paper_id,
                             "doi": paper.doi,
                             "citation_count": citation_count,
                             "url": paper.url,

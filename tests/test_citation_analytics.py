@@ -10,6 +10,7 @@ Tests for citation analysis features:
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from tests.test_config import Config
+from tests.fixtures import make_citation_paper
 
 
 # ============================================
@@ -199,21 +200,18 @@ class TestNetworkStatistics:
 
         network = CitationNetwork(
             seed_paper=CitationPaper(
-                paper_id="seed",
-                title="Seed Paper",
-                year=2020,
-                citation_count=1000
+                **make_citation_paper(paper_id="seed", title="Seed Paper", year=2020, citation_count=1000)
             ),
             citing_papers=[
-                CitationPaper(paper_id=f"citing_{i}", title=f"Citing {i}")
+                CitationPaper(**make_citation_paper(paper_id=f"citing_{i}", title=f"Citing {i}"))
                 for i in range(5)
             ],
             cited_papers=[
-                CitationPaper(paper_id=f"cited_{i}", title=f"Cited {i}")
+                CitationPaper(**make_citation_paper(paper_id=f"cited_{i}", title=f"Cited {i}"))
                 for i in range(10)
             ],
             highly_connected=[
-                CitationPaper(paper_id=f"connected_{i}", title=f"Connected {i}")
+                CitationPaper(**make_citation_paper(paper_id=f"connected_{i}", title=f"Connected {i}"))
                 for i in range(3)
             ]
         )
@@ -240,10 +238,7 @@ class TestNetworkStatistics:
 
         network = CitationNetwork(
             seed_paper=CitationPaper(
-                paper_id="seed",
-                title="Seed Paper",
-                year=2020,
-                citation_count=100
+                **make_citation_paper(paper_id="seed", title="Seed Paper", year=2020, citation_count=100)
             ),
             citing_papers=[],
             cited_papers=[],
@@ -272,9 +267,13 @@ class TestNetworkStatistics:
         from research_agent.tools.academic_search import AcademicSearchTools
 
         network = CitationNetwork(
-            seed_paper=CitationPaper(paper_id="seed", title="Seed"),
-            citing_papers=[CitationPaper(paper_id="citing_0", title="Citing")],
-            cited_papers=[CitationPaper(paper_id="cited_0", title="Cited")],
+            seed_paper=CitationPaper(**make_citation_paper(paper_id="seed", title="Seed")),
+            citing_papers=[
+                CitationPaper(**make_citation_paper(paper_id="citing_0", title="Citing"))
+            ],
+            cited_papers=[
+                CitationPaper(**make_citation_paper(paper_id="cited_0", title="Cited"))
+            ],
             highly_connected=[]
         )
 

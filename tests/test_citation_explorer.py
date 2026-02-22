@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from dataclasses import asdict
 
 from tests.test_config import Config, TestPaperIDs, ExpectedResults, Timeouts
+from tests.fixtures import make_citation_paper
 
 
 # ============================================
@@ -400,7 +401,7 @@ class TestSuggestRelated:
             from research_agent.tools.citation_explorer import CitationNetwork, CitationPaper
 
             mock_network = CitationNetwork(
-                seed_paper=CitationPaper(paper_id="seed", title="Seed"),
+                seed_paper=CitationPaper(**make_citation_paper(paper_id="seed", title="Seed")),
                 citing_papers=[],
                 cited_papers=[],
                 highly_connected=[]

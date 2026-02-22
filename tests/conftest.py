@@ -20,6 +20,9 @@ if str(SRC_DIR) not in sys.path:
 # Test configuration
 from tests.test_config import Config
 
+# Shared factory functions
+from tests.fixtures.data import make_citation_paper as _make_citation_paper
+
 
 # ============================================
 # Event Loop Configuration
@@ -111,14 +114,16 @@ def mock_citation_paper():
     from research_agent.tools.citation_explorer import CitationPaper
 
     return CitationPaper(
-        paper_id="test_paper_001",
-        title="Test Paper Title",
-        year=2024,
-        authors=["Test Author"],
-        citation_count=100,
-        abstract="This is a test abstract.",
-        venue="Test Journal",
-        url="https://example.com/paper",
+        **_make_citation_paper(
+            paper_id="test_paper_001",
+            title="Test Paper Title",
+            year=2024,
+            authors=["Test Author"],
+            citation_count=100,
+            abstract="This is a test abstract.",
+            venue="Test Journal",
+            url="https://example.com/paper",
+        )
     )
 
 
@@ -128,29 +133,35 @@ def mock_citation_network():
     from research_agent.tools.citation_explorer import CitationPaper, CitationNetwork
 
     seed = CitationPaper(
-        paper_id="seed_001",
-        title="Seed Paper",
-        year=2020,
-        authors=["Seed Author"],
-        citation_count=500,
+        **_make_citation_paper(
+            paper_id="seed_001",
+            title="Seed Paper",
+            year=2020,
+            authors=["Seed Author"],
+            citation_count=500,
+        )
     )
 
     citing = [
         CitationPaper(
-            paper_id=f"citing_{i}",
-            title=f"Citing Paper {i}",
-            year=2021 + i,
-            citation_count=10 * i,
+            **_make_citation_paper(
+                paper_id=f"citing_{i}",
+                title=f"Citing Paper {i}",
+                year=2021 + i,
+                citation_count=10 * i,
+            )
         )
         for i in range(3)
     ]
 
     cited = [
         CitationPaper(
-            paper_id=f"cited_{i}",
-            title=f"Cited Paper {i}",
-            year=2015 + i,
-            citation_count=100 * i,
+            **_make_citation_paper(
+                paper_id=f"cited_{i}",
+                title=f"Cited Paper {i}",
+                year=2015 + i,
+                citation_count=100 * i,
+            )
         )
         for i in range(3)
     ]

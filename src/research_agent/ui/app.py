@@ -2356,7 +2356,7 @@ def create_app(agent=None):
                     )
                     papers = [
                         {
-                            "paper_id": p.id,
+                            "paper_id": p.paper_id,
                             "title": p.title,
                             "year": p.year,
                             "citation_count": p.citations,
@@ -4088,9 +4088,7 @@ def create_app(agent=None):
                         await search.enrich_papers_oa_status(papers)
 
                         # SPECTER2 embeddings + TLDRs from S2
-                        s2_ids = [p.paper_id if hasattr(p, "paper_id") else p.id
-                                  for p in papers
-                                  if (hasattr(p, "paper_id") and p.paper_id) or (hasattr(p, "id") and p.id)]
+                        s2_ids = [p.paper_id for p in papers if p.paper_id]
                         embeddings = await search.get_paper_embeddings(s2_ids) if s2_ids else {}
 
                         # CrossRef citation gap-filling
@@ -4127,7 +4125,7 @@ def create_app(agent=None):
                     # Also inject TLDRs from papers that have them
                     tldrs = {}
                     for p in (profile.top_papers or []):
-                        pid = p.paper_id if hasattr(p, "paper_id") else p.id
+                        pid = getattr(p, "paper_id", None)
                         tldr = p.tldr if hasattr(p, "tldr") else None
                         if pid and tldr:
                             tldrs[pid] = tldr

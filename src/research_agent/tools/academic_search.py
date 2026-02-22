@@ -23,6 +23,7 @@ from functools import wraps
 import httpx
 
 from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
+from research_agent.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -94,88 +95,11 @@ class RateLimiter:
         return max(0, self.max_calls - len(recent_calls))
 
 
-async def retry_with_backoff(
-    func: Callable,
-    max_retries: int = 3,
-    base_delay: float = 1.0,
-    max_delay: float = 60.0,
-    exponential_base: float = 2.0,
-    jitter: bool = True,
-    retry_on: tuple = (429, 503, 504)
-):
-    """
-    Execute an async function with exponential backoff retry.
-
-    Args:
-        func: Async function to execute (should return httpx.Response)
-        max_retries: Maximum number of retry attempts
-        base_delay: Initial delay in seconds
-        max_delay: Maximum delay in seconds
-        exponential_base: Base for exponential backoff
-        jitter: Add random jitter to prevent thundering herd
-        retry_on: HTTP status codes to retry on
-
-    Returns:
-        The response from the function
-
-    Raises:
-        httpx.HTTPError: If all retries fail
-    """
-    last_exception = None
-
-    for attempt in range(max_retries + 1):
-        try:
-            response = await func()
-
-            # Check if we should retry based on status code
-            if response.status_code in retry_on:
-                if attempt < max_retries:
-                    delay = min(base_delay * (exponential_base ** attempt), max_delay)
-                    if jitter:
-                        delay = delay * (0.5 + random.random())
-
-                    # Check for Retry-After header
-                    retry_after = response.headers.get("Retry-After")
-                    if retry_after:
-                        try:
-                            delay = max(delay, float(retry_after))
-                        except ValueError:
-                            pass
-
-                    logger.warning(
-                        f"Request failed with {response.status_code}, "
-                        f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                else:
-                    response.raise_for_status()
-
-            return response
-
-        except httpx.HTTPError as e:
-            last_exception = e
-            if attempt < max_retries:
-                delay = min(base_delay * (exponential_base ** attempt), max_delay)
-                if jitter:
-                    delay = delay * (0.5 + random.random())
-                logger.warning(
-                    f"Request error: {e}, retrying in {delay:.1f}s "
-                    f"(attempt {attempt + 1}/{max_retries})"
-                )
-                await asyncio.sleep(delay)
-            else:
-                raise
-
-    if last_exception:
-        raise last_exception
-    raise RuntimeError("Unexpected retry loop exit")
-
 
 @dataclass
 class Paper:
     """Standardized paper representation across sources."""
-    id: str
+    paper_id: str
     title: str
     abstract: Optional[str]
     year: Optional[int]
@@ -386,7 +310,7 @@ class AcademicSearchTools:
                     oa_url = item["openAccessPdf"].get("url")
 
                 paper = Paper(
-                    id=item.get("paperId", ""),
+                    paper_id=item.get("paperId", ""),
                     title=item.get("title", ""),
                     abstract=item.get("abstract"),
                     year=item.get("year"),
@@ -518,7 +442,7 @@ class AcademicSearchTools:
                         venue = source.get("display_name")
 
                 paper = Paper(
-                    id=item.get("id", "").replace("https://openalex.org/", ""),
+                    paper_id=item.get("id", "").replace("https://openalex.org/", ""),
                     title=item.get("title", ""),
                     abstract=abstract,
                     year=item.get("publication_year"),
@@ -732,7 +656,7 @@ class AcademicSearchTools:
                     embedding_vec = embedding_data.get("vector")
 
                 paper = Paper(
-                    id=item.get("paperId", ""),
+                    paper_id=item.get("paperId", ""),
                     title=item.get("title", ""),
                     abstract=item.get("abstract"),
                     year=item.get("year"),
@@ -775,7 +699,7 @@ class AcademicSearchTools:
                     oa_url = oa_info["oa_url"]
 
                 paper = Paper(
-                    id=item.get("id", "").replace("https://openalex.org/", ""),
+                    paper_id=item.get("id", "").replace("https://openalex.org/", ""),
                     title=item.get("title", ""),
                     abstract=abstract,
                     year=item.get("publication_year"),

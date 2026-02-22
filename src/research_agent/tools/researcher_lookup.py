@@ -19,7 +19,8 @@ from typing import List, Dict, Optional, Any
 
 import httpx
 
-from research_agent.tools.academic_search import RateLimiter, retry_with_backoff
+from research_agent.tools.academic_search import RateLimiter
+from research_agent.utils.retry import retry_with_backoff
 from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
 
 logger = logging.getLogger(__name__)

@@ -16,7 +16,8 @@ import logging
 
 import httpx
 
-from research_agent.tools.academic_search import AcademicSearchTools, retry_with_backoff
+from research_agent.tools.academic_search import AcademicSearchTools
+from research_agent.utils.retry import retry_with_backoff
 
 if TYPE_CHECKING:
     from research_agent.tools.researcher_lookup import ResearcherProfile, AuthorPaper
