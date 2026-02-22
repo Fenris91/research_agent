@@ -322,10 +322,19 @@ class ResearchAgent:
             return False
 
         cloud_cfg = CLOUD_PROVIDERS[provider_key]
+        base_url = cloud_cfg.get("base_url")
+        if not base_url:
+            logger.error("No base_url configured for provider: %s", provider_key)
+            return False
+
+        if provider_key == "anthropic" and not api_key.startswith("sk-ant-"):
+            logger.warning("Anthropic keys start with 'sk-ant-' — check your key")
+            return False
+
         try:
             self.model = OpenAICompatibleModel(
                 model_name=cloud_cfg["default_model"],
-                base_url=cloud_cfg["base_url"],
+                base_url=base_url,
                 api_key=api_key,
                 fallback_models=cloud_cfg["models"],
             )
@@ -334,7 +343,7 @@ class ResearchAgent:
             self.use_ollama = False
             self._load_model_on_demand = False
             self._openai_api_key = api_key
-            self._openai_base_url = cloud_cfg["base_url"]
+            self._openai_base_url = base_url
             self._openai_fallback_models = cloud_cfg["models"]
             logger.info("Connected to %s via BYOK", cloud_cfg["name"])
             return True
@@ -929,8 +938,8 @@ Keywords:"""
 
         # Search academic databases — OpenAlex primary (2/3 budget), S2 fills remainder
         max_ext = self.config.max_external_results
-        openalex_limit = (max_ext * 2) // 3 or max_ext // 2
-        s2_limit = max_ext - openalex_limit or max_ext // 2
+        openalex_limit = max(1, (max_ext * 2) // 3)
+        s2_limit = max_ext - openalex_limit
 
         if self.academic_search:
             # Run both searches concurrently — each wrapped in its own error handler
