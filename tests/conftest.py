@@ -246,15 +246,25 @@ def mock_academic_search():
     mock = MagicMock()
     mock.SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1"
 
-    # Mock the HTTP client
+    # Mock the HTTP client — get/post must return awaitables for retry_with_backoff
     mock_client = MagicMock()
+    mock_client.get = AsyncMock()
+    mock_client.post = AsyncMock()
 
-    # Create async mock for _get_client that returns sync mock_client
+    # Create async mock for _get_client that returns the mock_client
     async def get_client():
         return mock_client
 
     mock._get_client = get_client
     mock.close = AsyncMock()
+
+    # Mock rate limiter (wait_if_needed is awaited in citation explorer)
+    mock._s2_rate_limiter = MagicMock()
+    mock._s2_rate_limiter.wait_if_needed = AsyncMock()
+
+    # Mock async methods called during ID resolution
+    mock.get_paper_details = AsyncMock(return_value=None)
+    mock.search_semantic_scholar = AsyncMock(return_value=[])
 
     return mock, mock_client
 

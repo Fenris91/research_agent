@@ -83,8 +83,8 @@ class TestCitationExplorerUI:
 
         assert result is not None
         assert len(result) == 2
-        assert result[0] == ["Test Paper 1", 2023, 100, "paper_001"]
-        assert result[1] == ["Test Paper 2", 2024, 50, "paper_002"]
+        assert result[0] == [False, "Test Paper 1", 2023, 100, "paper_001"]
+        assert result[1] == [False, "Test Paper 2", 2024, 50, "paper_002"]
 
     def test_papers_to_dataframe_empty(self):
         """Test _papers_to_dataframe with empty list."""
@@ -109,7 +109,7 @@ class TestCitationExplorerUI:
 
         assert result is not None
         assert len(result) == 1
-        assert result[0] == ["Unknown Title", "Unknown", 0, "paper_001"]
+        assert result[0] == [False, "Unknown Title", "Unknown", 0, "paper_001"]
 
 
 # ============================================
