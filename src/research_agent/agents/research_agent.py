@@ -679,7 +679,7 @@ Keywords:"""
 
             # Search all collections concurrently (ChromaDB is sync, so use executor)
             _empty = {"documents": [], "metadatas": [], "distances": []}
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _search_papers():
                 return self.vector_store.search(

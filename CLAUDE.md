@@ -70,6 +70,7 @@ python -m research_agent.main --mode ui
 ## Docs
 - [ROADMAP.md](docs/ROADMAP.md) — active priorities and future ideas
 - [DATA_SOURCES.md](docs/DATA_SOURCES.md) — API landscape (OpenAlex, Semantic Scholar, CrossRef, Unpaywall, CORE)
+- [STORAGE_PHILOSOPHY.md](docs/STORAGE_PHILOSOPHY.md) — vectors for meaning, tables for facts: the dual-write architecture
 - [CHANGELOG.md](docs/CHANGELOG.md) — implementation history by date
 - [SETUP.md](docs/SETUP.md) — environment setup and troubleshooting
 

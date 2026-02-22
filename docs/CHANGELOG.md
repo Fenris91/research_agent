@@ -2,6 +2,12 @@
 
 Implementation history for the Research Agent project.
 
+## February 22, 2026
+- **SQLite Metadata Index** — dual-write/delegated-read layer (`KBMetadataStore`) alongside ChromaDB; `list_papers()`, `get_stats()`, `list_notes()` now hit SQLite instead of scanning all chunks ([rationale](STORAGE_PHILOSOPHY.md))
+- **Auto-rebuild** — if SQLite index is empty but ChromaDB has data, rebuilds automatically on startup
+- **23 new tests** for `KBMetadataStore` (CRUD, pagination, stats, clear)
+- **asyncio fix** — `get_event_loop()` → `get_running_loop()` in research agent
+
 ## January 28, 2026
 - **Cloud LLM Auto-Detection** — auto-detect API keys (OpenAI, Groq, OpenRouter), Groq free tier default, falls back to Ollama/HuggingFace, `provider: "auto"` in config
 - **Multi-Collection Search** — papers, notes, web sources searched together, results merged by relevance, source type shown in responses
