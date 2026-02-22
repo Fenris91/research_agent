@@ -791,3 +791,16 @@ class ResearchVectorStore:
                 logger.warning(f"Failed to clear SQLite metadata: {e}")
 
         logger.info("Reset vector store")
+
+    def rebuild_metadata(self) -> Dict[str, int]:
+        """Wipe and rebuild the SQLite metadata index from ChromaDB.
+
+        Returns:
+            Stats dict after rebuild (same keys as get_stats()).
+        """
+        if not self._meta:
+            return self.get_stats()
+
+        self._meta.clear()
+        self._meta.rebuild_from_chromadb(self)
+        return self._meta.get_stats()

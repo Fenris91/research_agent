@@ -895,6 +895,9 @@ def create_app(agent=None):
                         delete_paper_btn = gr.Button("Delete", variant="stop", scale=1)
 
                     with gr.Row():
+                        rebuild_index_btn = gr.Button(
+                            "Rebuild Index", variant="secondary", scale=1
+                        )
                         reset_kb_btn = gr.Button("Reset KB", variant="stop", scale=1)
 
                     with gr.Row():
@@ -1922,6 +1925,16 @@ def create_app(agent=None):
                 year_from, year_to, min_citations, context_state
             )
             return status, stats, table
+
+        def rebuild_metadata_index(year_from=None, year_to=None, min_citations=0, context_state=None):
+            """Rebuild SQLite metadata index from ChromaDB."""
+            store, _, _ = _get_kb_resources()
+            rebuilt = store.rebuild_metadata()
+            stats, table = refresh_stats_and_table(
+                year_from, year_to, min_citations, context_state
+            )
+            n = rebuilt.get("total_papers", 0) + rebuilt.get("total_notes", 0) + rebuilt.get("total_web_sources", 0)
+            return f"Index rebuilt: {rebuilt.get('total_papers', 0)} papers, {rebuilt.get('total_notes', 0)} notes, {rebuilt.get('total_web_sources', 0)} web sources.", stats, table
 
         def reset_kb(year_from=None, year_to=None, min_citations=0, context_state=None):
             """Reset the knowledge base."""
@@ -3394,6 +3407,12 @@ def create_app(agent=None):
                 context_state,
             ],
             outputs=[delete_status, kb_stats, papers_table],
+        )
+
+        rebuild_index_btn.click(
+            rebuild_metadata_index,
+            inputs=[year_from_kb, year_to_kb, min_citations_kb, context_state],
+            outputs=[reset_kb_status, kb_stats, papers_table],
         )
 
         reset_kb_btn.click(
