@@ -114,7 +114,13 @@ class ResearchAgent:
         self._openai_compat_api_key = openai_compat_api_key
         self._ollama_default_model = ollama_model
 
-        if self.provider in {"openai", "openai_compatible"}:
+        if self.provider == "none":
+            # No LLM — retrieval-only mode
+            self.model = None
+            self._load_model_on_demand = False
+            self.use_ollama = False
+            print("Running in retrieval-only mode (no LLM)")
+        elif self.provider in {"openai", "openai_compatible"}:
             base_url = (
                 self._openai_compat_base_url
                 if self.provider == "openai_compatible"
@@ -206,6 +212,8 @@ class ResearchAgent:
 
     def get_current_model(self) -> str:
         """Get the name of the currently active model."""
+        if self.provider == "none":
+            return "retrieval-only"
         if self.model and self.provider in {"ollama", "openai", "openai_compatible"}:
             return self.model.model_name
         elif self.tokenizer:
@@ -225,7 +233,7 @@ class ResearchAgent:
 
     def switch_provider(self, provider: str) -> bool:
         """Switch the LLM provider and reinitialize the model wrapper."""
-        if provider not in {"ollama", "openai", "openai_compatible", "huggingface"}:
+        if provider not in {"ollama", "openai", "openai_compatible", "huggingface", "none"}:
             logger.warning("Unknown provider: %s", provider)
             return False
 
@@ -306,6 +314,35 @@ class ResearchAgent:
                 self.model = prev_model
                 self.tokenizer = prev_tokenizer
                 self._load_model_on_demand = prev_load_on_demand
+
+    def connect_provider(self, provider_key: str, api_key: str) -> bool:
+        """Connect to a cloud provider with a user-supplied API key (BYOK)."""
+        from research_agent.main import CLOUD_PROVIDERS
+
+        if provider_key not in CLOUD_PROVIDERS:
+            logger.warning("Unknown BYOK provider: %s", provider_key)
+            return False
+
+        cloud_cfg = CLOUD_PROVIDERS[provider_key]
+        try:
+            self.model = OpenAICompatibleModel(
+                model_name=cloud_cfg["default_model"],
+                base_url=cloud_cfg["base_url"],
+                api_key=api_key,
+                fallback_models=cloud_cfg["models"],
+            )
+            self.tokenizer = None
+            self.provider = "openai"
+            self.use_ollama = False
+            self._load_model_on_demand = False
+            self._openai_api_key = api_key
+            self._openai_base_url = cloud_cfg["base_url"]
+            self._openai_fallback_models = cloud_cfg["models"]
+            logger.info("Connected to %s via BYOK", cloud_cfg["name"])
+            return True
+        except Exception as e:
+            logger.error("BYOK connection failed for %s: %s", provider_key, e)
+            return False
 
     def _test_vram_on_initialization(self):
         """

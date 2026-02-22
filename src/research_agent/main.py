@@ -27,6 +27,13 @@ CLOUD_PROVIDERS = {
         "default_model": "gpt-4o-mini",
         "models": ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1", "gpt-4o"],
     },
+    "anthropic": {
+        "name": "Anthropic (Claude)",
+        "base_url": "https://api.anthropic.com/v1/",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "default_model": "claude-sonnet-4-6",
+        "models": ["claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-6"],
+    },
     "groq": {
         "name": "Groq (Free Tier)",
         "base_url": "https://api.groq.com/openai/v1",
@@ -60,10 +67,12 @@ def detect_available_provider(config: dict) -> Tuple[str, Optional[dict]]:
 
     Priority:
     1. OpenAI (if OPENAI_API_KEY is set)
-    2. Groq (if GROQ_API_KEY is set - free tier!)
-    3. OpenRouter (if OPENROUTER_API_KEY is set)
-    4. Ollama (if server is reachable)
-    5. HuggingFace (local, requires GPU)
+    2. Anthropic (if ANTHROPIC_API_KEY is set)
+    3. Groq (if GROQ_API_KEY is set - free tier!)
+    4. OpenRouter (if OPENROUTER_API_KEY is set)
+    5. Ollama (if server is reachable)
+    6. HuggingFace (local, requires GPU)
+    7. None (retrieval-only mode)
 
     Returns:
         Tuple of (provider_name, provider_config) or (provider_name, None) for local providers
@@ -71,7 +80,7 @@ def detect_available_provider(config: dict) -> Tuple[str, Optional[dict]]:
     model_cfg = config.get("model", {}) if isinstance(config, dict) else {}
 
     # Check cloud providers in priority order
-    for provider_key in ["openai", "groq", "openrouter"]:
+    for provider_key in ["openai", "anthropic", "groq", "openrouter"]:
         provider = CLOUD_PROVIDERS[provider_key]
         api_key = os.getenv(provider["api_key_env"])
         if api_key:
@@ -84,9 +93,19 @@ def detect_available_provider(config: dict) -> Tuple[str, Optional[dict]]:
         print(f"  Found Ollama server at {ollama_base_url}")
         return "ollama", None
 
-    # Fallback to HuggingFace (local)
-    print("  No cloud providers found, will use local HuggingFace models")
-    return "huggingface", None
+    # Check if GPU is available for HuggingFace
+    try:
+        import torch
+        if torch.cuda.is_available():
+            print("  No cloud providers found, will use local HuggingFace models")
+            return "huggingface", None
+    except ImportError:
+        pass
+
+    # No providers available - retrieval-only mode
+    print("  No LLM providers available — running in retrieval-only mode")
+    print("  Tip: Get a FREE Groq API key at https://console.groq.com/keys")
+    return "none", None
 
 
 def main():
@@ -293,6 +312,7 @@ def build_agent_from_config(config: dict):
             print(f"Warning: {provider} selected but {cloud_cfg['api_key_env']} not set")
 
     use_ollama = provider == "ollama"
+    use_none = provider == "none"
     ollama_base_url = model_cfg.get("ollama_base_url", "http://localhost:11434")
     ollama_model = model_cfg.get("ollama_model") or model_cfg.get("name") or "mistral"
 

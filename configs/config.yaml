@@ -8,18 +8,22 @@ model:
   # Provider options:
   # - "auto" (recommended) - Auto-detect best available provider
   # - "openai" - OpenAI API (requires OPENAI_API_KEY)
+  # - "anthropic" - Anthropic Claude (requires ANTHROPIC_API_KEY)
   # - "groq" - Groq API with free tier (requires GROQ_API_KEY)
   # - "openrouter" - OpenRouter with free models (requires OPENROUTER_API_KEY)
   # - "ollama" - Local Ollama server
   # - "huggingface" - Local HuggingFace models (requires GPU)
   # - "openai_compatible" - Custom OpenAI-compatible endpoint
+  # - "none" - Retrieval-only mode (no LLM, still searches and formats results)
   #
   # With "auto", the agent will check for API keys in order:
   # 1. OPENAI_API_KEY -> use OpenAI
-  # 2. GROQ_API_KEY -> use Groq (free tier!)
-  # 3. OPENROUTER_API_KEY -> use OpenRouter (has free models)
-  # 4. Ollama server -> use Ollama if running
-  # 5. Fall back to HuggingFace (requires GPU)
+  # 2. ANTHROPIC_API_KEY -> use Anthropic (Claude)
+  # 3. GROQ_API_KEY -> use Groq (free tier!)
+  # 4. OPENROUTER_API_KEY -> use OpenRouter (has free models)
+  # 5. Ollama server -> use Ollama if running
+  # 6. GPU available -> use HuggingFace
+  # 7. Nothing -> retrieval-only mode (still works!)
 
   provider: "groq"
 
@@ -117,7 +121,7 @@ search:
   # Web search for grey literature
   web_search:
     enabled: true
-    provider: "tavily"  # "tavily" or "serper"
+    provider: "duckduckgo"  # "duckduckgo" (free, no key), "tavily", or "serper"
     # API key loaded from environment: TAVILY_API_KEY or SERPER_API_KEY
 
 # ============================================
