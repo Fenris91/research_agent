@@ -8,7 +8,10 @@ Tests are organized into:
 """
 
 import pytest
-import pytest_asyncio
+try:
+    import pytest_asyncio
+except ImportError:
+    pytest.skip("pytest-asyncio not installed", allow_module_level=True)
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from dataclasses import asdict
