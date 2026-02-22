@@ -21,8 +21,9 @@ import httpx
 
 from research_agent.models.paper import BasePaper
 from research_agent.tools.academic_search import RateLimiter
-from research_agent.utils.retry import retry_with_backoff
 from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
+from research_agent.utils.openalex import reconstruct_abstract
+from research_agent.utils.retry import retry_with_backoff
 from research_agent.utils.observability import timed
 
 logger = logging.getLogger(__name__)
@@ -382,21 +383,7 @@ class ResearcherLookup:
 
     def _reconstruct_abstract(self, inverted_index: Optional[dict]) -> Optional[str]:
         """Reconstruct abstract from OpenAlex inverted index format."""
-        if not inverted_index:
-            return None
-
-        try:
-            # Create list of (position, word) tuples
-            words = []
-            for word, positions in inverted_index.items():
-                for pos in positions:
-                    words.append((pos, word))
-
-            # Sort by position and join
-            words.sort(key=lambda x: x[0])
-            return " ".join(word for _, word in words)
-        except Exception:
-            return None
+        return reconstruct_abstract(inverted_index)
 
     def _extract_openalex_fields(self, work: dict, limit: int = 5) -> List[str]:
         """Extract high-signal fields from OpenAlex work concepts."""

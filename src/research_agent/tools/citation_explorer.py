@@ -18,6 +18,7 @@ import httpx
 
 from research_agent.models.paper import BasePaper
 from research_agent.tools.academic_search import AcademicSearchTools
+from research_agent.utils.openalex import normalize_openalex_id, is_openalex_id
 from research_agent.utils.retry import retry_with_backoff
 
 if TYPE_CHECKING:
@@ -621,22 +622,13 @@ class CitationExplorer:
             logger.warning(f"Error getting cited papers for {paper_id}: {e}")
             return []
 
-    def _normalize_openalex_id(self, paper_id: str) -> str:
-        if paper_id.startswith("https://openalex.org/"):
-            return paper_id.replace("https://openalex.org/", "")
-        return paper_id
-
-    def _is_openalex_id(self, paper_id: str) -> bool:
-        normalized = self._normalize_openalex_id(paper_id)
-        return normalized.startswith("W")
-
     async def _resolve_to_s2_id(self, paper_id: str) -> Optional[str]:
         """Resolve OpenAlex IDs to Semantic Scholar IDs when possible."""
         if not paper_id:
             return None
 
-        normalized = self._normalize_openalex_id(paper_id)
-        if not self._is_openalex_id(normalized):
+        normalized = normalize_openalex_id(paper_id)
+        if not is_openalex_id(normalized):
             return normalized
 
         try:

@@ -24,6 +24,7 @@ import httpx
 
 from research_agent.models.paper import BasePaper
 from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
+from research_agent.utils.openalex import reconstruct_abstract
 from research_agent.utils.retry import retry_with_backoff
 from research_agent.utils.observability import timed
 
@@ -461,24 +462,8 @@ class AcademicSearchTools:
             return []
 
     def _reconstruct_abstract(self, inverted_index: Optional[Dict]) -> Optional[str]:
-        """
-        Reconstruct abstract from OpenAlex inverted index format.
-
-        OpenAlex stores abstracts as {word: [positions]} for compression.
-        """
-        if not inverted_index:
-            return None
-
-        try:
-            word_positions = []
-            for word, positions in inverted_index.items():
-                for pos in positions:
-                    word_positions.append((pos, word))
-
-            word_positions.sort()
-            return " ".join([word for _, word in word_positions])
-        except Exception:
-            return None
+        """Reconstruct abstract from OpenAlex inverted index format."""
+        return reconstruct_abstract(inverted_index)
 
     async def get_open_access_pdf(self, doi: str) -> Optional[str]:
         """

@@ -15,6 +15,7 @@ import gradio as gr
 
 from research_agent.explorer import ExplorerRenderer, GraphBuilder, get_mock_graph_data
 from research_agent.utils.config import load_config as _load_config
+from research_agent.utils.openalex import SOURCE_LABELS_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -1310,14 +1311,6 @@ def create_app(agent=None):
                         if s.get("title") and s.get("title") != "Unknown"
                     ]
                     if named_sources:
-                        source_labels = {
-                            "local_kb": "KB",
-                            "local_note": "note",
-                            "local_web": "web",
-                            "semantic_scholar": "S2",
-                            "openalex": "OA",
-                            "web": "web",
-                        }
                         seen_titles = set()
                         source_parts = []
                         for s in named_sources:
@@ -1325,7 +1318,7 @@ def create_app(agent=None):
                             if title in seen_titles:
                                 continue
                             seen_titles.add(title)
-                            tag = source_labels.get(s.get("source", ""), "")
+                            tag = SOURCE_LABELS_SHORT.get(s.get("source", ""), "")
                             year = s.get("year")
                             part = f"{title}"
                             if year:

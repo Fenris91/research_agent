@@ -17,6 +17,7 @@ import operator
 
 from langgraph.graph import StateGraph, END
 
+from ..utils.openalex import SOURCE_LABELS, SOURCE_LABELS_LONG
 from ..models.llm_utils import (
     get_qlora_pipeline,
     get_ollama_pipeline,
@@ -1023,16 +1024,6 @@ User: {query}
 
 Response:"""
 
-        # Map source types to human-readable labels
-        source_labels = {
-            "local_kb": "Knowledge Base Paper",
-            "local_note": "User Research Note",
-            "local_web": "Saved Web Source",
-            "semantic_scholar": "Semantic Scholar",
-            "openalex": "OpenAlex",
-            "web": "Web Search",
-        }
-
         # Build context section if we have selection context
         context_section = ""
         if current_researcher or current_paper_id:
@@ -1067,7 +1058,7 @@ Response:"""
             year = result.get("year", "")
             content = str(result.get("content") or "")[:800]
             source = result.get("source", "unknown")
-            source_label = source_labels.get(source, source)
+            source_label = SOURCE_LABELS_LONG.get(source, source)
             tags = result.get("tags", "")
             url = result.get("url", "")
 
@@ -1088,60 +1079,53 @@ Response:"""
             sources_text = "\n(No sources found)"
 
         # Build prompt based on query type
-        if query_type == "literature_review":
-            instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
+        _KB_PREAMBLE = (
+            "You are a research assistant with access to a personal knowledge base of ingested papers.\n\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ "
+            "from how they are referenced in the query (e.g., \"Envisaging the Future of Cities\" IS the World Cities Report 2022).\n"
+            "- Answer based on the CONTENT of the chunks provided, not by matching title strings.\n"
+            "- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.\n"
+            "- NEVER say a topic \"is not mentioned\" just because a title string doesn't match. Read the actual text excerpts.\n"
+        )
+        _MANDATORY = (
+            "\nMANDATORY: If sources are provided below, you MUST reference their content in your answer. "
+            "Start by addressing the question using the source excerpts. "
+            "Do NOT say \"no information found\" or \"not mentioned\" when sources are present."
+        )
 
-CRITICAL INSTRUCTIONS:
-- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
-- Answer based on the CONTENT of the chunks provided, not by matching title strings.
-- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
-- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
+        _QUERY_INSTRUCTIONS = {
+            "literature_review": (
+                "\nProvide a comprehensive literature review based on the source content:\n"
+                "1. Overview of the research landscape\n"
+                "2. Key themes and findings from the sources\n"
+                "3. Notable contributions from each relevant source\n"
+                "4. Research gaps or future directions\n\n"
+                "Cite sources by their title using [1], [2], etc."
+            ),
+            "factual": (
+                "\nProvide a precise, factual answer based on the source content.\n"
+                "Be specific and cite your sources using [1], [2], etc.\n"
+                "If sources conflict, note the disagreement."
+            ),
+            "analysis": (
+                "\nProvide a critical analysis based on the source content.\n"
+                "Compare different perspectives, evaluate evidence, and draw conclusions.\n"
+                "Cite sources using [1], [2], etc."
+            ),
+        }
 
-Provide a comprehensive literature review based on the source content:
-1. Overview of the research landscape
-2. Key themes and findings from the sources
-3. Notable contributions from each relevant source
-4. Research gaps or future directions
-
-Cite sources by their title using [1], [2], etc.
-
-MANDATORY: If sources are provided below, you MUST reference their content in your answer. Start by addressing the question using the source excerpts. Do NOT say "no information found" or "not mentioned" when sources are present."""
-
-        elif query_type == "factual":
-            instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
-
-CRITICAL INSTRUCTIONS:
-- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
-- Answer based on the CONTENT of the chunks provided, not by matching title strings.
-- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
-- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
-
-Provide a precise, factual answer based on the source content.
-Be specific and cite your sources using [1], [2], etc.
-If sources conflict, note the disagreement.
-
-MANDATORY: If sources are provided below, you MUST reference their content in your answer. Start by addressing the question using the source excerpts. Do NOT say "no information found" or "not mentioned" when sources are present."""
-
-        elif query_type == "analysis":
-            instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
-
-CRITICAL INSTRUCTIONS:
-- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
-- Answer based on the CONTENT of the chunks provided, not by matching title strings.
-- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
-- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
-
-Provide a critical analysis based on the source content.
-Compare different perspectives, evaluate evidence, and draw conclusions.
-Cite sources using [1], [2], etc.
-
-MANDATORY: If sources are provided below, you MUST reference their content in your answer. Start by addressing the question using the source excerpts. Do NOT say "no information found" or "not mentioned" when sources are present."""
-
+        if query_type in _QUERY_INSTRUCTIONS:
+            instruction = _KB_PREAMBLE + _QUERY_INSTRUCTIONS[query_type] + _MANDATORY
         else:  # general — but we have sources (casual w/o sources handled above)
-            instruction = """You are a helpful research assistant. The user asked a general question and some potentially relevant sources were found in the knowledge base.
-
-If the sources below are relevant to the question, use them to inform your answer and cite using [1], [2], etc.
-If they are not relevant to the question, answer directly using your own knowledge and ignore the sources."""
+            instruction = (
+                "You are a helpful research assistant. The user asked a general question "
+                "and some potentially relevant sources were found in the knowledge base.\n\n"
+                "If the sources below are relevant to the question, use them to inform your answer "
+                "and cite using [1], [2], etc.\n"
+                "If they are not relevant to the question, answer directly using your own knowledge "
+                "and ignore the sources."
+            )
 
         prompt = f"""{instruction}{context_section}
 
@@ -1162,16 +1146,6 @@ Response:"""
                 "(LLM synthesis is currently unavailable.)"
             )
 
-        # Map source types to human-readable labels
-        source_labels = {
-            "local_kb": "Knowledge Base",
-            "local_note": "Research Note",
-            "local_web": "Saved Web Source",
-            "semantic_scholar": "Semantic Scholar",
-            "openalex": "OpenAlex",
-            "web": "Web Search",
-        }
-
         response = (
             "I retrieved relevant sources, but an LLM is not available to synthesize "
             "them into a narrative answer right now. Here are the top retrieved "
@@ -1183,7 +1157,7 @@ Response:"""
             authors = result.get("authors", "")
             year = result.get("year", "")
             source = result.get("source", "")
-            source_label = source_labels.get(source, source)
+            source_label = SOURCE_LABELS.get(source, source)
             content = str(result.get("content", ""))[:200]
             tags = result.get("tags", "")
             url = result.get("url", "")
