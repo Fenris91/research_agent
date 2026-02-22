@@ -37,10 +37,8 @@ class ResearchState(TypedDict):
     current_query: str
     search_query: str  # Concise keywords extracted for API searches
     query_type: str  # "literature_review", "factual", "analysis", "general"
-    search_results: List[Dict]
     local_results: List[Dict]
     external_results: List[Dict]
-    context: str
     should_search_external: bool
     candidates_for_ingestion: List[Dict]
     final_answer: str
@@ -360,7 +358,7 @@ class ResearchAgent:
         """
         try:
             if self.provider in {"ollama", "openai", "openai_compatible"}:
-                # Use Ollama
+                # Use API-based model (Ollama, OpenAI, Groq, Anthropic, etc.)
                 return self.model.generate(
                     prompt, max_tokens=max_tokens, temperature=0.7
                 )
@@ -880,65 +878,84 @@ Keywords:"""
             query = f"{current_researcher} {query}"
             logger.info(f"Added researcher context to search query: {query}")
 
-        # Search academic databases
+        # Extract year filters from config for API calls
+        year_range = self.config.year_range
+        from_year = year_range[0] if year_range else None
+        to_year = year_range[1] if year_range else None
+
+        # Helper: normalize title for dedup (lowercase, first 80 chars)
+        def _title_key(title: str) -> str:
+            return (title or "").strip().lower()[:80]
+
+        seen_dois = set()
+        seen_titles = set()
+
+        def _is_duplicate(paper) -> bool:
+            if paper.doi and paper.doi in seen_dois:
+                return True
+            tk = _title_key(paper.title)
+            if tk and tk in seen_titles:
+                return True
+            return False
+
+        def _mark_seen(paper):
+            if paper.doi:
+                seen_dois.add(paper.doi)
+            tk = _title_key(paper.title)
+            if tk:
+                seen_titles.add(tk)
+
+        def _paper_to_dict(paper, source_label: str) -> dict:
+            return {
+                "content": paper.abstract or "",
+                "title": paper.title,
+                "authors": ", ".join(paper.authors) if paper.authors else "",
+                "year": paper.year,
+                "paper_id": paper.paper_id,
+                "doi": paper.doi,
+                "citation_count": paper.citation_count or 0,
+                "url": paper.url,
+                "source": source_label,
+            }
+
+        # Search academic databases — OpenAlex primary (2/3 budget), S2 fills remainder
+        max_ext = self.config.max_external_results
+        openalex_limit = (max_ext * 2) // 3 or max_ext // 2
+        s2_limit = max_ext - openalex_limit or max_ext // 2
+
         if self.academic_search:
             try:
-                # Search Semantic Scholar
+                # OpenAlex first — better social-science coverage, higher rate limits
+                openalex_papers = await self.academic_search.search_openalex(
+                    query, limit=openalex_limit,
+                    from_year=from_year, to_year=to_year,
+                )
+
+                for paper in openalex_papers:
+                    citation_count = paper.citation_count or 0
+                    if min_citations and citation_count < min_citations:
+                        continue
+                    if _is_duplicate(paper):
+                        continue
+                    _mark_seen(paper)
+                    external_results.append(_paper_to_dict(paper, "openalex"))
+
+                # Semantic Scholar — fills remaining budget
                 papers = await self.academic_search.search_semantic_scholar(
-                    query, limit=self.config.max_external_results // 2
+                    query, limit=s2_limit,
+                    year_range=year_range,
                 )
 
                 for paper in papers:
                     citation_count = paper.citation_count or 0
                     if min_citations and citation_count < min_citations:
                         continue
-                    external_results.append(
-                        {
-                            "content": paper.abstract or "",
-                            "title": paper.title,
-                            "authors": ", ".join(paper.authors)
-                            if paper.authors
-                            else "",
-                            "year": paper.year,
-                            "paper_id": paper.paper_id,
-                            "doi": paper.doi,
-                            "citation_count": citation_count,
-                            "url": paper.url,
-                            "source": "semantic_scholar",
-                        }
-                    )
-
-                # Search OpenAlex
-                openalex_papers = await self.academic_search.search_openalex(
-                    query, limit=self.config.max_external_results // 2
-                )
-
-                for paper in openalex_papers:
-                    # Avoid duplicates by DOI
-                    if paper.doi and any(
-                        r.get("doi") == paper.doi for r in external_results
-                    ):
+                    if _is_duplicate(paper):
                         continue
-                    citation_count = paper.citation_count or 0
-                    if min_citations and citation_count < min_citations:
-                        continue
-                    external_results.append(
-                        {
-                            "content": paper.abstract or "",
-                            "title": paper.title,
-                            "authors": ", ".join(paper.authors)
-                            if paper.authors
-                            else "",
-                            "year": paper.year,
-                            "paper_id": paper.paper_id,
-                            "doi": paper.doi,
-                            "citation_count": citation_count,
-                            "url": paper.url,
-                            "source": "openalex",
-                        }
-                    )
+                    _mark_seen(paper)
+                    external_results.append(_paper_to_dict(paper, "semantic_scholar"))
 
-                logger.info(f"Found {len(external_results)} academic results")
+                logger.info(f"Found {len(external_results)} academic results (OpenAlex: {openalex_limit}, S2: {s2_limit})")
 
             except Exception as e:
                 logger.error(f"Academic search error: {e}")
@@ -1010,12 +1027,6 @@ Keywords:"""
                 "final_answer": "Hello! I'm your research assistant. I can help you search your knowledge base, find academic papers, and analyze research topics. What would you like to explore?",
             }
 
-        if not all_results and not self.model:
-            return {
-                **state,
-                "final_answer": "I couldn't find relevant information and no LLM is available for generation.",
-            }
-
         # Build synthesis prompt with context
         prompt = self._build_synthesis_prompt(
             query, query_type, all_results,
@@ -1025,19 +1036,22 @@ Keywords:"""
             chat_context_items=state.get("chat_context_items"),
         )
 
-        # Generate response
+        # Generate response — LLM synthesis or formatted fallback
         try:
             if self.model:
                 answer = self.infer(prompt, max_tokens=1024)
             else:
-                # Fallback: format results without LLM
                 answer = self._format_results_without_llm(query, all_results)
 
             logger.info("Synthesis complete")
 
         except Exception as e:
             logger.error(f"Synthesis error: {e}")
-            answer = f"Error generating response: {str(e)}"
+            # Graceful fallback: show formatted results instead of an error
+            if all_results:
+                answer = self._format_results_without_llm(query, all_results)
+            else:
+                answer = f"Error generating response: {str(e)}"
 
         return {**state, "final_answer": answer}
 
@@ -1061,30 +1075,31 @@ User: {query}
 
 Response:"""
 
-        # Build context section if we have selection context
+        # Build context section from selection + pinned/chat items
+        context_parts = []
+        if current_researcher:
+            context_parts.append(f"The user is currently focused on researcher: {current_researcher}")
+        if current_paper_id:
+            # Find the paper title from results if possible
+            paper_title = None
+            for r in results:
+                if r.get("paper_id") == current_paper_id:
+                    paper_title = r.get("title")
+                    break
+            if paper_title:
+                context_parts.append(f"The user is currently focused on the paper: \"{paper_title}\"")
+            else:
+                context_parts.append(f"The user has selected a specific paper (ID: {current_paper_id[:20]}...)")
+        # Add pinned/active context items (independent of researcher/paper selection)
+        auth_items = auth_context_items or []
+        chat_items = chat_context_items or []
+        if auth_items:
+            context_parts.append(f"The user has pinned these topics: {', '.join(auth_items)}")
+        if chat_items:
+            context_parts.append(f"Recent conversation topics include: {', '.join(chat_items)}")
+
         context_section = ""
-        if current_researcher or current_paper_id:
-            context_parts = []
-            if current_researcher:
-                context_parts.append(f"The user is currently focused on researcher: {current_researcher}")
-            if current_paper_id:
-                # Find the paper title from results if possible
-                paper_title = None
-                for r in results:
-                    if r.get("paper_id") == current_paper_id:
-                        paper_title = r.get("title")
-                        break
-                if paper_title:
-                    context_parts.append(f"The user is currently focused on the paper: \"{paper_title}\"")
-                else:
-                    context_parts.append(f"The user has selected a specific paper (ID: {current_paper_id[:20]}...)")
-            # Add pinned/active context items if available
-            auth_items = auth_context_items or []
-            chat_items = chat_context_items or []
-            if auth_items:
-                context_parts.append(f"The user has pinned these topics: {', '.join(auth_items)}")
-            if chat_items:
-                context_parts.append(f"Recent conversation topics include: {', '.join(chat_items)}")
+        if context_parts:
             context_section = "\n\nContext: " + ". ".join(context_parts) + ". Prioritize information relevant to this context."
 
         # Format sources
@@ -1294,10 +1309,8 @@ Response:"""
             "current_query": user_query,
             "search_query": "",
             "query_type": "general",
-            "search_results": [],
             "local_results": [],
             "external_results": [],
-            "context": "",
             "should_search_external": True,
             "candidates_for_ingestion": [],
             "final_answer": "",
@@ -1347,8 +1360,8 @@ Response:"""
 
         except Exception as e:
             logger.error(f"Graph execution error: {e}")
-            # Fallback to direct inference
-            if self.model and (self.tokenizer or self.use_ollama):
+            # Fallback to direct inference (works for all provider types)
+            if self.model:
                 result["answer"] = self.infer(user_query, max_tokens=1024)
                 result["fallback"] = True
             else:
