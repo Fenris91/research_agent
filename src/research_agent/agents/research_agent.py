@@ -668,39 +668,48 @@ Keywords:"""
                 if context_paper:
                     logger.info(f"Using paper context: {context_paper.get('metadata', {}).get('title', 'Unknown')[:50]}")
 
-            # Search all collections: papers, notes, and web_sources
-            # Papers get year filter, others don't
-            paper_results = self.vector_store.search(
-                query_embedding=query_embedding,
-                collection="papers",
-                n_results=self.config.max_local_results * 2,  # Get more for re-ranking
-                filter_dict=filter_dict,
-                query_text=query,
+            # Search all collections concurrently (ChromaDB is sync, so use executor)
+            _empty = {"documents": [], "metadatas": [], "distances": []}
+            loop = asyncio.get_event_loop()
+
+            def _search_papers():
+                return self.vector_store.search(
+                    query_embedding=query_embedding,
+                    collection="papers",
+                    n_results=self.config.max_local_results * 2,
+                    filter_dict=filter_dict,
+                    query_text=query,
+                )
+
+            def _search_notes():
+                try:
+                    return self.vector_store.search(
+                        query_embedding=query_embedding,
+                        collection="notes",
+                        n_results=max(3, self.config.max_local_results // 2),
+                        query_text=query,
+                    )
+                except Exception as e:
+                    logger.debug(f"Notes search skipped: {e}")
+                    return _empty
+
+            def _search_web():
+                try:
+                    return self.vector_store.search(
+                        query_embedding=query_embedding,
+                        collection="web_sources",
+                        n_results=max(3, self.config.max_local_results // 2),
+                        query_text=query,
+                    )
+                except Exception as e:
+                    logger.debug(f"Web sources search skipped: {e}")
+                    return _empty
+
+            paper_results, notes_results, web_results = await asyncio.gather(
+                loop.run_in_executor(None, _search_papers),
+                loop.run_in_executor(None, _search_notes),
+                loop.run_in_executor(None, _search_web),
             )
-
-            # Search notes collection (gracefully handle empty/incompatible collections)
-            try:
-                notes_results = self.vector_store.search(
-                    query_embedding=query_embedding,
-                    collection="notes",
-                    n_results=max(3, self.config.max_local_results // 2),
-                    query_text=query,
-                )
-            except Exception as e:
-                logger.debug(f"Notes search skipped: {e}")
-                notes_results = {"documents": [], "metadatas": [], "distances": []}
-
-            # Search web sources collection (gracefully handle empty/incompatible collections)
-            try:
-                web_results = self.vector_store.search(
-                    query_embedding=query_embedding,
-                    collection="web_sources",
-                    n_results=max(3, self.config.max_local_results // 2),
-                    query_text=query,
-                )
-            except Exception as e:
-                logger.debug(f"Web sources search skipped: {e}")
-                web_results = {"documents": [], "metadatas": [], "distances": []}
 
             # Format paper results
             for i, doc in enumerate(paper_results.get("documents", [])):
@@ -924,41 +933,52 @@ Keywords:"""
         s2_limit = max_ext - openalex_limit or max_ext // 2
 
         if self.academic_search:
-            try:
-                # OpenAlex first — better social-science coverage, higher rate limits
-                openalex_papers = await self.academic_search.search_openalex(
-                    query, limit=openalex_limit,
-                    from_year=from_year, to_year=to_year,
-                )
+            # Run both searches concurrently — each wrapped in its own error handler
+            async def _fetch_openalex():
+                try:
+                    return await self.academic_search.search_openalex(
+                        query, limit=openalex_limit,
+                        from_year=from_year, to_year=to_year,
+                    )
+                except Exception as e:
+                    logger.error(f"OpenAlex search error: {e}")
+                    return []
 
-                for paper in openalex_papers:
-                    citation_count = paper.citation_count or 0
-                    if min_citations and citation_count < min_citations:
-                        continue
-                    if _is_duplicate(paper):
-                        continue
-                    _mark_seen(paper)
-                    external_results.append(_paper_to_dict(paper, "openalex"))
+            async def _fetch_s2():
+                try:
+                    return await self.academic_search.search_semantic_scholar(
+                        query, limit=s2_limit,
+                        year_range=year_range,
+                    )
+                except Exception as e:
+                    logger.error(f"Semantic Scholar search error: {e}")
+                    return []
 
-                # Semantic Scholar — fills remaining budget
-                papers = await self.academic_search.search_semantic_scholar(
-                    query, limit=s2_limit,
-                    year_range=year_range,
-                )
+            openalex_papers, s2_papers = await asyncio.gather(
+                _fetch_openalex(), _fetch_s2()
+            )
 
-                for paper in papers:
-                    citation_count = paper.citation_count or 0
-                    if min_citations and citation_count < min_citations:
-                        continue
-                    if _is_duplicate(paper):
-                        continue
-                    _mark_seen(paper)
-                    external_results.append(_paper_to_dict(paper, "semantic_scholar"))
+            # Process OpenAlex results first (primary source)
+            for paper in openalex_papers:
+                citation_count = paper.citation_count or 0
+                if min_citations and citation_count < min_citations:
+                    continue
+                if _is_duplicate(paper):
+                    continue
+                _mark_seen(paper)
+                external_results.append(_paper_to_dict(paper, "openalex"))
 
-                logger.info(f"Found {len(external_results)} academic results (OpenAlex: {openalex_limit}, S2: {s2_limit})")
+            # Then S2 results (fills remaining, deduped)
+            for paper in s2_papers:
+                citation_count = paper.citation_count or 0
+                if min_citations and citation_count < min_citations:
+                    continue
+                if _is_duplicate(paper):
+                    continue
+                _mark_seen(paper)
+                external_results.append(_paper_to_dict(paper, "semantic_scholar"))
 
-            except Exception as e:
-                logger.error(f"Academic search error: {e}")
+            logger.info(f"Found {len(external_results)} academic results (OpenAlex: {len(openalex_papers)}, S2: {len(s2_papers)})")
 
         # Search web if configured and query type warrants it
         if self.web_search and self.config.include_web_search:

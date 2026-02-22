@@ -517,6 +517,10 @@ def create_app(agent=None):
       if (e.data && e.data.type === "explorer-action") {
         setBusValue("#explorer-action-bus", JSON.stringify(e.data.payload) + ":" + Date.now());
       }
+      if (e.data && e.data.type === "explorer-select") {
+        var payload = {nodeType: e.data.nodeType, nodeId: e.data.nodeId, label: e.data.label};
+        setBusValue("#explorer-select-bus", JSON.stringify(payload) + ":" + Date.now());
+      }
     });
     </script>
     """
@@ -627,6 +631,7 @@ def create_app(agent=None):
         ctx_items_json = gr.Textbox(value="", visible=False, elem_id="ctx-items-json")
         explorer_action_bus = gr.Textbox(value="", visible=False, elem_id="explorer-action-bus")
         explorer_action_result = gr.Textbox(value="", visible=False, elem_id="explorer-action-result")
+        explorer_select_bus = gr.Textbox(value="", visible=False, elem_id="explorer-select-bus")
         right_layer_bus = gr.Textbox(value="", visible=False, elem_id="right-layer-bus")
 
         # Hidden components (needed by event handlers wired elsewhere)
@@ -4137,6 +4142,51 @@ def create_app(agent=None):
             inputs=[explorer_action_result],
             outputs=[],
             js="(result) => { try { sendActionResultToExplorer(JSON.parse(result)); } catch(e) {} }",
+        )
+
+        # ── Explorer node click → context switch ──────────────────────
+        def _handle_explorer_select(select_raw, state):
+            """Update agent context when user clicks a researcher or paper node."""
+            import json as _json
+
+            if not select_raw:
+                return state, gr.update(), gr.update()
+
+            # Strip timestamp suffix
+            parts = select_raw.rsplit(":", 1)
+            payload_str = parts[0] if len(parts) > 1 and parts[-1].isdigit() else select_raw
+
+            try:
+                payload = _json.loads(payload_str)
+            except (ValueError, TypeError):
+                return state, gr.update(), gr.update()
+
+            node_type = payload.get("nodeType")
+            label = payload.get("label") or ""
+            node_id = payload.get("nodeId") or ""
+
+            new_state = dict(state or {})
+
+            if node_type == "researcher":
+                new_state["researcher"] = label
+                # Add to dropdown choices if needed
+                choices = _get_researcher_choices()
+                if label and label not in choices:
+                    choices.insert(0, label)
+                return new_state, gr.update(choices=choices, value=label), gr.update()
+            elif node_type == "paper":
+                new_state["paper_id"] = node_id
+                return new_state, gr.update(), gr.update(value=node_id)
+            else:
+                # Deselect — clear context
+                new_state["researcher"] = None
+                new_state["paper_id"] = None
+                return new_state, gr.update(value=None), gr.update(value="")
+
+        explorer_select_bus.input(
+            _handle_explorer_select,
+            inputs=[explorer_select_bus, context_state],
+            outputs=[context_state, current_researcher, current_paper_id],
         )
 
         # ── Left-pane layer switching ─────────────────────────────────
