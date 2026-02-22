@@ -1,36 +1,23 @@
 <div id="knowledge-explorer">
-  <div class="explorer-toolbar">
+  <div class="explorer-header">
+    <div class="elb-row">
+      <button class="elb active" data-layer="structure" onclick="switchLayerBtn(this,'structure')">Structure</button>
+      <span class="elb-sep">&middot;</span>
+      <button class="elb" data-layer="people" onclick="switchLayerBtn(this,'people')">People</button>
+      <span class="elb-sep">&middot;</span>
+      <button class="elb" data-layer="topics" onclick="switchLayerBtn(this,'topics')">Topics</button>
+    </div>
     <div class="explorer-search-wrap">
       <input type="text" class="explorer-search" placeholder="Filter by label..." />
       <button class="explorer-search-btn">FILTER</button>
     </div>
-    <div class="explorer-legend-inline">
-      <svg width="14" height="2"><line x1="0" y1="1" x2="14" y2="1" stroke="#5a6580" stroke-width="1.5" opacity="0.6"/></svg>
-      <span>AUTHOR</span>
-      <svg width="14" height="2"><line x1="0" y1="1" x2="14" y2="1" stroke="#475569" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.6"/></svg>
-      <span>CITES</span>
-      <svg width="14" height="2"><line x1="0" y1="1" x2="14" y2="1" stroke="#c45c4a" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.6"/></svg>
-      <span>SEMANTIC</span>
-      <span class="explorer-legend-sep"></span>
-      <span class="explorer-oa-dot" style="border-color:#22c55e"></span><span>GOLD</span>
-      <span class="explorer-oa-dot" style="border-color:#16a34a"></span><span>GREEN</span>
-      <span class="explorer-oa-dot" style="border-color:#d97706"></span><span>BRONZE</span>
-      <span class="explorer-oa-dot" style="border-color:#eab308"></span><span>PREPRINT</span>
-      <span class="explorer-oa-dot" style="border-color:#64748b"></span><span>PAYWALLED</span>
-      <span class="explorer-legend-sep"></span>
-      <svg width="8" height="8"><circle cx="4" cy="4" r="3" fill="none" stroke="#2e5a88" stroke-width="1" opacity="0.5"/></svg>
-      <span>FIELD</span>
-      <svg width="8" height="8"><circle cx="4" cy="4" r="4" fill="none" stroke="#555" stroke-width="0.5" opacity="0.3" stroke-dasharray="2,2"/></svg>
-      <span>DOMAIN</span>
-    </div>
-    <!-- CTX toggle replaced by SOC/AUTH/CHAT layer buttons -->
   </div>
   <div class="explorer-canvas">
     <svg id="explorer-svg"></svg>
     <div class="explorer-layers" id="explorer-layers">
-      <button class="explorer-layer-btn" data-layer="soc">SOC</button>
-      <button class="explorer-layer-btn" data-layer="auth">AUTH</button>
-      <button class="explorer-layer-btn" data-layer="chat">CHAT</button>
+      <button class="explorer-layer-btn" data-layer="structure">Structure</button>
+      <button class="explorer-layer-btn" data-layer="people">People</button>
+      <button class="explorer-layer-btn" data-layer="topics">Topics</button>
     </div>
   </div>
   <div id="explorer-detail" class="explorer-detail">
@@ -74,12 +61,12 @@
     flex-direction: column;
   }
 
-  /* ── Toolbar ──────────────────────────────────── */
-  #knowledge-explorer .explorer-toolbar {
+  /* ── Header (search + layer tabs) ────────────── */
+  #knowledge-explorer .explorer-header {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 7px 12px;
+    padding: 5px 12px;
     background: #0e1219;
     border-bottom: 1px solid #1a1f2e;
     flex-shrink: 0;
@@ -88,9 +75,10 @@
 
   #knowledge-explorer .explorer-search-wrap {
     display: flex;
-    flex: 1;
-    max-width: 280px;
-    min-width: 160px;
+    flex: 0 1 auto;
+    margin-left: auto;
+    max-width: 220px;
+    min-width: 120px;
     background: #0a0d13;
     border: 1px solid #1a1f2e;
     border-radius: 6px;
@@ -121,31 +109,45 @@
     letter-spacing: 0.5px;
   }
 
-  #knowledge-explorer .explorer-legend-inline {
-    margin-left: auto;
+  /* ── Layer tabs (left side of header) ──────── */
+  .elb-row {
     display: flex;
     align-items: center;
-    gap: 5px;
-    font-size: 6px;
-    font-weight: 600;
-    color: #2e3648;
-    letter-spacing: 0.8px;
+    gap: 0;
   }
-
-  #knowledge-explorer .explorer-legend-sep {
-    width: 1px;
-    height: 10px;
-    background: #1a1f2e;
-    display: inline-block;
-    margin: 0 3px;
+  .elb {
+    font-size: 8px;
+    letter-spacing: 0.6px;
+    padding: 4px 8px;
+    color: #3e4a64;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    font-family: 'IBM Plex Mono', monospace;
+    cursor: pointer;
+    white-space: nowrap;
   }
-
-  #knowledge-explorer .explorer-oa-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    border: 1.5px solid;
-    display: inline-block;
+  .elb::before {
+    content: "\25CF";
+    font-size: 5px;
+    margin-right: 5px;
+    vertical-align: middle;
+    opacity: 0.4;
+  }
+  .elb:hover { color: #5a6580; }
+  .elb.active {
+    color: #c45c4a;
+    border-bottom-color: #c45c4a;
+  }
+  .elb.active::before {
+    opacity: 1;
+    color: #c45c4a;
+  }
+  .elb-sep {
+    color: #1a1f2e;
+    font-size: 10px;
+    margin: 0 1px;
   }
 
   /* ── Canvas ───────────────────────────────────── */
@@ -164,14 +166,8 @@
 
   /* ── Layer selector buttons ────────────────────── */
   #knowledge-explorer .explorer-layers {
-    position: absolute;
-    bottom: 14px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 4px;
-    align-items: center;
-    z-index: 5;
+    /* Hidden — layer buttons now live in Gradio right-pane header */
+    display: none;
   }
 
   #knowledge-explorer .explorer-layer-btn {
@@ -527,120 +523,8 @@
   var nodeG = root.append("g");
   var node = nodeG.selectAll("g").data(data.nodes).join("g").style("cursor", "pointer");
 
-  // OA rings
-  node.filter(function(d) { return d.type === "paper"; }).append("circle")
-    .attr("class", "oa-ring")
-    .attr("r", function(d) { return d.size + 2.5; })
-    .attr("fill", "none")
-    .each(function(d) {
-      var oa = (d.metadata && d.metadata.oa_status) || "closed";
-      var cfg = OA[oa] || OA.closed;
-      d3.select(this).attr("stroke", cfg.color).attr("stroke-width", 1.5).attr("opacity", 0.5);
-      if (cfg.dash) d3.select(this).attr("stroke-dasharray", cfg.dash);
-    });
-
-  // Researcher outer ring
-  node.filter(function(d) { return d.type === "researcher"; }).append("circle")
-    .attr("class", "outer-ring")
-    .attr("r", function(d) { return d.size + 3; })
-    .attr("fill", "none").attr("stroke", function(d) { return d.color; })
-    .attr("stroke-width", 0.4).attr("opacity", 0.15);
-
-  // Domain outer ring (large dashed, very faint)
-  node.filter(function(d) { return d.type === "domain"; }).append("circle")
-    .attr("class", "outer-ring")
-    .attr("r", function(d) { return d.size + 5; })
-    .attr("fill", "none").attr("stroke", function(d) { return d.color; })
-    .attr("stroke-width", 0.6).attr("opacity", 0.12)
-    .attr("stroke-dasharray", "4,3");
-
-  // Field outer ring
-  node.filter(function(d) { return d.type === "field"; }).append("circle")
-    .attr("class", "outer-ring")
-    .attr("r", function(d) { return d.size + 2; })
-    .attr("fill", "none").attr("stroke", function(d) { return d.color; })
-    .attr("stroke-width", 0.5).attr("opacity", 0.2);
-
-  // Main body (radial gradient fill)
-  node.append("circle").attr("class", "body")
-    .attr("r", function(d) { return d.size; })
-    .attr("fill", function(d) { return "url(#ng-" + d.id.replace(/[^a-zA-Z0-9]/g, "_") + ")"; })
-    .attr("stroke", function(d) { return d.type === "query" ? "#c45c4a" : (d._authorColor || d.color); })
-    .attr("stroke-width", function(d) {
-      if (d.type === "domain") return 0.4;
-      if (d.type === "field") return 0.6;
-      return d.type === "researcher" ? 1.5 : d.type === "query" ? 1.2 : 0.8;
-    })
-    .attr("stroke-dasharray", function(d) { return d.type === "query" ? "3,2" : d.type === "domain" ? "4,3" : null; })
-    .attr("opacity", function(d) {
-      if (d.type === "domain") return 0.25;
-      if (d.type === "field") return 0.5;
-      return 0.9;
-    })
-    .attr("filter", function(d) { return (d.type === "researcher" || d.type === "query") ? "url(#glow)" : null; });
-
-  // Icons inside researcher/query nodes
-  node.filter(function(d) { return d.type === "researcher"; }).append("text")
-    .text("\u25CE").attr("text-anchor", "middle").attr("dy", 4)
-    .attr("font-size", "12px").attr("fill", function(d) { return d.color; }).attr("opacity", 0.3)
-    .style("pointer-events", "none");
-  node.filter(function(d) { return d.type === "query"; }).append("text")
-    .text("\u2299").attr("text-anchor", "middle").attr("dy", 4)
-    .attr("font-size", "10px").attr("fill", "#c45c4a").attr("opacity", 0.35)
-    .style("pointer-events", "none");
-  node.filter(function(d) { return d.type === "field"; }).append("text")
-    .text("\u25C7").attr("text-anchor", "middle").attr("dy", 4)
-    .attr("font-size", "9px").attr("fill", function(d) { return d.color; }).attr("opacity", 0.25)
-    .style("pointer-events", "none");
-  node.filter(function(d) { return d.type === "domain"; }).append("text")
-    .text("\u2B21").attr("text-anchor", "middle").attr("dy", 5)
-    .attr("font-size", "14px").attr("fill", function(d) { return d.color; }).attr("opacity", 0.15)
-    .style("pointer-events", "none");
-
-  // Labels (above node)
-  node.append("text").attr("class", "label")
-    .text(function(d) { return d.label.length > 24 ? d.label.slice(0, 22) + "\u2026" : d.label; })
-    .attr("text-anchor", "middle").attr("dy", function(d) { return -d.size - 6; })
-    .attr("font-size", function(d) {
-      if (d.type === "domain") return "10px";
-      if (d.type === "field") return "7.5px";
-      return d.type === "researcher" ? "9px" : d.type === "query" ? "8px" : "6.5px";
-    })
-    .attr("font-weight", function(d) {
-      return (d.type === "researcher" || d.type === "query" || d.type === "domain") ? 600 : d.type === "field" ? 500 : 400;
-    })
-    .attr("fill", function(d) {
-      if (d.type === "domain") return d.color;
-      if (d.type === "field") return d.color;
-      return d.type === "query" ? "#c45c4a" : d.type === "researcher" ? d.color : "#6a7590";
-    })
-    .attr("opacity", function(d) {
-      if (d.type === "domain") return 0.25;
-      if (d.type === "field") return 0.45;
-      return 1;
-    })
-    .attr("letter-spacing", function(d) { return (d.type === "researcher" || d.type === "domain") ? "0.8px" : "0.2px"; })
-    .attr("font-family", "inherit")
-    .style("pointer-events", "none");
-
-  // Sub-labels (below node, hidden by default)
-  node.append("text").attr("class", "sub-label")
-    .text(function(d) {
-      if (d.type === "researcher") { var m = d.metadata || {}; return "h-index: " + (m.h_index || "?") + " \u00B7 " + ((m.affiliations && m.affiliations[0]) || ""); }
-      if (d.type === "paper") { var m2 = d.metadata || {}; return (m2.year || "") + " \u00B7 " + (m2.citations || 0) + " cites"; }
-      if (d.type === "field" || d.type === "domain") { var conn = getConnected(d.id); return (conn.size - 1) + " connected"; }
-      return "";
-    })
-    .attr("text-anchor", "middle").attr("dy", function(d) { return d.size + 12; })
-    .attr("font-size", "6px").attr("fill", "#4a5568").attr("opacity", 0)
-    .attr("font-family", "inherit").style("pointer-events", "none");
-
-  // Field tags (paper only, hidden by default)
-  node.filter(function(d) { return d.type === "paper"; }).append("text").attr("class", "field-tag")
-    .text(function(d) { return (d.metadata && d.metadata.fields && d.metadata.fields[0]) || ""; })
-    .attr("text-anchor", "middle").attr("dy", function(d) { return d.size + 22; })
-    .attr("font-size", "5.5px").attr("fill", function(d) { return d._authorColor || d.color; }).attr("opacity", 0)
-    .attr("font-family", "inherit").style("pointer-events", "none");
+  // Append all visual elements (OA rings, outer rings, body, icons, labels, sub-labels, field tags)
+  setupNodeVisuals(node);
 
   // ── Drag ──────────────────────────────────────────
   node.call(d3.drag()
@@ -801,8 +685,8 @@
         html += '</div>';
       }
       html += '<div style="display:flex;flex-direction:column;gap:3px;margin-top:4px">';
-      var primaryLabel = activeLayer === "chat" ? "DISCOVER RELATED" : "LOAD ALL PAPERS";
-      var primaryAction = activeLayer === "chat" ? "discover-related" : "load-papers";
+      var primaryLabel = activeLayer === "topics" ? "DISCOVER RELATED" : "LOAD ALL PAPERS";
+      var primaryAction = activeLayer === "topics" ? "discover-related" : "load-papers";
       html += '<button class="explorer-detail-btn explorer-action-btn" data-action="' + primaryAction + '" data-node-id="' + esc(d.id) + '" data-researcher-name="' + esc(d.label) + '" style="color:' + c + '">' + primaryLabel + '</button>';
       html += '<button class="explorer-detail-btn">CO-AUTHOR NETWORK</button>';
       html += '<button class="explorer-detail-btn">VIEW PROFILE \u2192</button>';
@@ -974,13 +858,27 @@
   // ── Layer emphasis system ───────────────────────────
   var layersEl = document.getElementById("explorer-layers");
   var layerBtns = layersEl.querySelectorAll(".explorer-layer-btn");
-  var activeLayer = data.active_layer || "soc";
+  var headerLayerBtns = document.querySelectorAll(".elb[data-layer]");
+  var activeLayer = data.active_layer || "structure";
 
   function setActiveLayerBtn(layer) {
     layerBtns.forEach(function(b) { b.classList.remove("active"); });
     layerBtns.forEach(function(b) {
       if (b.getAttribute("data-layer") === layer) b.classList.add("active");
     });
+    // Also update header buttons
+    headerLayerBtns.forEach(function(b) { b.classList.remove("active"); });
+    headerLayerBtns.forEach(function(b) {
+      if (b.getAttribute("data-layer") === layer) b.classList.add("active");
+    });
+  }
+
+  /* Called by header layer buttons */
+  function switchLayerBtn(btn, layer) {
+    setActiveLayerBtn(layer);
+    applyLayerEmphasis(layer);
+    /* Notify parent Gradio of layer change */
+    window.parent.postMessage({type: "explorer-layer", layer: layer}, "*");
   }
 
   function applyLayerEmphasis(layer) {
@@ -989,16 +887,16 @@
 
     // Pre-compute disabled labels per layer
     var ci = (data.context_items) || {};
-    var socDisabled = (ci.soc || []).filter(function(it) { return it.enabled === false; })
+    var socDisabled = (ci.soc_items || ci.soc || []).filter(function(it) { return it.enabled === false; })
                        .map(function(it) { return it.label.toLowerCase(); });
-    var authDisabled = (ci.auth || []).filter(function(it) { return it.enabled === false; })
+    var authDisabled = (ci.auth_items || ci.auth || []).filter(function(it) { return it.enabled === false; })
                         .map(function(it) { return it.label.toLowerCase(); });
-    var chatEnabled = (ci.chat || []).filter(function(it) { return it.enabled !== false; })
+    var chatEnabled = (ci.chat_items || ci.chat || []).filter(function(it) { return it.enabled !== false; })
                        .map(function(it) { return it.label.toLowerCase(); });
 
     // Node emphasis
     node.transition().duration(400).attr("opacity", function(d) {
-      if (layer === "soc") {
+      if (layer === "structure") {
         if (d.type === "domain" || d.type === "field") {
           var lbl = d.label.toLowerCase();
           if (socDisabled.some(function(dl) { return lbl === dl; })) return 0.03;
@@ -1009,8 +907,8 @@
         if (d.type === "paper") return 0.1;
         if (d.type === "query") return 0.2;
         return 0.2;
-      } else if (layer === "auth") {
-        var ai = (ci.auth || []);
+      } else if (layer === "people") {
+        var ai = (ci.auth_items || ci.auth || []);
         var authLabels = ai.filter(function(it) { return it.enabled !== false; })
                            .map(function(it) { return (it.label || it).toLowerCase(); });
         if (d.type === "researcher") {
@@ -1034,10 +932,11 @@
         if (d.type === "field") return 0.2;
         if (d.type === "domain") return 0.1;
         return 0.5;
-      } else if (layer === "chat") {
+      } else if (layer === "topics") {
         var label = d.label.toLowerCase();
         // Use enabled chat items if context exists, else fall back to highlight_terms
-        var hasCtxChat = ci.chat && ci.chat.length > 0;
+        var chatItems = ci.chat_items || ci.chat || [];
+        var hasCtxChat = chatItems.length > 0;
         var terms = hasCtxChat ? chatEnabled : ht.map(function(t) { return t.toLowerCase(); });
         var matched = terms.length > 0 && terms.some(function(t) {
           return label.indexOf(t) !== -1;
@@ -1053,13 +952,13 @@
     // Edge emphasis
     link.transition().duration(400).attr("opacity", function(l) {
       var base = edgeStyle(l).opacity;
-      if (layer === "soc") {
+      if (layer === "structure") {
         if (l.type === "field_membership" || l.type === "domain_mapping") return Math.min(base * 3, 0.8);
         return base * 0.1;
-      } else if (layer === "auth") {
+      } else if (layer === "people") {
         if (l.type === "authorship" || l.type === "citation" || l.type === "semantic") return Math.min(base * 2, 0.8);
         return base * 0.2;
-      } else if (layer === "chat") {
+      } else if (layer === "topics") {
         return base * 0.5;
       }
       return base;
@@ -1069,7 +968,7 @@
     root.select(".explorer-halos").selectAll("circle")
       .filter(function(d) { return d.type === "domain"; })
       .transition().duration(400)
-      .attr("opacity", layer === "soc" ? 0.04 : 0.003);
+      .attr("opacity", layer === "structure" ? 0.04 : 0.003);
 
     // Highlight glow per layer
     node.each(function(d) {
@@ -1077,8 +976,8 @@
       var highlighted = false;
       var glowColor = d._authorColor || d.color || "#c45c4a";
 
-      if (layer === "soc") {
-        // SOC: highlight fields and domains (skip disabled)
+      if (layer === "structure") {
+        // Structure: highlight fields and domains (skip disabled)
         if (d.type === "domain" || d.type === "field") {
           var sLbl = d.label.toLowerCase();
           if (!socDisabled.some(function(dl) { return sLbl === dl; })) {
@@ -1086,8 +985,8 @@
             glowColor = d.color || "#2e5a88";
           }
         }
-      } else if (layer === "auth") {
-        // AUTH: highlight researcher, papers, and pinned items (skip disabled)
+      } else if (layer === "people") {
+        // People: highlight researcher, papers, and pinned items (skip disabled)
         if (d.type === "researcher") {
           var rLbl = d.label.toLowerCase();
           highlighted = !authDisabled.some(function(dl) { return rLbl === dl; });
@@ -1099,15 +998,16 @@
             highlighted = true;
           }
         } else {
-          var ai2 = (ci.auth || []).filter(function(it) { return it.enabled !== false; });
+          var ai2 = (ci.auth_items || ci.auth || []).filter(function(it) { return it.enabled !== false; });
           var lbl2 = d.label.toLowerCase();
           if (ai2.some(function(it) { return lbl2.indexOf((it.label || it).toLowerCase()) !== -1; })) {
             highlighted = true;
           }
         }
-      } else if (layer === "chat") {
-        // CHAT: highlight keyword-matched nodes (only enabled terms)
-        var hasCtxChat2 = ci.chat && ci.chat.length > 0;
+      } else if (layer === "topics") {
+        // Topics: highlight keyword-matched nodes (only enabled terms)
+        var chatItems2 = ci.chat_items || ci.chat || [];
+        var hasCtxChat2 = chatItems2.length > 0;
         var terms2 = hasCtxChat2 ? chatEnabled : ht.map(function(t) { return t.toLowerCase(); });
         if (terms2.length > 0) {
           var label = d.label.toLowerCase();
@@ -1126,8 +1026,8 @@
     var actionBtn = detailEl.querySelector(".explorer-action-btn");
     if (actionBtn && !actionBtn.classList.contains("explorer-btn-loading")) {
       if (actionBtn.getAttribute("data-researcher-name")) {
-        actionBtn.textContent = layer === "chat" ? "DISCOVER RELATED" : "LOAD ALL PAPERS";
-        actionBtn.setAttribute("data-action", layer === "chat" ? "discover-related" : "load-papers");
+        actionBtn.textContent = layer === "topics" ? "DISCOVER RELATED" : "LOAD ALL PAPERS";
+        actionBtn.setAttribute("data-action", layer === "topics" ? "discover-related" : "load-papers");
       }
     }
   }
@@ -1153,7 +1053,7 @@
     }
     if (e.data && e.data.type === "set-highlights") {
       data.highlight_terms = e.data.terms;
-      if (activeLayer === "chat") applyLayerEmphasis("chat");
+      if (activeLayer === "topics") applyLayerEmphasis("topics");
     }
     if (e.data && e.data.type === "set-context-items") {
       data.context_items = e.data.items;
@@ -1434,7 +1334,8 @@
     .force("center", d3.forceCenter(width / 2, height / 2).strength(0.03))
     .force("collision", d3.forceCollide().radius(function(d) { return d.size + 8; }).strength(0.7))
     .alpha(0.8)
-    .alphaDecay(0.04)
+    .alphaDecay(0.03)
+    .alphaMin(0.003)
     .velocityDecay(0.55)
     .on("tick", function() {
       link.attr("x1", function(d) { return d.source.x; }).attr("y1", function(d) { return d.source.y; })

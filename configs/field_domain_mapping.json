@@ -1,5 +1,6 @@
 {
   "_comment": "Maps academic fields to societal domains. Auto-expanded by LLM when unknown fields are encountered.",
+  "_meta": { "version": 3, "separator": ":" },
   "domains": [
     "Economy",
     "Governance",

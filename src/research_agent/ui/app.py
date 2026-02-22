@@ -186,99 +186,75 @@ def create_app(agent=None):
         overflow: hidden;
     }
 
-    /* ── Top bar ─────────────────────────────────── */
-    #top-bar {
-        background: #0e1219;
-        border: 1px solid #1a1f2e;
-        border-radius: 4px;
-        padding: 2px 6px;
-        gap: 4px;
-        margin-bottom: 1px;
-        min-height: 0;
+    /* ── Status bar (top of left pane) ── */
+    #status-bar, #status-bar > div {
+        padding: 0; border: none; background: none; min-height: 0;
+    }
+    .status-bar {
+        display: flex;
         align-items: center;
+        gap: 0;
+        padding: 3px 4px;
+        background: #0a0d13;
+        border-bottom: 1px solid #1a1f2e;
+    }
+    .si {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 8px;
+        color: #5a6580;
+        padding: 3px 7px;
+        cursor: default;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        line-height: 1.4;
+    }
+    .si-star { color: #c45c4a; margin-right: 2px; }
+    .si-val { color: #c8d0e0; margin-left: 4px; }
+
+    /* ── Chat layer buttons (left pane) ──────── */
+    #chat-layers {
         flex: 0 0 auto;
-    }
-    /* Reset ALL inner elements: no stray borders */
-    #top-bar * {
-        border-color: #1a1f2e !important;
-        box-shadow: none !important;
-        outline: none !important;
-        min-height: 0;
-    }
-    #top-bar > div {
-        padding: 0;
-        border: none !important;
-        background: none;
-    }
-    #top-bar input,
-    #top-bar .wrap {
-        font-size: 10px;
-        padding: 3px 6px;
-        line-height: 1.2;
+        gap: 0;
+        padding: 0 6px;
+        border-bottom: 1px solid #1a1f2e;
         background: #0e1219;
-        border: 1px solid #1a1f2e !important;
-        border-radius: 4px;
-        color: #c8d0e0;
+        display: flex;
+        align-items: stretch;
     }
-    #top-bar input:focus,
-    #top-bar .wrap:focus-within {
-        border-color: #c45c4a40 !important;
+    #chat-layers > div {
+        padding: 0; border: none; background: none; min-height: 0;
     }
-    #top-bar .wrap .icon-wrap,
-    #top-bar .wrap svg {
+    .chat-layer-btn {
+        font-size: 8px;
+        letter-spacing: 0.6px;
+        padding: 5px 10px;
         color: #3e4a64;
-        width: 12px;
-        height: 12px;
-    }
-    #top-bar button {
-        font-size: 9px;
-        padding: 3px 8px;
-        line-height: 1.2;
-        border-radius: 4px;
-    }
-    /* Clear (×) button — tight, no Gradio bloat */
-    #top-bar .topbar-clear-btn {
-        font-size: 14px;
-        padding: 0 4px;
-        min-width: 20px;
-        max-width: 24px;
-        width: 24px;
-        height: 28px;
-        line-height: 28px;
+        background: transparent;
         border: none;
-        background: transparent;
-        opacity: 0.4;
-        transition: opacity 0.2s, color 0.2s;
-        box-shadow: none;
-        flex-grow: 0;
-        flex-shrink: 0;
+        border-bottom: 2px solid transparent;
+        transition: all 0.2s;
+        min-height: 0;
+        min-width: 0;
+        font-family: 'IBM Plex Mono', monospace;
+        cursor: pointer;
     }
-    #top-bar .topbar-clear-btn:hover {
-        opacity: 1;
+    .chat-layer-btn:hover {
+        color: #5a6580;
+    }
+    .chat-layer-active {
         color: #c45c4a;
-        background: transparent;
+        border-bottom-color: #c45c4a;
     }
-    /* Context layer buttons */
-    #top-bar .ctx-layer-btn {
-        font-size: 7px !important;
-        padding: 3px 8px !important;
-        min-width: 32px !important;
-        letter-spacing: 0.8px;
-        color: #2e3648;
-    }
-    #top-bar .ctx-active {
-        border-color: rgba(196, 92, 74, 0.5) !important;
-        color: #c45c4a !important;
-        background: rgba(196, 92, 74, 0.06) !important;
-    }
+
 
     /* ── Context pill strip ─────────────────────── */
     #ctx-pills-row {
         flex: 0 0 auto;
-        margin-bottom: 2px;
         min-height: 0;
     }
-    #ctx-pills-row > div { padding: 0; border: none; background: none; }
+    #ctx-pills-row > div { padding: 0; border: none; background: none; min-height: 0; }
     #ctx-pills-container { padding: 0; min-height: 0; }
     #ctx-pills-container > div { min-height: 0; }
     .ctx-pills-wrap {
@@ -422,7 +398,7 @@ def create_app(agent=None):
         flex-direction: column;
         overflow: hidden;
     }
-    /* Propagate flex through all Gradio wrapper divs */
+    /* Propagate flex through all Gradio wrapper divs (except layers bar) */
     #explorer-col > div,
     #explorer-col > div > div,
     #explorer-col > div > div > div {
@@ -462,79 +438,89 @@ def create_app(agent=None):
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script>
-    /* Send layer change to explorer iframe */
-    function sendLayerToExplorer(layer) {
+    /* Shared helpers for iframe postMessage bridge and Gradio bus setters */
+    function postToExplorer(type, data) {
       var iframe = document.querySelector("#explorer-col iframe");
       if (iframe && iframe.contentWindow) {
-        iframe.contentWindow.postMessage({type: "set-layer", layer: layer}, "*");
+        iframe.contentWindow.postMessage(Object.assign({type: type}, data), "*");
       }
     }
-    /* Listen for layer changes FROM explorer iframe (bottom buttons) */
+    function setBusValue(busId, value) {
+      var bus = document.querySelector(busId + " textarea, " + busId + " input");
+      if (!bus) return;
+      var setter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype, 'value'
+      ).set || Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value'
+      ).set;
+      setter.call(bus, value);
+      bus.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    /* Public API — explorer iframe messaging */
+    function sendLayerToExplorer(layer) { postToExplorer("set-layer", {layer: layer}); }
+    function sendActionResultToExplorer(result) { postToExplorer("action-result", {result: result}); }
+    function sendHighlightsToExplorer(terms) { postToExplorer("set-highlights", {terms: terms}); }
+    function sendContextItemsToExplorer(items) { postToExplorer("set-context-items", {items: items}); }
+    function sendGraphDelta(delta) { postToExplorer("update-graph", {delta: delta}); }
+    /* Public API — Gradio bus setters */
+    function ctxCommand(cmd) { setBusValue("#ctx-command-bus", cmd + ":" + Date.now()); }
+    function toggleStatusDropdown(id) {
+      var el = document.querySelector(id);
+      if (!el) return;
+      el.classList.toggle("si-reveal");
+    }
+    /* Listen for messages FROM explorer iframe — route to Python via hidden buses */
     window.addEventListener("message", function(e) {
       if (e.data && e.data.type === "explorer-layer") {
-        /* Click the matching top-bar button to trigger full Gradio handler (pills, state, etc.) */
-        var layer = e.data.layer;
-        var btns = document.querySelectorAll(".ctx-layer-btn");
-        btns.forEach(function(btn) {
-          if (btn.textContent.trim() === layer.toUpperCase()) btn.click();
-        });
+        setBusValue("#right-layer-bus", e.data.layer + ":" + Date.now());
       }
-      /* Route explorer detail-panel button actions to Python via hidden bus */
       if (e.data && e.data.type === "explorer-action") {
-        var bus = document.querySelector("#explorer-action-bus textarea, #explorer-action-bus input");
-        if (bus) {
-          var setter = Object.getOwnPropertyDescriptor(
-            window.HTMLTextAreaElement.prototype, 'value'
-          ).set || Object.getOwnPropertyDescriptor(
-            window.HTMLInputElement.prototype, 'value'
-          ).set;
-          setter.call(bus, JSON.stringify(e.data.payload) + ":" + Date.now());
-          bus.dispatchEvent(new Event('input', { bubbles: true }));
-        }
+        setBusValue("#explorer-action-bus", JSON.stringify(e.data.payload) + ":" + Date.now());
       }
     });
-    /* Send action result back to explorer iframe */
-    function sendActionResultToExplorer(result) {
-      var iframe = document.querySelector("#explorer-col iframe");
-      if (iframe && iframe.contentWindow) {
-        iframe.contentWindow.postMessage({type: "action-result", result: result}, "*");
-      }
-    }
-    /* Context pill command bus — JS→Python bridge */
-    function ctxCommand(cmd) {
-      var bus = document.querySelector("#ctx-command-bus textarea, #ctx-command-bus input");
-      if (bus) {
-        var setter = Object.getOwnPropertyDescriptor(
-          window.HTMLTextAreaElement.prototype, 'value'
-        ).set || Object.getOwnPropertyDescriptor(
-          window.HTMLInputElement.prototype, 'value'
-        ).set;
-        setter.call(bus, cmd + ":" + Date.now());
-        bus.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    }
-    /* Send highlight items to explorer iframe (avoids full re-render) */
-    function sendHighlightsToExplorer(terms) {
-      var iframe = document.querySelector("#explorer-col iframe");
-      if (iframe && iframe.contentWindow) {
-        iframe.contentWindow.postMessage({type: "set-highlights", terms: terms}, "*");
-      }
-    }
-    function sendContextItemsToExplorer(items) {
-      var iframe = document.querySelector("#explorer-col iframe");
-      if (iframe && iframe.contentWindow) {
-        iframe.contentWindow.postMessage({type: "set-context-items", items: items}, "*");
-      }
-    }
-    /* Incremental graph update — sends node/edge delta to avoid iframe flash */
-    function sendGraphDelta(delta) {
-      var iframe = document.querySelector("#explorer-col iframe");
-      if (iframe && iframe.contentWindow) {
-        iframe.contentWindow.postMessage({type: "update-graph", delta: delta}, "*");
-      }
-    }
     </script>
     """
+
+    def _render_status_bar(state: dict) -> str:
+        """Render all status indicators as a single HTML strip."""
+        import html as html_mod
+        state = state or {}
+        # User
+        researcher = state.get("researcher")
+        is_anon = state.get("is_anon", True)
+        user_name = researcher if researcher and not is_anon else "anon"
+        # Data
+        data_val = "\u2014"
+        try:
+            from research_agent.db.vector_store import ResearchVectorStore
+            store = ResearchVectorStore()
+            stats = store.get_stats()
+            papers = stats.get("total_papers", 0)
+            notes = stats.get("total_notes", 0)
+            parts = []
+            if papers:
+                parts.append(f"{papers} paper{'s' if papers != 1 else ''}")
+            if notes:
+                parts.append(f"{notes} note{'s' if notes != 1 else ''}")
+            if parts:
+                data_val = html_mod.escape(", ".join(parts))
+        except Exception:
+            pass
+        # AI
+        short = state.get("model_name") or "unknown"
+        if "/" in short:
+            short = short.split("/")[-1]
+        if len(short) > 20:
+            short = short[:18] + "\u2026"
+        short = html_mod.escape(short)
+
+        return (
+            f'<div class="status-bar">'
+            f'<span class="si"><span class="si-star">*</span>user<span class="si-val">{html_mod.escape(user_name)}</span></span>'
+            f'<span class="si"><span class="si-star">*</span>data<span class="si-val">{data_val}</span></span>'
+            f'<span class="si"><span class="si-star">*</span>ai<span class="si-val">{short}</span></span>'
+            f'</div>'
+        )
 
     with gr.Blocks(
         title="Research Assistant",
@@ -552,53 +538,24 @@ def create_app(agent=None):
         # Shared state
         context_state = gr.State({
             "researcher": None, "paper_id": None,
-            "active_layer": "soc", "chat_context": None,
+            "active_layer_left": "context",      # Context / Author / Chat
+            "active_layer_right": "structure",    # Structure / People / Topics
+            "chat_context": None,
             "soc_items": _initial_soc, "auth_items": [], "chat_items": [],
+            "is_anon": True,
+            "model_name": "loading",
         })
         _query_state = gr.State({"query": None, "chunks": []})
 
-        # ── TOP BAR ────────────────────────────────────────────────────
-        with gr.Row(equal_height=True, elem_id="top-bar"):
-            topbar_researcher = gr.Dropdown(
-                choices=[],
-                value=None,
-                allow_custom_value=True,
-                show_label=False,
-                container=False,
-                scale=2,
-                min_width=200,
-                elem_id="topbar-researcher",
-            )
-            topbar_clear_btn = gr.Button(
-                "\u00d7", variant="secondary", scale=0, min_width=20,
-                elem_classes=["topbar-clear-btn"],
-                visible=False,
-            )
-            model_dropdown = gr.Dropdown(
-                choices=["Loading..."],
-                value="Loading...",
-                show_label=False,
-                container=False,
-                scale=2,
-                interactive=True,
-                min_width=140,
-            )
-            layer_soc_btn = gr.Button(
-                "SOC", variant="secondary", scale=0, min_width=40,
-                elem_classes=["ctx-layer-btn", "ctx-active"],
-            )
-            layer_auth_btn = gr.Button(
-                "AUTH", variant="secondary", scale=0, min_width=40,
-                elem_classes=["ctx-layer-btn"],
-            )
-            layer_chat_btn = gr.Button(
-                "CHAT", variant="secondary", scale=0, min_width=40,
-                elem_classes=["ctx-layer-btn"],
-            )
+        # ── Mapping left layers to item keys ──────────────────────────
+        _LEFT_LAYER_ITEMS = {
+            "context": "soc_items",
+            "author": "auth_items",
+            "chat": "chat_items",
+        }
 
-        # ── CONTEXT PILL STRIP (row 2, collapses when empty) ─────────
-        _has_initial_pills = bool(_initial_soc)
         # Pre-render initial SOC pills
+        _has_initial_pills = bool(_initial_soc)
         if _has_initial_pills:
             import html as _html_mod
             _init_pills = []
@@ -613,14 +570,13 @@ def create_app(agent=None):
             _init_pills_html = f'<div class="ctx-pills-wrap">{" ".join(_init_pills)}</div>'
         else:
             _init_pills_html = ""
-        with gr.Row(visible=_has_initial_pills, elem_id="ctx-pills-row") as ctx_pills_row:
-            ctx_pills_html = gr.HTML(value=_init_pills_html, elem_id="ctx-pills-container")
-        # Hidden command bus for pill ✕/pin/toggle JS→Python bridge
+
+        # Hidden buses (pill commands, explorer actions, right-layer sync)
         ctx_command_bus = gr.Textbox(value="", visible=False, elem_id="ctx-command-bus")
         ctx_items_json = gr.Textbox(value="", visible=False, elem_id="ctx-items-json")
-        # Hidden action bus for explorer detail-panel buttons (iframe → Python → iframe)
         explorer_action_bus = gr.Textbox(value="", visible=False, elem_id="explorer-action-bus")
         explorer_action_result = gr.Textbox(value="", visible=False, elem_id="explorer-action-result")
+        right_layer_bus = gr.Textbox(value="", visible=False, elem_id="right-layer-bus")
 
         # Hidden components (needed by event handlers wired elsewhere)
         with gr.Group(visible=False):
@@ -644,11 +600,49 @@ def create_app(agent=None):
             ctx_citations_btn = gr.Button()
             context_map_plot = gr.Plot()
             context_map_status = gr.Textbox()
+            # Status-bar dropdowns (toggled via JS)
+            topbar_researcher = gr.Dropdown(
+                choices=[], value=None, allow_custom_value=True,
+                show_label=False, container=False,
+                elem_id="topbar-researcher",
+            )
+            topbar_clear_btn = gr.Button(
+                "\u00d7", variant="secondary", scale=0, min_width=20,
+                elem_classes=["topbar-clear-btn"],
+            )
+            model_dropdown = gr.Dropdown(
+                choices=["Loading..."], value="Loading...",
+                show_label=False, container=False, interactive=True,
+                min_width=140, elem_id="topbar-model-dropdown",
+            )
 
         # ── SPLIT PANE: Chat (left) + Explorer (right) ───────────────────
         with gr.Row(equal_height=False, elem_id="split-pane"):
           # LEFT PANE: Chat
           with gr.Column(scale=2, min_width=340, elem_id="chat-col"):
+            # Status indicators (single HTML to avoid Gradio wrapper fights)
+            status_bar = gr.HTML(
+                value=_render_status_bar({"is_anon": True, "model_name": "loading"}),
+                elem_id="status-bar",
+            )
+            # Layer tabs
+            with gr.Row(elem_id="chat-layers"):
+                layer_context_btn = gr.Button(
+                    "Context", variant="secondary", scale=0, min_width=50,
+                    elem_classes=["chat-layer-btn", "chat-layer-active"],
+                )
+                layer_author_btn = gr.Button(
+                    "Author", variant="secondary", scale=0, min_width=50,
+                    elem_classes=["chat-layer-btn"],
+                )
+                layer_chat_btn = gr.Button(
+                    "Chat", variant="secondary", scale=0, min_width=50,
+                    elem_classes=["chat-layer-btn"],
+                )
+
+            with gr.Row(visible=_has_initial_pills, elem_id="ctx-pills-row") as ctx_pills_row:
+                ctx_pills_html = gr.HTML(value=_init_pills_html, elem_id="ctx-pills-container")
+
             chatbot = gr.Chatbot(
                 value=[{"role": "assistant", "content": "What are you researching?"}],
             )
@@ -1190,12 +1184,19 @@ def create_app(agent=None):
             return "", history
 
         def _render_context_pills(state: dict) -> str:
-            """Render HTML pill strip for the active layer's context items."""
+            """Render HTML pill strip for the active left layer's context items."""
             import html as html_mod
-            layer = state.get("active_layer", "soc")
-            items = state.get(f"{layer}_items", [])
+            layer = state.get("active_layer_left", "context")
+            items_key = _LEFT_LAYER_ITEMS.get(layer, "soc_items")
+            items = state.get(items_key, [])
             if not items:
+                # Show anon hint for author layer when no items
+                if layer == "author":
+                    return '<div class="ctx-pills-wrap"><span class="ctx-pill ctx-pill-field" style="opacity:0.5;cursor:default">Select a researcher to set your perspective</span></div>'
                 return ""
+            # Map left layer name → items prefix for toggle commands
+            _layer_to_prefix = {"context": "soc", "author": "auth", "chat": "chat"}
+            prefix = _layer_to_prefix.get(layer, layer)
             pills = []
             for item in items:
                 label = item["label"]
@@ -1207,14 +1208,14 @@ def create_app(agent=None):
                 js_label = label.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
                 disabled_cls = "" if enabled else " ctx-pill-disabled"
                 pill = f'<span class="ctx-pill ctx-pill-{itype}{disabled_cls}" '
-                pill += f'onclick="ctxCommand(\'toggle:{layer}:{js_label}\')" '
+                pill += f'onclick="ctxCommand(\'toggle:{prefix}:{js_label}\')" '
                 pill += f'style="cursor:pointer">'
                 pill += f'<span class="ctx-pill-label">{escaped}</span>'
                 if layer == "chat":
-                    pill += f'<button class="ctx-pill-pin" onclick="event.stopPropagation();ctxCommand(\'pin:{js_label}\')" title="Pin to AUTH">&#x1F4CC;</button>'
-                if layer == "chat" or (layer == "auth" and not auto):
-                    pill += f'<button class="ctx-pill-close" onclick="event.stopPropagation();ctxCommand(\'remove:{layer}:{js_label}\')">&#x00D7;</button>'
-                if layer == "auth" and auto and itype == "researcher":
+                    pill += f'<button class="ctx-pill-pin" onclick="event.stopPropagation();ctxCommand(\'pin:{js_label}\')" title="Pin to Author">&#x1F4CC;</button>'
+                if layer == "chat" or (layer == "author" and not auto):
+                    pill += f'<button class="ctx-pill-close" onclick="event.stopPropagation();ctxCommand(\'remove:{prefix}:{js_label}\')">&#x00D7;</button>'
+                if layer == "author" and auto and itype == "researcher":
                     pill += '<span class="ctx-pill-lock" title="Auto (researcher lookup)">&#x1F512;</span>'
                 pill += '</span>'
                 pills.append(pill)
@@ -1343,10 +1344,11 @@ def create_app(agent=None):
                         })
                     new_state["chat_items"] = chat_items
 
-                    # Auto-switch to CHAT layer if keywords found
+                    # Auto-switch left pane to Chat layer, right pane to Topics
                     if chat_ctx["keywords"]:
-                        new_state["active_layer"] = "chat"
-                        layer_updates = _layer_btn_classes("chat")
+                        new_state["active_layer_left"] = "chat"
+                        new_state["active_layer_right"] = "topics"
+                        layer_updates = _left_layer_btn_classes("chat")
                         renderer = ExplorerRenderer()
                         researcher_name = new_state.get("researcher")
                         if researcher_name:
@@ -1366,18 +1368,18 @@ def create_app(agent=None):
                                     "chat": chat_items,
                                 }
                                 explorer_update = renderer.render(
-                                    gb.to_dict(active_layer="chat",
+                                    gb.to_dict(active_layer="topics",
                                                highlight_terms=chat_ctx["keywords"],
                                                context_items=ctx_items)
                                 )
                             else:
                                 gd = get_mock_graph_data()
-                                gd["active_layer"] = "chat"
+                                gd["active_layer"] = "topics"
                                 gd["highlight_terms"] = chat_ctx["keywords"]
                                 explorer_update = renderer.render(gd)
                         else:
                             gd = get_mock_graph_data()
-                            gd["active_layer"] = "chat"
+                            gd["active_layer"] = "topics"
                             gd["highlight_terms"] = chat_ctx["keywords"]
                             explorer_update = renderer.render(gd)
 
@@ -1393,8 +1395,9 @@ def create_app(agent=None):
 
             history.append({"role": "assistant", "content": response})
             pills_html = _render_context_pills(new_state)
-            layer = new_state.get("active_layer", "soc")
-            has_items = bool(new_state.get(f"{layer}_items", []))
+            left_layer = new_state.get("active_layer_left", "context")
+            items_key = _LEFT_LAYER_ITEMS.get(left_layer, "soc_items")
+            has_items = bool(new_state.get(items_key, []))
             return history, new_state, explorer_update, *layer_updates, pills_html, gr.update(visible=has_items)
 
         vector_store = None
@@ -3130,6 +3133,11 @@ def create_app(agent=None):
                 return None, f"Error generating concept map: {e}"
 
         # Wire up events
+        _generate_outputs = [
+            chatbot, context_state, explorer_html,
+            layer_context_btn, layer_author_btn, layer_chat_btn,
+            ctx_pills_html, ctx_pills_row,
+        ]
         msg.submit(
             add_user_message,
             [msg, chatbot],
@@ -3137,9 +3145,7 @@ def create_app(agent=None):
         ).then(
             generate_response,
             [chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
-            [chatbot, context_state, explorer_html,
-             layer_soc_btn, layer_auth_btn, layer_chat_btn,
-             ctx_pills_html, ctx_pills_row],
+            _generate_outputs,
         )
         submit.click(
             add_user_message,
@@ -3148,9 +3154,7 @@ def create_app(agent=None):
         ).then(
             generate_response,
             [chatbot, year_from_chat, year_to_chat, min_citations_chat, context_state],
-            [chatbot, context_state, explorer_html,
-             layer_soc_btn, layer_auth_btn, layer_chat_btn,
-             ctx_pills_html, ctx_pills_row],
+            _generate_outputs,
         )
         clear.click(lambda: [], outputs=[chatbot])
         refresh_btn.click(
@@ -3394,15 +3398,35 @@ def create_app(agent=None):
         )
 
         # Model selector events
+        def refresh_model_list_with_status(state):
+            dd_update, current = refresh_model_list()
+            new_state = dict(state or {})
+            new_state["model_name"] = current
+            return dd_update, current, new_state, _render_status_bar(new_state)
+
+        def switch_model_with_status(model_name, state):
+            result = switch_model(model_name)
+            new_state = dict(state or {})
+            new_state["model_name"] = model_name
+            return result, new_state, _render_status_bar(new_state)
+
         refresh_models_btn.click(
-            refresh_model_list, outputs=[model_dropdown, current_model_display]
+            refresh_model_list_with_status,
+            inputs=[context_state],
+            outputs=[model_dropdown, current_model_display, context_state, status_bar],
         )
         model_dropdown.change(
-            switch_model, inputs=[model_dropdown], outputs=[current_model_display]
+            switch_model_with_status,
+            inputs=[model_dropdown, context_state],
+            outputs=[current_model_display, context_state, status_bar],
         )
 
         # Initialize model list on load
-        app.load(refresh_model_list, outputs=[model_dropdown, current_model_display])
+        app.load(
+            refresh_model_list_with_status,
+            inputs=[context_state],
+            outputs=[model_dropdown, current_model_display, context_state, status_bar],
+        )
 
         # Initialize knowledge base stats/table on load
         app.load(
@@ -3751,8 +3775,9 @@ def create_app(agent=None):
                 new_state["auth_items"] = auth_items
 
             pills_html = _render_context_pills(new_state)
-            layer = new_state.get("active_layer", "soc")
-            has_items = bool(new_state.get(f"{layer}_items", []))
+            left_layer = new_state.get("active_layer_left", "context")
+            items_key = _LEFT_LAYER_ITEMS.get(left_layer, "soc_items")
+            has_items = bool(new_state.get(items_key, []))
             items_json = _json.dumps({
                 "soc": new_state.get("soc_items", []),
                 "auth": new_state.get("auth_items", []),
@@ -3949,44 +3974,61 @@ def create_app(agent=None):
             js="(result) => { try { sendActionResultToExplorer(JSON.parse(result)); } catch(e) {} }",
         )
 
-        # ── Layer switching ────────────────────────────────────────────
-        def _layer_btn_classes(layer):
-            """Return elem_classes updates for the 3 layer buttons."""
+        # ── Left-pane layer switching ─────────────────────────────────
+        def _left_layer_btn_classes(layer):
+            """Return elem_classes updates for the 3 left-pane layer buttons."""
             return (
-                gr.update(elem_classes=["ctx-layer-btn", "ctx-active"] if layer == "soc" else ["ctx-layer-btn"]),
-                gr.update(elem_classes=["ctx-layer-btn", "ctx-active"] if layer == "auth" else ["ctx-layer-btn"]),
-                gr.update(elem_classes=["ctx-layer-btn", "ctx-active"] if layer == "chat" else ["ctx-layer-btn"]),
+                gr.update(elem_classes=["chat-layer-btn", "chat-layer-active"] if layer == "context" else ["chat-layer-btn"]),
+                gr.update(elem_classes=["chat-layer-btn", "chat-layer-active"] if layer == "author" else ["chat-layer-btn"]),
+                gr.update(elem_classes=["chat-layer-btn", "chat-layer-active"] if layer == "chat" else ["chat-layer-btn"]),
             )
 
-        def switch_layer_top(layer, state):
-            """Handle layer switch from top-bar buttons."""
+        def switch_left_layer(layer, state):
+            """Handle layer switch from left-pane buttons."""
             new_state = dict(state or {})
-            new_state["active_layer"] = layer
-            soc, auth, chat = _layer_btn_classes(layer)
+            new_state["active_layer_left"] = layer
+            ctx_btn, auth_btn, chat_btn = _left_layer_btn_classes(layer)
             pills_html = _render_context_pills(new_state)
-            has_items = bool(new_state.get(f"{layer}_items", []))
-            return new_state, soc, auth, chat, pills_html, gr.update(visible=has_items)
+            items_key = _LEFT_LAYER_ITEMS.get(layer, "soc_items")
+            has_items = bool(new_state.get(items_key, []))
+            return new_state, ctx_btn, auth_btn, chat_btn, pills_html, gr.update(visible=has_items)
 
-        layer_soc_btn.click(
-            lambda s: switch_layer_top("soc", s),
+        _left_layer_outputs = [
+            context_state, layer_context_btn, layer_author_btn, layer_chat_btn,
+            ctx_pills_html, ctx_pills_row,
+        ]
+
+        layer_context_btn.click(
+            lambda s: switch_left_layer("context", s),
             inputs=[context_state],
-            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn,
-                     ctx_pills_html, ctx_pills_row],
-            js="() => { sendLayerToExplorer('soc'); }",
+            outputs=_left_layer_outputs,
         )
-        layer_auth_btn.click(
-            lambda s: switch_layer_top("auth", s),
+        layer_author_btn.click(
+            lambda s: switch_left_layer("author", s),
             inputs=[context_state],
-            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn,
-                     ctx_pills_html, ctx_pills_row],
-            js="() => { sendLayerToExplorer('auth'); }",
+            outputs=_left_layer_outputs,
         )
         layer_chat_btn.click(
-            lambda s: switch_layer_top("chat", s),
+            lambda s: switch_left_layer("chat", s),
             inputs=[context_state],
-            outputs=[context_state, layer_soc_btn, layer_auth_btn, layer_chat_btn,
-                     ctx_pills_html, ctx_pills_row],
-            js="() => { sendLayerToExplorer('chat'); }",
+            outputs=_left_layer_outputs,
+        )
+
+        # ── Right-pane layer switching ────────────────────────────────
+        # Right-pane layer changes from explorer iframe — sync Python state
+        def _handle_right_layer(layer_raw, state):
+            if not layer_raw:
+                return state
+            parts = layer_raw.rsplit(":", 1)
+            layer = parts[0] if len(parts) > 1 and parts[-1].isdigit() else layer_raw
+            new_state = dict(state or {})
+            new_state["active_layer_right"] = layer
+            return new_state
+
+        right_layer_bus.input(
+            _handle_right_layer,
+            inputs=[right_layer_bus, context_state],
+            outputs=[context_state],
         )
 
         # ── Top bar: researcher lookup → explorer graph ──────────────────
@@ -3999,7 +4041,7 @@ def create_app(agent=None):
                 # Cleared field → reset everything
                 renderer = ExplorerRenderer()
                 mock_data = get_mock_graph_data()
-                mock_data["active_layer"] = "soc"
+                mock_data["active_layer"] = "structure"
                 mock_soc = [
                     {"label": n["label"], "type": n["type"], "auto": True, "enabled": True}
                     for n in mock_data.get("nodes", [])
@@ -4009,23 +4051,28 @@ def create_app(agent=None):
                 mock_html = renderer.render(mock_data)
                 reset_state = {
                     "researcher": None, "paper_id": None,
-                    "active_layer": "soc", "chat_context": None,
+                    "active_layer_left": "context", "active_layer_right": "structure",
+                    "chat_context": None,
                     "soc_items": mock_soc, "auth_items": [], "chat_items": [],
+                    "is_anon": True,
                 }
                 choices = _get_researcher_choices()
                 dd = gr.update(choices=choices, value=None)
                 stats, table = refresh_stats_and_table(
                     year_from, year_to, min_citations, reset_state
                 )
-                soc, auth, chat = _layer_btn_classes("soc")
+                ctx_b, auth_b, chat_b = _left_layer_btn_classes("context")
+
                 pills_html = _render_context_pills(reset_state)
                 return (
                     mock_html, reset_state,
                     gr.update(value=None, choices=choices),  # topbar dropdown reset
                     gr.update(visible=False),                # hide clear btn
                     dd, dd, dd, stats, table,
-                    soc, auth, chat,
+                    ctx_b, auth_b, chat_b,
                     pills_html, gr.update(visible=bool(mock_soc)),
+                    _render_status_bar(reset_state),
+
                 )
 
             name = researcher_name.strip()
@@ -4062,7 +4109,7 @@ def create_app(agent=None):
                 if not profile:
                     logger.warning(f"[Explorer] No results for '{name}'")
                     gr.Warning(f"Researcher '{name}' not found — try a different name or spelling.")
-                    return (gr.update(),) * 14
+                    return (gr.update(),) * 15
 
                 # Store in registry
                 registry = get_researcher_registry()
@@ -4133,7 +4180,9 @@ def create_app(agent=None):
                 # Sync all surfaces
                 new_state = dict(state or {})
                 new_state["researcher"] = profile.name
-                new_state["active_layer"] = "auth"
+                new_state["active_layer_left"] = "author"
+                new_state["active_layer_right"] = "people"
+                new_state["is_anon"] = False
 
                 new_state["auth_items"] = _build_auth_items(profile, state)
 
@@ -4146,7 +4195,7 @@ def create_app(agent=None):
                     "auth": new_state["auth_items"],
                     "chat": new_state.get("chat_items", []),
                 }
-                graph_data = gb.to_dict(active_layer="auth", context_items=ctx_items)
+                graph_data = gb.to_dict(active_layer="people", context_items=ctx_items)
 
                 # Store graph data for incremental updates
                 new_state["_prev_graph"] = graph_data
@@ -4161,7 +4210,8 @@ def create_app(agent=None):
                     year_from, year_to, min_citations, new_state
                 )
 
-                soc, auth, chat = _layer_btn_classes("auth")
+                ctx_b, auth_b, chat_b = _left_layer_btn_classes("author")
+
                 pills_html = _render_context_pills(new_state)
                 has_items = bool(new_state.get("auth_items", []))
                 return (
@@ -4169,14 +4219,16 @@ def create_app(agent=None):
                     gr.update(value=profile.name, choices=choices),  # topbar dropdown
                     gr.update(visible=True),                         # show clear btn
                     dd, dd, dd, stats, table,
-                    soc, auth, chat,
+                    ctx_b, auth_b, chat_b,
                     pills_html, gr.update(visible=has_items),
+                    _render_status_bar(new_state),
+
                 )
 
             except Exception as e:
                 logger.error(f"[Explorer] {type(e).__name__}: {e}", exc_info=True)
                 gr.Warning(f"Lookup failed: {e}")
-                return (gr.update(),) * 14
+                return (gr.update(),) * 15
 
         _lookup_outputs = [
             explorer_html, context_state, topbar_researcher,
@@ -4184,15 +4236,16 @@ def create_app(agent=None):
             current_researcher, researcher_select,
             citation_ui["researcher_dropdown"],
             kb_stats, papers_table,
-            layer_soc_btn, layer_auth_btn, layer_chat_btn,
+            layer_context_btn, layer_author_btn, layer_chat_btn,
             ctx_pills_html, ctx_pills_row,
+            status_bar,
         ]
 
         def _instant_clear(state):
             """Instantly reset explorer to mock data — no API calls."""
             renderer = ExplorerRenderer()
             mock = get_mock_graph_data()
-            mock["active_layer"] = "soc"
+            mock["active_layer"] = "structure"
             mock_soc_items = [
                 {"label": n["label"], "type": n["type"], "auto": True, "enabled": True}
                 for n in mock.get("nodes", [])
@@ -4201,13 +4254,16 @@ def create_app(agent=None):
             mock["context_items"] = {"soc": mock_soc_items, "auth": [], "chat": []}
             reset_state = {
                 "researcher": None, "paper_id": None,
-                "active_layer": "soc", "chat_context": None,
+                "active_layer_left": "context", "active_layer_right": "structure",
+                "chat_context": None,
                 "soc_items": mock_soc_items, "auth_items": [], "chat_items": [],
+                "is_anon": True,
                 "_prev_graph": mock,
             }
             choices = _get_researcher_choices()
             dd = gr.update(choices=choices, value=None)
-            soc, auth, chat = _layer_btn_classes("soc")
+            ctx_b, auth_b, chat_b = _left_layer_btn_classes("context")
+
             pills_html = _render_context_pills(reset_state)
             has_items = bool(mock_soc_items)
             return (
@@ -4216,8 +4272,10 @@ def create_app(agent=None):
                 gr.update(visible=False),                # hide clear btn
                 dd, dd, dd,
                 gr.update(), gr.update(),  # stats/table unchanged
-                soc, auth, chat,
+                ctx_b, auth_b, chat_b,
                 pills_html, gr.update(visible=has_items),
+                _render_status_bar(reset_state),
+
             )
 
         def _build_auth_items(profile, state):
@@ -4242,7 +4300,7 @@ def create_app(agent=None):
             return items
 
         def _build_from_registry_full(name, state):
-            """Build explorer from registry, returning all 14 _lookup_outputs.
+            """Build explorer from registry, returning all _lookup_outputs.
 
             Instant — no API calls. Returns None if researcher not in registry.
             """
@@ -4263,7 +4321,9 @@ def create_app(agent=None):
             gb.build_structural_context()
 
             new_state = dict(state or {})
-            new_state["active_layer"] = "auth"
+            new_state["active_layer_left"] = "author"
+            new_state["active_layer_right"] = "people"
+            new_state["is_anon"] = False
             new_state["researcher"] = profile.name
             new_state["auth_items"] = _build_auth_items(profile, state)
             new_state["soc_items"] = gb.get_structural_items()
@@ -4274,13 +4334,14 @@ def create_app(agent=None):
                 "auth": new_state["auth_items"],
                 "chat": new_state.get("chat_items", []),
             }
-            graph_data = gb.to_dict(active_layer="auth", context_items=ctx_items)
+            graph_data = gb.to_dict(active_layer="people", context_items=ctx_items)
             new_state["_prev_graph"] = graph_data
             html = renderer.render(graph_data)
 
             choices = _get_researcher_choices()
             dd = gr.update(choices=choices, value=profile.name)
-            soc, auth, chat = _layer_btn_classes("auth")
+            ctx_b, auth_b, chat_b = _left_layer_btn_classes("author")
+
             pills_html = _render_context_pills(new_state)
             has_items = bool(new_state.get("auth_items", []))
 
@@ -4290,8 +4351,10 @@ def create_app(agent=None):
                 gr.update(visible=True),
                 dd, dd, dd,
                 gr.update(), gr.update(),  # stats/table unchanged
-                soc, auth, chat,
+                ctx_b, auth_b, chat_b,
                 pills_html, gr.update(visible=has_items),
+                _render_status_bar(new_state),
+
             )
 
         def _on_researcher_dropdown_select(evt: gr.SelectData, state, yf, yt, mc):
@@ -4374,11 +4437,13 @@ def create_app(agent=None):
                 mock = get_mock_graph_data()
                 new_s = dict(state or {})
                 new_s["_prev_graph"] = mock
-                soc, auth, chat = _layer_btn_classes(new_s.get("active_layer", "soc"))
+                left_layer = new_s.get("active_layer_left", "context")
+                right_layer = new_s.get("active_layer_right", "structure")
+                ctx_b, auth_b, chat_b = _left_layer_btn_classes(left_layer)
                 pills_html = _render_context_pills(new_s)
-                layer = new_s.get("active_layer", "soc")
-                has_items = bool(new_s.get(f"{layer}_items", []))
-                return renderer.render(mock), new_s, pills_html, gr.update(visible=has_items), soc, auth, chat
+                items_key = _LEFT_LAYER_ITEMS.get(left_layer, "soc_items")
+                has_items = bool(new_s.get(items_key, []))
+                return renderer.render(mock), new_s, pills_html, gr.update(visible=has_items), ctx_b, auth_b, chat_b
 
             from research_agent.tools.researcher_registry import get_researcher_registry
 
@@ -4390,11 +4455,13 @@ def create_app(agent=None):
                 mock = get_mock_graph_data()
                 new_s = dict(state or {})
                 new_s["_prev_graph"] = mock
-                soc, auth, chat = _layer_btn_classes(new_s.get("active_layer", "soc"))
+                left_layer = new_s.get("active_layer_left", "context")
+                right_layer = new_s.get("active_layer_right", "structure")
+                ctx_b, auth_b, chat_b = _left_layer_btn_classes(left_layer)
                 pills_html = _render_context_pills(new_s)
-                layer = new_s.get("active_layer", "soc")
-                has_items = bool(new_s.get(f"{layer}_items", []))
-                return renderer.render(mock), new_s, pills_html, gr.update(visible=has_items), soc, auth, chat
+                items_key = _LEFT_LAYER_ITEMS.get(left_layer, "soc_items")
+                has_items = bool(new_s.get(items_key, []))
+                return renderer.render(mock), new_s, pills_html, gr.update(visible=has_items), ctx_b, auth_b, chat_b
 
             gb = GraphBuilder()
             researcher_id = gb.add_researcher(profile.to_dict())
@@ -4406,7 +4473,9 @@ def create_app(agent=None):
             gb.build_structural_context()
 
             new_state = dict(state or {})
-            new_state["active_layer"] = "auth"
+            new_state["active_layer_left"] = "author"
+            new_state["active_layer_right"] = "people"
+            new_state["is_anon"] = False
             new_state["researcher"] = profile.name
             new_state["auth_items"] = _build_auth_items(profile, state)
             new_state["soc_items"] = gb.get_structural_items()
@@ -4417,21 +4486,22 @@ def create_app(agent=None):
                 "auth": new_state["auth_items"],
                 "chat": new_state.get("chat_items", []),
             }
-            graph_data = gb.to_dict(active_layer="auth", context_items=ctx_items)
+            graph_data = gb.to_dict(active_layer="people", context_items=ctx_items)
             new_state["_prev_graph"] = graph_data
             html = renderer.render(graph_data)
 
             pills_html = _render_context_pills(new_state)
             has_items = bool(new_state.get("auth_items", []))
-            soc, auth, chat = _layer_btn_classes("auth")
-            return html, new_state, pills_html, gr.update(visible=has_items), soc, auth, chat
+            ctx_b, auth_b, chat_b = _left_layer_btn_classes("author")
+
+            return html, new_state, pills_html, gr.update(visible=has_items), ctx_b, auth_b, chat_b
 
         researcher_select.change(
             build_explorer_from_registry,
             inputs=[researcher_select, context_state],
             outputs=[explorer_html, context_state,
                      ctx_pills_html, ctx_pills_row,
-                     layer_soc_btn, layer_auth_btn, layer_chat_btn],
+                     layer_context_btn, layer_author_btn, layer_chat_btn],
         )
 
         def build_kb_explorer(state):

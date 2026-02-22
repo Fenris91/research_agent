@@ -87,6 +87,39 @@ PAPERS = [
         "fields": ["Urban Studies", "Social Movements", "Right to the City"],
         "source": "seed",
     },
+    {
+        "paper_id": "granovetter-weak-ties-1973",
+        "title": "The Strength of Weak Ties",
+        "abstract": (
+            "Analysis of the role of weak ties in social networks, demonstrating "
+            "that acquaintances (weak ties) are paradoxically more important than "
+            "close friends (strong ties) for tertiary (3) network diffusion, job "
+            "information flow, and community organization across bridging clusters."
+        ),
+        "year": 1973,
+        "citations": 65000,
+        "authors": ["Mark Granovetter"],
+        "venue": "American Journal of Sociology",
+        "fields": ["Sociology", "Social Movements", "Methodology"],
+        "source": "seed",
+        "encoding_note": "utf\u002D3",
+    },
+    {
+        "paper_id": "kramvig-storytelling-indigenous-2014",
+        "title": "Storytelling as a Means of Indigenous Knowledge Production",
+        "abstract": (
+            "Examines storytelling as a S\u00e1mi research methodology that challenges "
+            "Western epistemological frameworks. Through 3:rd-person narrative analysis "
+            "and relational ontology, the paper centres indigenous ways of knowing "
+            "and argues for methodological pluralism in social sciences research."
+        ),
+        "year": 2014,
+        "citations": 55,
+        "authors": ["Britt Kramvig"],
+        "venue": "AlterNative: An International Journal of Indigenous Peoples",
+        "fields": ["Indigenous Studies", "Methodology", "Epistemology"],
+        "source": "seed",
+    },
 ]
 
 

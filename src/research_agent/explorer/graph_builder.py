@@ -95,25 +95,25 @@ def _classify_field_llm(field_name: str, domains: list[str]) -> str | None:
     """Use LLM to classify an unknown field into a domain.
 
     Returns the domain name, or None on failure.
+    Tries Groq (free tier), then OpenAI as fallback.
     """
-    try:
-        import os
-        domain_list = ", ".join(domains)
-        prompt = (
-            f"Classify the academic field \"{field_name}\" into exactly one "
-            f"of these societal domains: {domain_list}.\n"
-            f"Reply with ONLY the domain name, nothing else."
-        )
+    import os
+    import httpx
 
-        # Try Groq first (default provider, free tier)
-        api_key = os.environ.get("GROQ_API_KEY")
-        if api_key:
-            import httpx
+    domain_list = ", ".join(domains)
+    prompt = (
+        f"Classify the academic field \"{field_name}\" into exactly one "
+        f"of these societal domains: {domain_list}.\n"
+        f"Reply with ONLY the domain name, nothing else."
+    )
+
+    def _try_provider(url: str, api_key: str, model: str) -> str | None:
+        try:
             resp = httpx.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+                url,
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={
-                    "model": "llama-3.1-8b-instant",
+                    "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 20,
                     "temperature": 0,
@@ -122,36 +122,24 @@ def _classify_field_llm(field_name: str, domains: list[str]) -> str | None:
             )
             if resp.status_code == 200:
                 answer = resp.json()["choices"][0]["message"]["content"].strip()
-                # Validate it's actually one of our domains
                 for d in domains:
                     if d.lower() == answer.lower():
                         return d
                 logger.warning(f"LLM returned unexpected domain '{answer}' for field '{field_name}'")
-                return None
+        except Exception:
+            logger.debug(f"LLM classification failed for field '{field_name}'", exc_info=True)
+        return None
 
-        # Try OpenAI as fallback
-        api_key = os.environ.get("OPENAI_API_KEY")
+    providers = [
+        ("https://api.groq.com/openai/v1/chat/completions", "GROQ_API_KEY", "llama-3.1-8b-instant"),
+        ("https://api.openai.com/v1/chat/completions", "OPENAI_API_KEY", "gpt-4o-mini"),
+    ]
+    for url, key_env, model in providers:
+        api_key = os.environ.get(key_env)
         if api_key:
-            import httpx
-            resp = httpx.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": "gpt-4o-mini",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 20,
-                    "temperature": 0,
-                },
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                answer = resp.json()["choices"][0]["message"]["content"].strip()
-                for d in domains:
-                    if d.lower() == answer.lower():
-                        return d
-
-    except Exception:
-        logger.debug(f"LLM classification failed for field '{field_name}'", exc_info=True)
+            result = _try_provider(url, api_key, model)
+            if result:
+                return result
     return None
 
 
@@ -581,7 +569,7 @@ class GraphBuilder:
 
     def to_dict(
         self,
-        active_layer: str = "soc",
+        active_layer: str = "structure",
         highlight_terms: list | None = None,
         context_items: dict | None = None,
     ) -> dict:
@@ -607,6 +595,6 @@ class GraphBuilder:
             result["context_items"] = context_items
         return result
 
-    def to_json(self, active_layer: str = "soc", highlight_terms: list | None = None) -> str:
+    def to_json(self, active_layer: str = "structure", highlight_terms: list | None = None) -> str:
         """Return JSON string of graph data."""
         return json.dumps(self.to_dict(active_layer=active_layer, highlight_terms=highlight_terms), indent=2)
