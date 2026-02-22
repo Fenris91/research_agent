@@ -68,3 +68,6 @@ python -m research_agent.main --mode ui
 - [DATA_SOURCES.md](docs/DATA_SOURCES.md) — API landscape (OpenAlex, Semantic Scholar, CrossRef, Unpaywall, CORE)
 - [CHANGELOG.md](docs/CHANGELOG.md) — implementation history by date
 - [SETUP.md](docs/SETUP.md) — environment setup and troubleshooting
+
+## Acknowledgements
+Made with care, love and joy by Rolf, Claude and Taiga :3

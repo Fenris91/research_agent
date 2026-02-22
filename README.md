@@ -1,224 +1,67 @@
 # Research Agent
 
-An autonomous research assistant for social sciences (social anthropology, geography, etc.) that can search, analyze, and build its own knowledge base.
+A personal research memory for social sciences researchers. Ingest papers, build a semantic knowledge base, query it in natural language, and get cited answers — with a visual knowledge graph for exploration.
 
-## Features
+## What It Does
 
-### Implemented
-- **Academic Paper Search**: Search Semantic Scholar and OpenAlex APIs
-- **Web Search**: Free DuckDuckGo search (no API key required)
-- **Researcher Lookup**: Fetch citation data, h-index, web presence, and top papers for researchers
-- **Researcher-Citation Integration**: Look up researchers and explore their citation networks
-  - Fetches researcher's top papers automatically
-  - Stores profiles in a registry for cross-tab access
-  - Explore citation networks for any researcher's papers
-- **Vector Store**: ChromaDB-based knowledge base with semantic search
-- **Research Agent**: LangGraph-based orchestration for query understanding, search, and synthesis
-- **Gradio UI**: Web interface with chat, knowledge base, researcher lookup, and citation explorer tabs
-- **PDF Ingestion**: Extract and chunk academic PDFs
-- **LLM Integration**: Local LLM for response synthesis
-- **Citation Explorer**: Follow citation chains, explore author networks
-- **Data Analysis**: Statistical analysis and visualization
-
-### Planned
-- **Evaluation Suite**: Test retrieval and synthesis quality
-- **Collaborative Features**: Share knowledge bases
-- **Fine-tuning**: Domain-specific model training
-
-## Requirements
-
-- Python 3.11+
-- ~2GB disk space for embedding models
-- GPU optional (speeds up embeddings)
+- **Semantic Search** across your personal knowledge base (ChromaDB + BGE embeddings)
+- **Academic APIs** — Semantic Scholar, OpenAlex, CrossRef, Unpaywall for paper discovery
+- **Researcher Lookup** — citation profiles, h-index, publication networks, open access detection
+- **Knowledge Explorer** — interactive D3.js force-directed graph mapping researchers, papers, fields and societal domains
+- **Research Agent** — LangGraph orchestration that understands your query, searches, and synthesizes cited answers
+- **PDF Ingestion** — extract and chunk academic papers directly into the KB
+- **Data Analysis** — statistical analysis and visualization tools
 
 ## Quick Start
 
 ```bash
-# 1. Clone the repo
-git clone <your-repo-url>
+# Clone and setup
+git clone https://github.com/Fenris91/research_agent.git
 cd research_agent
-
-# 2. Create conda environment
-conda create -n research_agent python=3.11
-conda activate research_agent
-
-# 3. Install dependencies
+conda create -n llm311 python=3.11
+conda activate llm311
 pip install -r requirements-runtime.txt
 
-# 4. Run the UI
+# Run
 python -m research_agent.main --mode ui
 ```
 
-## Usage Examples
+The UI launches at `localhost:7860` (auto-increments if busy). LLM provider is auto-detected from available API keys (Groq free tier, OpenAI, Ollama).
 
-### Research Agent (Python)
+## Knowledge Explorer
 
-```python
-import asyncio
-from research_agent.agents import create_research_agent
+Interactive graph visualization of your research landscape:
 
-async def main():
-    # Create agent with all components
-    agent = create_research_agent()
+- **Dual-mode**: single researcher view or full knowledge base view
+- **Node types**: researchers, papers (sized by citations), academic fields, societal domains
+- **Layers**: Structure (fields/domains), People (authorship), Topics (keyword-matched)
+- **Open Access indicators**: green (open), yellow (preprint), grey (paywalled)
+- **Detail panel**: click any node for metadata, actions, and connections
 
-    # Run a research query
-    result = await agent.run("What theories explain urban gentrification?")
+## Tech Stack
 
-    print(result["answer"])
-    print(f"Found {len(result['external_results'])} papers")
-
-    # Ingest a paper to knowledge base
-    if result["candidates_for_ingestion"]:
-        await agent.ingest_paper(result["candidates_for_ingestion"][0])
-
-asyncio.run(main())
-```
-
-### Academic Paper Search
-
-```python
-import asyncio
-from research_agent.tools import AcademicSearchTools
-
-async def search():
-    search = AcademicSearchTools()
-
-    # Search across Semantic Scholar and OpenAlex
-    papers = await search.search_all(
-        "participatory mapping indigenous communities",
-        limit_per_source=10,
-        year_range=(2015, 2024)
-    )
-
-    for paper in papers[:5]:
-        print(f"{paper.title} ({paper.year}) - {paper.citations} citations")
-
-    await search.close()
-
-asyncio.run(search())
-```
-
-### Researcher Lookup
-
-```python
-import asyncio
-from research_agent.tools import ResearcherLookup
-
-async def lookup():
-    lookup = ResearcherLookup()
-
-    profile = await lookup.lookup_researcher("David Harvey")
-
-    print(f"Name: {profile.name}")
-    print(f"Citations: {profile.citations_count:,}")
-    print(f"H-Index: {profile.h_index}")
-    print(f"Affiliations: {', '.join(profile.affiliations)}")
-
-    await lookup.close()
-
-asyncio.run(lookup())
-```
-
-### CLI: Researcher Lookup
-
-```bash
-# Lookup researchers from command line
-python -m research_agent.scripts.lookup_researchers --names "David Harvey, Doreen Massey"
-
-# From a file
-python -m research_agent.scripts.lookup_researchers --file data/researchers.txt
-
-# Output as JSON
-python -m research_agent.scripts.lookup_researchers --names "Anna Tsing" --json
-```
-
-### Vector Store
-
-```python
-from research_agent.db import ResearchVectorStore, EmbeddingModel
-
-# Initialize
-store = ResearchVectorStore("./data/chroma_db")
-embedder = EmbeddingModel()
-
-# Add a paper
-chunks = ["First paragraph...", "Second paragraph..."]
-embeddings = embedder.embed_batch(chunks)
-
-store.add_paper(
-    paper_id="paper123",
-    chunks=chunks,
-    embeddings=embeddings,
-    metadata={"title": "My Paper", "year": 2024, "authors": ["Author Name"]}
-)
-
-# Search
-query_emb = embedder.embed_query("urban development")
-results = store.search(query_emb, collection="papers", n_results=5)
-
-# Get stats
-print(store.get_stats())
-```
+| Component | Technology |
+|-----------|-----------|
+| Language | Python 3.11 |
+| Embeddings | BAAI/bge-base-en-v1.5 (768 dims) |
+| Vector DB | ChromaDB |
+| LLM | Groq / OpenAI / Ollama (auto-detected) |
+| Agent | LangGraph |
+| UI | Gradio 6.4 |
+| Graph | D3.js v7 (force-directed, iframe srcdoc) |
 
 ## Project Structure
 
 ```
-research_agent/
-├── src/
-│   └── research_agent/
-│       ├── agents/           # LangGraph research agent
-│       │   └── research_agent.py
-│       ├── tools/            # Search and lookup tools
-│       │   ├── academic_search.py    # Semantic Scholar + OpenAlex
-│       │   ├── web_search.py         # DuckDuckGo, Tavily, Serper
-│       │   ├── researcher_lookup.py  # Author profile lookup
-│       │   └── researcher_file_parser.py
-│       ├── db/               # Vector store
-│       │   ├── vector_store.py       # ChromaDB wrapper
-│       │   └── embeddings.py         # Sentence transformers
-│       ├── processors/       # Document processing (planned)
-│       ├── scripts/          # CLI tools
-│       │   └── lookup_researchers.py
-│       └── ui/               # Gradio interface
-│           └── app.py
-├── configs/
-│   └── config.yaml       # Configuration
-├── data/                 # Local data (gitignored)
-│   ├── chroma_db/        # Vector database
-│   └── researchers/      # Researcher lookup results
-├── docs/
-│   └── PLAN.md           # Implementation roadmap
-└── tests/
-```
-
-## Configuration
-
-Edit `configs/config.yaml`:
-
-```yaml
-# Embedding model
-embedding:
-  name: "BAAI/bge-base-en-v1.5"
-  device: "cuda"  # or "cpu"
-
-# Vector store
-vector_store:
-  persist_directory: "./data/chroma_db"
-
-# Search settings
-search:
-  semantic_scholar:
-    enabled: true
-  openalex:
-    enabled: true
-    email: null  # Optional: for polite pool
-  web_search:
-    provider: "duckduckgo"  # free, no key
-
-# Researcher lookup
-researcher_lookup:
-  input_file: "./data/researchers.txt"
-  output_dir: "./data/researchers"
+src/research_agent/
+├── agents/        # LangGraph orchestration
+├── db/            # ChromaDB vector store + embeddings
+├── explorer/      # Knowledge Explorer (D3 graph)
+├── models/        # LLM/embedding loaders
+├── processors/    # PDF ingestion
+├── tools/         # Academic search APIs
+├── ui/            # Gradio interface
+└── main.py        # Entry point
 ```
 
 ## API Rate Limits
@@ -229,35 +72,30 @@ researcher_lookup:
 | OpenAlex | Very generous | No |
 | DuckDuckGo | Reasonable | No |
 | Unpaywall | Generous | Email only |
+| Groq | Free tier | Yes (free) |
 
 ## Development
 
-Install full dev dependencies:
-
 ```bash
 pip install -r requirements.txt
-```
-
-```bash
-# Run tests
 pytest tests/
-
-# Format code
-black src/ tests/
-ruff check src/ tests/
-
-# Type checking
-mypy src/
 ```
+
+## Docs
+
+- [ROADMAP.md](docs/ROADMAP.md) — priorities and future ideas
+- [DATA_SOURCES.md](docs/DATA_SOURCES.md) — API landscape
+- [CHANGELOG.md](docs/CHANGELOG.md) — implementation history
+- [SETUP.md](docs/SETUP.md) — environment setup
+
+## Acknowledgements
+
+With gratitude to **Britt Kramvig**, **Tone Huse** and **Berit Kristoffersen** — the researchers whose work inspired this tool and whose scholarship shapes its knowledge base.
+
+Built with [Anthropic](https://anthropic.com)'s **Claude** and the open source communities behind LangGraph, ChromaDB, Gradio, and D3.js.
+
+Made with care, love and joy by Rolf, Claude and Taiga :3
 
 ## License
 
 MIT
-
-## Acknowledgments
-
-- [Semantic Scholar API](https://www.semanticscholar.org/product/api)
-- [OpenAlex](https://openalex.org/)
-- [LangGraph](https://github.com/langchain-ai/langgraph)
-- [ChromaDB](https://www.trychroma.com/)
-- [Sentence Transformers](https://www.sbert.net/)
