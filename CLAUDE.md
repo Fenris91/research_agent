@@ -38,6 +38,10 @@ scripts/
 
 ## Running
 ```bash
+# With uv (recommended)
+uv run python -m research_agent.main --mode ui
+
+# Or with conda/pip
 conda activate llm311
 python -m research_agent.main --mode ui
 # Auto-finds available port starting at 7860

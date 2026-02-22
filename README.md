@@ -18,8 +18,11 @@ A personal research memory for social sciences researchers. Ingest papers, build
 # Clone and setup
 git clone https://github.com/Fenris91/research_agent.git
 cd research_agent
-conda create -n llm311 python=3.11
-conda activate llm311
+
+# Install with uv (recommended)
+uv sync
+
+# Or with pip (backwards compatible)
 pip install -r requirements-runtime.txt
 
 # Run
@@ -42,6 +45,7 @@ Interactive graph visualization of your research landscape:
 
 | Component | Technology |
 |-----------|-----------|
+| Package manager | uv (pip compatible) |
 | Language | Python 3.11 |
 | Embeddings | BAAI/bge-base-en-v1.5 (768 dims) |
 | Vector DB | ChromaDB |
@@ -77,6 +81,11 @@ src/research_agent/
 ## Development
 
 ```bash
+# With uv
+uv sync --all-extras
+uv run pytest tests/
+
+# Or with pip
 pip install -r requirements.txt
 pytest tests/
 ```
