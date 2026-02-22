@@ -409,34 +409,34 @@ class AcademicSearchTools:
 
                 # Extract authors
                 authors = []
-                for authorship in item.get("authorships", []):
-                    author = authorship.get("author", {})
+                for authorship in item.get("authorships") or []:
+                    author = authorship.get("author") or {}
                     if author.get("display_name"):
                         authors.append(author["display_name"])
 
                 # Extract fields/concepts
                 fields = []
-                for concept in item.get("concepts", [])[:5]:  # Top 5 concepts
+                for concept in (item.get("concepts") or [])[:5]:  # Top 5 concepts
                     if concept.get("display_name"):
                         fields.append(concept["display_name"])
 
                 # Get open access URL
                 oa_url = None
-                oa_info = item.get("open_access", {})
+                oa_info = item.get("open_access") or {}
                 if oa_info.get("oa_url"):
                     oa_url = oa_info["oa_url"]
 
                 # Get venue/journal
                 venue = None
-                primary_location = item.get("primary_location", {})
+                primary_location = item.get("primary_location") or {}
                 if primary_location:
-                    source = primary_location.get("source", {})
+                    source = primary_location.get("source") or {}
                     if source:
                         venue = source.get("display_name")
 
                 paper = Paper(
                     paper_id=item.get("id", "").replace("https://openalex.org/", ""),
-                    title=item.get("title", ""),
+                    title=item.get("title") or "",
                     abstract=abstract,
                     year=item.get("publication_year"),
                     authors=authors,
@@ -668,17 +668,20 @@ class AcademicSearchTools:
                 item = response.json()
 
                 abstract = self._reconstruct_abstract(item.get("abstract_inverted_index"))
-                authors = [a.get("author", {}).get("display_name", "") for a in item.get("authorships", [])]
-                fields = [c.get("display_name", "") for c in item.get("concepts", [])[:5]]
+                authors = [(a.get("author") or {}).get("display_name", "") for a in item.get("authorships") or []]
+                fields = [c.get("display_name", "") for c in (item.get("concepts") or [])[:5]]
 
                 oa_url = None
-                oa_info = item.get("open_access", {})
+                oa_info = item.get("open_access") or {}
                 if oa_info.get("oa_url"):
                     oa_url = oa_info["oa_url"]
 
+                primary_loc = item.get("primary_location") or {}
+                venue_source = primary_loc.get("source") or {}
+
                 paper = Paper(
                     paper_id=item.get("id", "").replace("https://openalex.org/", ""),
-                    title=item.get("title", ""),
+                    title=item.get("title") or "",
                     abstract=abstract,
                     year=item.get("publication_year"),
                     authors=authors,
@@ -687,7 +690,7 @@ class AcademicSearchTools:
                     open_access_url=oa_url,
                     source="openalex",
                     fields=fields,
-                    venue=item.get("primary_location", {}).get("source", {}).get("display_name"),
+                    venue=venue_source.get("display_name"),
                     url=item.get("id")
                 )
 
@@ -757,6 +760,9 @@ class AcademicSearchTools:
                 )
                 response.raise_for_status()
                 items = response.json()
+                if not isinstance(items, list):
+                    logger.warning("S2 batch endpoint returned non-list: %s", type(items).__name__)
+                    continue
 
                 for item in items:
                     if not item:
@@ -816,7 +822,7 @@ class AcademicSearchTools:
                 return []
 
             data = response.json()
-            refs = data.get("message", {}).get("reference", [])
+            refs = (data.get("message") or {}).get("reference") or []
             ref_dois = []
             for ref in refs:
                 ref_doi = ref.get("DOI")

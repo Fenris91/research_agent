@@ -490,7 +490,7 @@ class CitationExplorer:
                 paper_id=s2_data.get("paperId", paper_id),
                 title=s2_data.get("title", "Unknown Title"),
                 year=s2_data.get("year"),
-                authors=[a.get("name", "") for a in s2_data.get("authors", [])],
+                authors=[a.get("name", "") for a in s2_data.get("authors") or []],
                 citation_count=s2_data.get("citationCount"),
                 abstract=s2_data.get("abstract"),
                 venue=s2_data.get("venue"),
@@ -639,14 +639,14 @@ class CitationExplorer:
             if paper.doi:
                 results = await self.search.search_semantic_scholar(paper.doi, limit=1)
                 if results:
-                    return results[0].id
+                    return results[0].paper_id
 
             if paper.title:
                 results = await self.search.search_semantic_scholar(
                     paper.title, limit=3
                 )
                 if results:
-                    return results[0].id
+                    return results[0].paper_id
         except Exception as e:
             logger.warning("Failed to resolve OpenAlex ID %s: %s", paper_id, e)
 
