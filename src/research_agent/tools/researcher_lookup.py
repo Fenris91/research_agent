@@ -19,6 +19,7 @@ from typing import List, Dict, Optional, Any
 
 import httpx
 
+from research_agent.models.paper import BasePaper
 from research_agent.tools.academic_search import RateLimiter
 from research_agent.utils.retry import retry_with_backoff
 from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
@@ -28,32 +29,15 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class AuthorPaper:
-    """A paper authored by a researcher."""
+class AuthorPaper(BasePaper):
+    """A paper authored by a researcher.
 
-    paper_id: str
-    title: str
-    year: Optional[int] = None
-    citation_count: Optional[int] = None
-    venue: Optional[str] = None
-    doi: Optional[str] = None
-    abstract: Optional[str] = None
-    fields: Optional[List[str]] = None
-    source: str = "unknown"  # "openalex" or "semantic_scholar"
+    Inherits all fields from BasePaper. Source defaults to "unknown".
+    """
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return {
-            "paper_id": self.paper_id,
-            "title": self.title,
-            "year": self.year,
-            "citation_count": self.citation_count,
-            "venue": self.venue,
-            "doi": self.doi,
-            "abstract": self.abstract,
-            "fields": self.fields,
-            "source": self.source,
-        }
+    def __post_init__(self):
+        if self.source is None:
+            self.source = "unknown"
 
 
 @dataclass

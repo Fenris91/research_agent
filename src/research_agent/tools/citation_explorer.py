@@ -16,6 +16,7 @@ import logging
 
 import httpx
 
+from research_agent.models.paper import BasePaper
 from research_agent.tools.academic_search import AcademicSearchTools
 from research_agent.utils.retry import retry_with_backoff
 
@@ -26,17 +27,13 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class CitationPaper:
-    """Represents a paper in a citation network."""
+class CitationPaper(BasePaper):
+    """A paper in a citation network.
 
-    paper_id: str
-    title: str
-    year: Optional[int] = None
-    authors: Optional[List[str]] = None
-    citation_count: Optional[int] = None
-    abstract: Optional[str] = None
-    venue: Optional[str] = None
-    url: Optional[str] = None
+    Inherits all fields from BasePaper. No additional fields needed.
+    """
+
+    pass
 
 
 @dataclass

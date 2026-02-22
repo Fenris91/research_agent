@@ -851,7 +851,7 @@ Keywords:"""
                 )
 
                 for paper in papers:
-                    citation_count = paper.citations or 0
+                    citation_count = paper.citation_count or 0
                     if min_citations and citation_count < min_citations:
                         continue
                     external_results.append(
@@ -881,7 +881,7 @@ Keywords:"""
                         r.get("doi") == paper.doi for r in external_results
                     ):
                         continue
-                    citation_count = paper.citations or 0
+                    citation_count = paper.citation_count or 0
                     if min_citations and citation_count < min_citations:
                         continue
                     external_results.append(

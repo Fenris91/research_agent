@@ -589,8 +589,8 @@ class ResearchVectorStore:
                         "year": meta.get("year"),
                         "authors": meta.get("authors", ""),
                         "added_at": meta.get("added_at", ""),
-                        "citations": meta.get("citations")
-                        or meta.get("citation_count"),
+                        "citation_count": meta.get("citation_count")
+                        or meta.get("citations"),
                         "venue": meta.get("venue", ""),
                         "fields": meta.get("fields", ""),
                         "source": meta.get("source", ""),

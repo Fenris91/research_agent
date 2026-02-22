@@ -18,7 +18,7 @@ def make_paper(**overrides: Any) -> dict:
     """Create a Paper-compatible dict with sensible defaults.
 
     Matches the Paper dataclass in academic_search.py:
-        paper_id, title, abstract, year, authors, citations, doi,
+        paper_id, title, abstract, year, authors, citation_count, doi,
         open_access_url, source, fields, venue, url, oa_status,
         tldr, specter_embedding
     """
@@ -28,7 +28,7 @@ def make_paper(**overrides: Any) -> dict:
         "abstract": "This is a test abstract about research.",
         "year": 2024,
         "authors": ["Author One", "Author Two"],
-        "citations": 42,
+        "citation_count": 42,
         "doi": "10.1234/test.2024",
         "open_access_url": None,
         "source": "semantic_scholar",

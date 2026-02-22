@@ -263,7 +263,7 @@ class GraphBuilder:
         if pid in self._nodes:
             return pid
 
-        citations = d.get("citations") or d.get("citation_count") or 0
+        citations = d.get("citation_count") or d.get("citations") or 0
         oa_url = d.get("open_access_url")
         oa = _oa_status(oa_url, d.get("oa_status"))
 

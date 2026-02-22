@@ -16,12 +16,13 @@ import asyncio
 import logging
 import random
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Callable
 from functools import wraps
 
 import httpx
 
+from research_agent.models.paper import BasePaper
 from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
 from research_agent.utils.retry import retry_with_backoff
 from research_agent.utils.observability import timed
@@ -98,30 +99,18 @@ class RateLimiter:
 
 
 @dataclass
-class Paper:
-    """Standardized paper representation across sources."""
-    paper_id: str
-    title: str
-    abstract: Optional[str]
-    year: Optional[int]
-    authors: List[str]
-    citations: Optional[int]
-    doi: Optional[str]
-    open_access_url: Optional[str]
-    source: str  # "semantic_scholar", "openalex", etc.
-    fields: Optional[List[str]] = None
-    venue: Optional[str] = None
-    url: Optional[str] = None
+class Paper(BasePaper):
+    """Standardized paper representation from academic search APIs.
+
+    Extends BasePaper with open-access info, TLDR summaries, and SPECTER embeddings.
+    """
+    open_access_url: Optional[str] = None
     oa_status: Optional[str] = None  # gold/green/hybrid/bronze from Unpaywall
     tldr: Optional[str] = None  # S2 TLDR summary
     specter_embedding: Optional[List[float]] = None  # S2 SPECTER2 768d vector
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return asdict(self)
-
     def __str__(self) -> str:
-        return f"{self.title} ({self.year}) - {self.citations or 0} citations"
+        return f"{self.title} ({self.year}) - {self.citation_count or 0} citations"
 
 
 class AcademicSearchTools:
@@ -317,7 +306,7 @@ class AcademicSearchTools:
                     abstract=item.get("abstract"),
                     year=item.get("year"),
                     authors=[a.get("name", "") for a in (item.get("authors") or [])],
-                    citations=item.get("citationCount"),
+                    citation_count=item.get("citationCount"),
                     doi=doi,
                     open_access_url=oa_url,
                     source="semantic_scholar",
@@ -450,7 +439,7 @@ class AcademicSearchTools:
                     abstract=abstract,
                     year=item.get("publication_year"),
                     authors=authors,
-                    citations=item.get("cited_by_count"),
+                    citation_count=item.get("cited_by_count"),
                     doi=item.get("doi", "").replace("https://doi.org/", "") if item.get("doi") else None,
                     open_access_url=oa_url,
                     source="openalex",
@@ -665,7 +654,7 @@ class AcademicSearchTools:
                     abstract=item.get("abstract"),
                     year=item.get("year"),
                     authors=[a.get("name", "") for a in (item.get("authors") or [])],
-                    citations=item.get("citationCount"),
+                    citation_count=item.get("citationCount"),
                     doi=doi,
                     open_access_url=oa_url,
                     source="semantic_scholar",
@@ -708,7 +697,7 @@ class AcademicSearchTools:
                     abstract=abstract,
                     year=item.get("publication_year"),
                     authors=authors,
-                    citations=item.get("cited_by_count"),
+                    citation_count=item.get("cited_by_count"),
                     doi=item.get("doi", "").replace("https://doi.org/", "") if item.get("doi") else None,
                     open_access_url=oa_url,
                     source="openalex",
@@ -903,7 +892,7 @@ class AcademicSearchTools:
         unique_papers = self._deduplicate(all_papers)
 
         # Sort by citation count (descending)
-        unique_papers.sort(key=lambda p: p.citations or 0, reverse=True)
+        unique_papers.sort(key=lambda p: p.citation_count or 0, reverse=True)
 
         logger.info(f"Combined search found {len(unique_papers)} unique papers for: {query}")
         return unique_papers

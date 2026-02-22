@@ -1519,7 +1519,7 @@ def create_app(agent=None):
             table_data = []
             for paper in papers:
                 year = paper.get("year")
-                citations = paper.get("citations") or paper.get("citation_count")
+                citations = paper.get("citation_count") or paper.get("citations")
                 if year_from and year and year < year_from:
                     continue
                 if year_to and year and year > year_to:
@@ -1873,15 +1873,15 @@ def create_app(agent=None):
             if "year" in df.columns:
                 df["year"] = df["year"].apply(_to_int)
 
-            if "citations" in df.columns:
-                df["citations"] = df["citations"].apply(_to_int)
+            if "citation_count" in df.columns:
+                df["citation_count"] = df["citation_count"].apply(_to_int)
 
             if year_from and year_from > 1900:
                 df = df[df["year"].isna() | (df["year"] >= year_from)]
             if year_to and year_to < 2030:
                 df = df[df["year"].isna() | (df["year"] <= year_to)]
             if min_citations:
-                df = df[df["citations"].isna() | (df["citations"] >= min_citations)]
+                df = df[df["citation_count"].isna() | (df["citation_count"] >= min_citations)]
 
             if df.empty:
                 _analysis_df["df"] = None
@@ -1953,8 +1953,8 @@ def create_app(agent=None):
 
             if "year" in df.columns:
                 df["year"] = df["year"].apply(_to_int)
-            if "citations" in df.columns:
-                df["citations"] = df["citations"].apply(_to_int)
+            if "citation_count" in df.columns:
+                df["citation_count"] = df["citation_count"].apply(_to_int)
 
             _analysis_df["df"] = df
             _analysis_df["path"] = None
@@ -2359,7 +2359,7 @@ def create_app(agent=None):
                             "paper_id": p.paper_id,
                             "title": p.title,
                             "year": p.year,
-                            "citation_count": p.citations,
+                            "citation_count": p.citation_count,
                         }
                         for p in results
                     ]
@@ -2437,10 +2437,10 @@ def create_app(agent=None):
                         )
 
                     def _sort_key(paper):
-                        return (paper.year or 0, paper.citations or 0)
+                        return (paper.year or 0, paper.citation_count or 0)
 
                     candidates = sorted(papers, key=_sort_key, reverse=True)
-                    seed_paper_id = candidates[0].id
+                    seed_paper_id = candidates[0].paper_id
                 finally:
                     await search_tools.close()
 
@@ -2526,7 +2526,7 @@ def create_app(agent=None):
                         fields=fields,
                         doi=paper.doi,
                         year=paper.year,
-                        citations=paper.citation_count,
+                        citation_count=paper.citation_count,
                         authors=None,
                         source=paper.source,
                         extra_metadata={
@@ -4454,7 +4454,7 @@ def create_app(agent=None):
                     "id": p["paper_id"],
                     "title": p["title"],
                     "year": p.get("year"),
-                    "citations": p.get("citations") or 0,
+                    "citations": p.get("citation_count") or p.get("citations") or 0,
                     "fields": p.get("fields", "").split(", ") if p.get("fields") else [],
                     "venue": p.get("venue", ""),
                     "doi": p.get("doi", ""),

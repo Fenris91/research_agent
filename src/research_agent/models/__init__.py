@@ -6,8 +6,10 @@ from .embeddings import (
     EmbeddingModel,
 )
 from .reranker import Reranker, load_reranker_from_config
+from .paper import BasePaper
 
 __all__ = [
+    "BasePaper",
     "load_llm",
     "LLMConfig",
     "check_gpu",
