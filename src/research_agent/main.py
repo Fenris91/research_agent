@@ -27,6 +27,8 @@ CLOUD_PROVIDERS = {
         "default_model": "gpt-4o-mini",
         "models": ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1", "gpt-4o"],
     },
+    # Uses Anthropic's OpenAI compatibility layer (docs.anthropic.com/en/api/openai-sdk)
+    # Supports chat completions, tool use, streaming. Not all native features (e.g. caching).
     "anthropic": {
         "name": "Anthropic (Claude)",
         "base_url": "https://api.anthropic.com/v1/",
