@@ -1,11 +1,11 @@
 <div id="knowledge-explorer">
   <div class="explorer-header">
     <div class="elb-row">
-      <button class="elb active" data-layer="structure" onclick="switchLayerBtn(this,'structure')">Structure</button>
+      <button class="elb active" data-layer="structure">Structure</button>
       <span class="elb-sep">&middot;</span>
-      <button class="elb" data-layer="people" onclick="switchLayerBtn(this,'people')">People</button>
+      <button class="elb" data-layer="people">People</button>
       <span class="elb-sep">&middot;</span>
-      <button class="elb" data-layer="topics" onclick="switchLayerBtn(this,'topics')">Topics</button>
+      <button class="elb" data-layer="topics">Topics</button>
     </div>
     <div class="explorer-search-wrap">
       <input type="text" class="explorer-search" placeholder="Filter by label..." />
@@ -1034,6 +1034,16 @@
 
   // Set initial button state
   setActiveLayerBtn(activeLayer);
+
+  // Header button clicks
+  headerLayerBtns.forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var layer = btn.getAttribute("data-layer");
+      setActiveLayerBtn(layer);
+      applyLayerEmphasis(layer);
+      window.parent.postMessage({type: "explorer-layer", layer: layer}, "*");
+    });
+  });
 
   // Bottom button clicks
   layerBtns.forEach(function(btn) {
