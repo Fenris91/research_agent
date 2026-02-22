@@ -6,7 +6,6 @@ Run with: python -m research_agent.main
 
 import argparse
 import os
-from pathlib import Path
 from typing import Optional, Tuple
 
 try:
@@ -16,7 +15,7 @@ try:
 except Exception:
     pass
 
-import yaml
+from research_agent.utils.config import load_config
 
 
 # Cloud provider configurations (OpenAI-compatible endpoints)
@@ -88,18 +87,6 @@ def detect_available_provider(config: dict) -> Tuple[str, Optional[dict]]:
     # Fallback to HuggingFace (local)
     print("  No cloud providers found, will use local HuggingFace models")
     return "huggingface", None
-
-
-def load_config(config_path: str = "configs/config.yaml") -> dict:
-    """Load configuration from YAML file."""
-    path = Path(config_path)
-
-    if not path.exists():
-        print(f"Config not found at {config_path}, using defaults")
-        return {}
-
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 def main():

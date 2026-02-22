@@ -1,8 +1,7 @@
 """Gradio components for the Citation Explorer tab."""
 
-from pathlib import Path
-
 import gradio as gr
+from research_agent.utils.config import load_config as _load_config
 import matplotlib.pyplot as plt
 import networkx as nx
 
@@ -404,20 +403,6 @@ def _clear_checks(table_data):
         updated.append(row_list)
 
     return updated
-
-
-def _load_config():
-    config_path = Path("configs/config.yaml")
-    if not config_path.exists():
-        return {}
-
-    try:
-        import yaml
-
-        with config_path.open("r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except Exception:
-        return {}
 
 
 def _get_kb_resources():

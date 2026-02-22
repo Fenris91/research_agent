@@ -16,6 +16,7 @@ from tests.test_config import Config
 # Highly Connected Paper Tests
 # ============================================
 
+@pytest.mark.unit
 class TestHighlyConnected:
     """Tests for find_highly_connected functionality."""
 
@@ -152,6 +153,7 @@ class TestHighlyConnected:
 # Citation Overlap Tests
 # ============================================
 
+@pytest.mark.unit
 class TestCitationOverlap:
     """Tests for citation overlap calculation in suggest_related."""
 
@@ -182,6 +184,7 @@ class TestCitationOverlap:
 # Network Statistics Tests
 # ============================================
 
+@pytest.mark.unit
 class TestNetworkStatistics:
     """Tests for network statistics calculation."""
 
@@ -291,6 +294,7 @@ class TestNetworkStatistics:
 # Performance Tests
 # ============================================
 
+@pytest.mark.unit
 class TestPerformance:
     """Performance-related tests."""
 

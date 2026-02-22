@@ -23,6 +23,7 @@ from tests.test_config import Config, TestPaperIDs, ExpectedResults, Timeouts
 # Unit Tests (Mocked)
 # ============================================
 
+@pytest.mark.unit
 class TestCitationExplorerUnit:
     """Unit tests using mocked API responses."""
 
@@ -163,6 +164,7 @@ class TestCitationExplorerUnit:
 # ============================================
 
 @pytest.mark.integration
+@pytest.mark.network
 class TestCitationExplorerIntegration:
     """Integration tests with real API calls (limited)."""
 
@@ -237,6 +239,7 @@ class TestCitationExplorerIntegration:
 # Error Handling Tests
 # ============================================
 
+@pytest.mark.unit
 class TestCitationExplorerErrors:
     """Tests for error handling and edge cases."""
 
@@ -368,6 +371,7 @@ class TestCitationExplorerErrors:
 # Suggest Related Tests
 # ============================================
 
+@pytest.mark.unit
 class TestSuggestRelated:
     """Tests for the suggest_related functionality."""
 

@@ -14,6 +14,7 @@ from pathlib import Path
 import gradio as gr
 
 from research_agent.explorer import ExplorerRenderer, GraphBuilder, get_mock_graph_data
+from research_agent.utils.config import load_config as _load_config
 
 logger = logging.getLogger(__name__)
 
@@ -1408,31 +1409,10 @@ def create_app(agent=None):
         processor = None
         reranker = None
         rerank_top_k = None
-        _config_cache = None
 
         # Shared reranker settings
         reranker_enabled = None
         rerank_top_k = None
-
-        def _load_config():
-            nonlocal _config_cache
-            if _config_cache is not None:
-                return _config_cache
-
-            config_path = Path("configs/config.yaml")
-            if not config_path.exists():
-                _config_cache = {}
-                return _config_cache
-
-            try:
-                import yaml
-
-                with config_path.open("r", encoding="utf-8") as f:
-                    _config_cache = yaml.safe_load(f) or {}
-            except Exception as e:  # pragma: no cover - defensive
-                logger.error(f"Failed to load config: {e}")
-                _config_cache = {}
-            return _config_cache
 
         def _get_kb_resources():
             nonlocal \

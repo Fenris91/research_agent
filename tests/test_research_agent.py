@@ -39,6 +39,7 @@ def make_state(query: str, **overrides):
     return state
 
 
+@pytest.mark.unit
 class TestQueryClassification:
     """Tests for query understanding and classification."""
 
@@ -87,6 +88,7 @@ class TestQueryClassification:
         assert result["query_type"] == "general"
 
 
+@pytest.mark.unit
 class TestLocalSearch:
     """Tests for local vector store search."""
 
@@ -130,6 +132,7 @@ class TestLocalSearch:
         assert result["should_search_external"] is True
 
 
+@pytest.mark.unit
 class TestSynthesis:
     """Tests for result synthesis."""
 
@@ -188,6 +191,7 @@ class TestSynthesis:
         assert "No relevant results" in formatted
 
 
+@pytest.mark.unit
 class TestIngestionOffer:
     """Tests for ingestion offer logic."""
 
@@ -231,6 +235,7 @@ class TestIngestionOffer:
         assert result["final_answer"] == "Answer."
 
 
+@pytest.mark.unit
 class TestGraphExecution:
     """Tests for full graph execution."""
 

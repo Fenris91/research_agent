@@ -163,7 +163,7 @@ class CitationExplorer:
                         citation_counts[ref_id] = {"paper": ref, "count": 0}
                     citation_counts[ref_id]["count"] += 1
             except Exception as e:
-                print(f"Error processing paper {pid}: {e}")
+                logger.warning(f"Error processing paper {pid}: {e}")
                 continue
 
         # Filter and sort by connection count
@@ -221,6 +221,7 @@ class CitationExplorer:
                         "overlap_percentage": overlap / len(target_refs),
                     }
             except Exception as e:
+                logger.debug(f"suggest_related skipped paper: {e}")
                 continue
 
         # Sort by overlap score

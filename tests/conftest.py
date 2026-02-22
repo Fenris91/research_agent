@@ -282,20 +282,6 @@ def api_call_tracker():
 
 
 # ============================================
-# Integration Test Markers
-# ============================================
-
-
-def pytest_configure(config):
-    """Configure custom pytest markers."""
-    config.addinivalue_line(
-        "markers", "integration: mark test as integration test (hits real APIs)"
-    )
-    config.addinivalue_line("markers", "slow: mark test as slow running")
-    config.addinivalue_line("markers", "ui: mark test as UI component test")
-
-
-# ============================================
 # Skip Markers for Conditional Tests
 # ============================================
 

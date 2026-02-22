@@ -225,7 +225,12 @@ class ResearcherLookup:
             params["mailto"] = self.email
 
         try:
-            response = await client.get(self.OPENALEX_AUTHORS_URL, params=params)
+            response = await retry_with_backoff(
+                lambda: client.get(self.OPENALEX_AUTHORS_URL, params=params),
+                max_retries=2,
+                base_delay=1.0,
+                retry_on=(429, 503, 504),
+            )
             response.raise_for_status()
             data = response.json()
 
@@ -343,7 +348,12 @@ class ResearcherLookup:
             params["mailto"] = self.email
 
         try:
-            response = await client.get("https://api.openalex.org/works", params=params)
+            response = await retry_with_backoff(
+                lambda: client.get("https://api.openalex.org/works", params=params),
+                max_retries=2,
+                base_delay=1.0,
+                retry_on=(429, 503, 504),
+            )
             response.raise_for_status()
             data = response.json()
 
