@@ -22,13 +22,16 @@ A PR is mergeable when:
 | Claude Code Review | Auto on PR | Code review via `claude-code-action` |
 | Claude Code (CLI) | `@claude` mention | On-demand review, implementation, Q&A |
 
-### Branch protection (recommended)
+### Branch protection (active)
 
-On GitHub, set these for `master`:
+Currently enforced on `master`:
 - Require pull request before merging
-- Require at least 1 approval
-- Require status checks to pass (lint, unit-tests)
-- Do not allow bypassing the above settings
+- Require at least 1 human approval
+- Require status checks to pass (`lint`, `unit-tests`)
+- Dismiss stale reviews on new pushes
+- Force push blocked
+
+> Note: AI agents post review comments but cannot submit formal GitHub approvals (requires collaborator status). The human reads agent feedback and decides whether to approve. See `AGENTS.md` for how agents cooperate.
 
 ## Future: Multi-AI voting
 
@@ -43,11 +46,13 @@ Goal: replace the single "at least one AI" requirement with a structured voting 
 - Merge requires: human approval + majority AI approval (e.g., 2 of 3)
 - Human retains veto/override power at all times
 
-### Steps to get there
+### Implementation path
 
-1. Standardize AI review output format (structured comment with verdict tag)
-2. Build a GitHub Action that parses verdicts and reports a combined status
-3. Add the combined status as a required check on `master`
+The key insight: GitHub only counts approvals from collaborators, not bot comments. To bridge this gap:
+
+1. Each agent posts a comment containing a structured verdict tag (e.g., `<!-- AI_VERDICT: APPROVE -->`)
+2. A **tally workflow** runs after agent workflows complete, scans for verdict tags, and sets a status check (`ai-review: 2/3 approve`)
+3. Add `ai-review` as a required status check on `master`
 4. Gradually relax human approval from "always required" to "tiebreaker" to "spot check"
 5. Define escalation rules (e.g., any `REQUEST_CHANGES` blocks merge until addressed)
 
