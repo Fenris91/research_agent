@@ -17,6 +17,7 @@ import operator
 
 from langgraph.graph import StateGraph, END
 
+from ..utils.openalex import SOURCE_LABELS, SOURCE_LABELS_LONG
 from ..models.llm_utils import (
     get_qlora_pipeline,
     get_ollama_pipeline,
@@ -47,6 +48,9 @@ class ResearchState(TypedDict):
     # Context from UI selection
     current_researcher: Optional[str]
     current_paper_id: Optional[str]
+    # Context items from pill strip
+    auth_context_items: Optional[List[str]]
+    chat_context_items: Optional[List[str]]
 
 
 @dataclass
@@ -848,7 +852,7 @@ Keywords:"""
                 )
 
                 for paper in papers:
-                    citation_count = paper.citations or 0
+                    citation_count = paper.citation_count or 0
                     if min_citations and citation_count < min_citations:
                         continue
                     external_results.append(
@@ -859,7 +863,7 @@ Keywords:"""
                             if paper.authors
                             else "",
                             "year": paper.year,
-                            "paper_id": paper.id,
+                            "paper_id": paper.paper_id,
                             "doi": paper.doi,
                             "citation_count": citation_count,
                             "url": paper.url,
@@ -878,7 +882,7 @@ Keywords:"""
                         r.get("doi") == paper.doi for r in external_results
                     ):
                         continue
-                    citation_count = paper.citations or 0
+                    citation_count = paper.citation_count or 0
                     if min_citations and citation_count < min_citations:
                         continue
                     external_results.append(
@@ -889,7 +893,7 @@ Keywords:"""
                             if paper.authors
                             else "",
                             "year": paper.year,
-                            "paper_id": paper.id,
+                            "paper_id": paper.paper_id,
                             "doi": paper.doi,
                             "citation_count": citation_count,
                             "url": paper.url,
@@ -980,6 +984,8 @@ Keywords:"""
             query, query_type, all_results,
             current_researcher=current_researcher,
             current_paper_id=current_paper_id,
+            auth_context_items=state.get("auth_context_items"),
+            chat_context_items=state.get("chat_context_items"),
         )
 
         # Generate response
@@ -1005,6 +1011,8 @@ Keywords:"""
         results: List[Dict],
         current_researcher: Optional[str] = None,
         current_paper_id: Optional[str] = None,
+        auth_context_items: Optional[List[str]] = None,
+        chat_context_items: Optional[List[str]] = None,
     ) -> str:
         """Build a prompt for synthesizing results based on query type."""
 
@@ -1015,16 +1023,6 @@ Keywords:"""
 User: {query}
 
 Response:"""
-
-        # Map source types to human-readable labels
-        source_labels = {
-            "local_kb": "Knowledge Base Paper",
-            "local_note": "User Research Note",
-            "local_web": "Saved Web Source",
-            "semantic_scholar": "Semantic Scholar",
-            "openalex": "OpenAlex",
-            "web": "Web Search",
-        }
 
         # Build context section if we have selection context
         context_section = ""
@@ -1043,6 +1041,13 @@ Response:"""
                     context_parts.append(f"The user is currently focused on the paper: \"{paper_title}\"")
                 else:
                     context_parts.append(f"The user has selected a specific paper (ID: {current_paper_id[:20]}...)")
+            # Add pinned/active context items if available
+            auth_items = auth_context_items or []
+            chat_items = chat_context_items or []
+            if auth_items:
+                context_parts.append(f"The user has pinned these topics: {', '.join(auth_items)}")
+            if chat_items:
+                context_parts.append(f"Recent conversation topics include: {', '.join(chat_items)}")
             context_section = "\n\nContext: " + ". ".join(context_parts) + ". Prioritize information relevant to this context."
 
         # Format sources
@@ -1051,9 +1056,9 @@ Response:"""
             title = result.get("title", "Unknown")
             authors = result.get("authors", "")
             year = result.get("year", "")
-            content = result.get("content", "")[:800]  # Truncate content
+            content = str(result.get("content") or "")[:800]
             source = result.get("source", "unknown")
-            source_label = source_labels.get(source, source)
+            source_label = SOURCE_LABELS_LONG.get(source, source)
             tags = result.get("tags", "")
             url = result.get("url", "")
 
@@ -1074,60 +1079,53 @@ Response:"""
             sources_text = "\n(No sources found)"
 
         # Build prompt based on query type
-        if query_type == "literature_review":
-            instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
+        _KB_PREAMBLE = (
+            "You are a research assistant with access to a personal knowledge base of ingested papers.\n\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ "
+            "from how they are referenced in the query (e.g., \"Envisaging the Future of Cities\" IS the World Cities Report 2022).\n"
+            "- Answer based on the CONTENT of the chunks provided, not by matching title strings.\n"
+            "- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.\n"
+            "- NEVER say a topic \"is not mentioned\" just because a title string doesn't match. Read the actual text excerpts.\n"
+        )
+        _MANDATORY = (
+            "\nMANDATORY: If sources are provided below, you MUST reference their content in your answer. "
+            "Start by addressing the question using the source excerpts. "
+            "Do NOT say \"no information found\" or \"not mentioned\" when sources are present."
+        )
 
-CRITICAL INSTRUCTIONS:
-- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
-- Answer based on the CONTENT of the chunks provided, not by matching title strings.
-- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
-- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
+        _QUERY_INSTRUCTIONS = {
+            "literature_review": (
+                "\nProvide a comprehensive literature review based on the source content:\n"
+                "1. Overview of the research landscape\n"
+                "2. Key themes and findings from the sources\n"
+                "3. Notable contributions from each relevant source\n"
+                "4. Research gaps or future directions\n\n"
+                "Cite sources by their title using [1], [2], etc."
+            ),
+            "factual": (
+                "\nProvide a precise, factual answer based on the source content.\n"
+                "Be specific and cite your sources using [1], [2], etc.\n"
+                "If sources conflict, note the disagreement."
+            ),
+            "analysis": (
+                "\nProvide a critical analysis based on the source content.\n"
+                "Compare different perspectives, evaluate evidence, and draw conclusions.\n"
+                "Cite sources using [1], [2], etc."
+            ),
+        }
 
-Provide a comprehensive literature review based on the source content:
-1. Overview of the research landscape
-2. Key themes and findings from the sources
-3. Notable contributions from each relevant source
-4. Research gaps or future directions
-
-Cite sources by their title using [1], [2], etc.
-
-MANDATORY: If sources are provided below, you MUST reference their content in your answer. Start by addressing the question using the source excerpts. Do NOT say "no information found" or "not mentioned" when sources are present."""
-
-        elif query_type == "factual":
-            instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
-
-CRITICAL INSTRUCTIONS:
-- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
-- Answer based on the CONTENT of the chunks provided, not by matching title strings.
-- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
-- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
-
-Provide a precise, factual answer based on the source content.
-Be specific and cite your sources using [1], [2], etc.
-If sources conflict, note the disagreement.
-
-MANDATORY: If sources are provided below, you MUST reference their content in your answer. Start by addressing the question using the source excerpts. Do NOT say "no information found" or "not mentioned" when sources are present."""
-
-        elif query_type == "analysis":
-            instruction = """You are a research assistant with access to a personal knowledge base of ingested papers.
-
-CRITICAL INSTRUCTIONS:
-- The sources below are text chunks from papers in the knowledge base. Their stored titles may differ from how they are referenced in the query (e.g., "Envisaging the Future of Cities" IS the World Cities Report 2022).
-- Answer based on the CONTENT of the chunks provided, not by matching title strings.
-- If a chunk's content is relevant to the question, USE it — even if its title doesn't exactly match what the user named.
-- NEVER say a topic "is not mentioned" just because a title string doesn't match. Read the actual text excerpts.
-
-Provide a critical analysis based on the source content.
-Compare different perspectives, evaluate evidence, and draw conclusions.
-Cite sources using [1], [2], etc.
-
-MANDATORY: If sources are provided below, you MUST reference their content in your answer. Start by addressing the question using the source excerpts. Do NOT say "no information found" or "not mentioned" when sources are present."""
-
+        if query_type in _QUERY_INSTRUCTIONS:
+            instruction = _KB_PREAMBLE + _QUERY_INSTRUCTIONS[query_type] + _MANDATORY
         else:  # general — but we have sources (casual w/o sources handled above)
-            instruction = """You are a helpful research assistant. The user asked a general question and some potentially relevant sources were found in the knowledge base.
-
-If the sources below are relevant to the question, use them to inform your answer and cite using [1], [2], etc.
-If they are not relevant to the question, answer directly using your own knowledge and ignore the sources."""
+            instruction = (
+                "You are a helpful research assistant. The user asked a general question "
+                "and some potentially relevant sources were found in the knowledge base.\n\n"
+                "If the sources below are relevant to the question, use them to inform your answer "
+                "and cite using [1], [2], etc.\n"
+                "If they are not relevant to the question, answer directly using your own knowledge "
+                "and ignore the sources."
+            )
 
         prompt = f"""{instruction}{context_section}
 
@@ -1141,29 +1139,26 @@ Response:"""
         return prompt
 
     def _format_results_without_llm(self, query: str, results: List[Dict]) -> str:
-        """Format results when no LLM is available."""
+        """Format retrieved results when no LLM is available for synthesis."""
         if not results:
-            return "No relevant results found for your query."
+            return (
+                "No retrieved sources are available for this query. "
+                "(LLM synthesis is currently unavailable.)"
+            )
 
-        # Map source types to human-readable labels
-        source_labels = {
-            "local_kb": "Knowledge Base",
-            "local_note": "Research Note",
-            "local_web": "Saved Web Source",
-            "semantic_scholar": "Semantic Scholar",
-            "openalex": "OpenAlex",
-            "web": "Web Search",
-        }
-
-        response = f"**Results for:** {query}\n\n"
+        response = (
+            "I retrieved relevant sources, but an LLM is not available to synthesize "
+            "them into a narrative answer right now. Here are the top retrieved "
+            f"results for: **{query}**\n\n"
+        )
 
         for i, result in enumerate(results[:10], 1):
             title = result.get("title", "Unknown")
             authors = result.get("authors", "")
             year = result.get("year", "")
             source = result.get("source", "")
-            source_label = source_labels.get(source, source)
-            content = result.get("content", "")[:200]
+            source_label = SOURCE_LABELS.get(source, source)
+            content = str(result.get("content", ""))[:200]
             tags = result.get("tags", "")
             url = result.get("url", "")
 
@@ -1228,10 +1223,15 @@ Response:"""
             search_filters: Optional filters (year_from, year_to, min_citations)
             context: Optional context from UI (researcher, paper_id)
         """
+        from research_agent.utils.observability import new_request_id
+        new_request_id()
+
         # Extract context
         context = context or {}
         current_researcher = context.get("researcher")
         current_paper_id = context.get("paper_id")
+        auth_context_items = context.get("auth_items", [])
+        chat_context_items = context.get("chat_items", [])
 
         # Apply search filters to config
         if search_filters:
@@ -1267,6 +1267,8 @@ Response:"""
             "error": None,
             "current_researcher": current_researcher,
             "current_paper_id": current_paper_id,
+            "auth_context_items": auth_context_items,
+            "chat_context_items": chat_context_items,
         }
 
         result = {

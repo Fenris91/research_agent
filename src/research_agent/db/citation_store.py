@@ -14,7 +14,7 @@ class CitationPaperRecord:
     paper_id: str
     title: str
     year: Optional[int]
-    citations: Optional[int]
+    citation_count: Optional[int]
     source: Optional[str] = None
     doi: Optional[str] = None
 
@@ -70,7 +70,7 @@ class CitationStore:
                 p.paper_id,
                 p.title,
                 p.year,
-                p.citations,
+                p.citation_count,
                 p.source,
                 p.doi,
                 now,

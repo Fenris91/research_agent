@@ -11,7 +11,7 @@ import math
 import threading
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +190,15 @@ def _paper_size(citations: int) -> float:
     return max(7, min(19, 7 + math.sqrt(citations / 80) * 4))
 
 
-def _oa_status(open_access_url: Optional[str]) -> str:
-    """Derive OA status from open_access_url field."""
+_OA_STATUS_MAP = {
+    "gold": "gold", "green": "green", "hybrid": "hybrid", "bronze": "bronze",
+}
+
+
+def _oa_status(open_access_url: Optional[str], oa_status_field: Optional[str] = None) -> str:
+    """Derive OA status — prefer explicit Unpaywall status, fall back to URL heuristic."""
+    if oa_status_field:
+        return _OA_STATUS_MAP.get(oa_status_field.lower(), "closed")
     if not open_access_url:
         return "closed"
     if "preprint" in open_access_url.lower() or "arxiv" in open_access_url.lower():
@@ -256,9 +263,9 @@ class GraphBuilder:
         if pid in self._nodes:
             return pid
 
-        citations = d.get("citations") or d.get("citation_count") or 0
+        citations = d.get("citation_count") or d.get("citations") or 0
         oa_url = d.get("open_access_url")
-        oa = _oa_status(oa_url)
+        oa = _oa_status(oa_url, d.get("oa_status"))
 
         self._nodes[pid] = {
             "id": pid,
@@ -406,15 +413,198 @@ class GraphBuilder:
             for fid in field_ids:
                 self.add_domain_mapping_edge(fid, domain_id)
 
-    def to_dict(self, active_layer: str = "soc", highlight_terms: list | None = None) -> dict:
-        """Return D3-compatible dict with nodes, links, and layer metadata."""
+    def get_structural_items(self) -> list[dict]:
+        """Return field and domain labels for SOC context pills."""
+        items = []
+        for node in self._nodes.values():
+            if node["type"] == "field":
+                items.append({"label": node["label"], "type": "field", "auto": True, "enabled": True})
+            elif node["type"] == "domain":
+                items.append({"label": node["label"], "type": "domain", "auto": True, "enabled": True})
+        return items
+
+    def inject_embeddings(self, embeddings: Dict[str, List[float]]) -> int:
+        """Inject SPECTER2 embeddings into paper nodes (by S2 paper ID).
+
+        Returns count of nodes enriched.
+        """
+        count = 0
+        for nid, node in self._nodes.items():
+            if node["type"] != "paper":
+                continue
+            # Extract S2 paper ID from node id "paper:<id>"
+            paper_id = nid.split(":", 1)[1] if ":" in nid else nid
+            if paper_id in embeddings:
+                node["_specter_embedding"] = embeddings[paper_id]
+                count += 1
+        return count
+
+    def inject_tldrs(self, tldrs: Dict[str, str]) -> int:
+        """Inject TLDR summaries into paper node metadata.
+
+        Args:
+            tldrs: Dict mapping paper_id → tldr text
+
+        Returns count of nodes enriched.
+        """
+        count = 0
+        for nid, node in self._nodes.items():
+            if node["type"] != "paper":
+                continue
+            paper_id = nid.split(":", 1)[1] if ":" in nid else nid
+            if paper_id in tldrs:
+                node["metadata"]["tldr"] = tldrs[paper_id]
+                count += 1
+        return count
+
+    def compute_semantic_edges(self, threshold: float = 0.65) -> int:
+        """Compute pairwise cosine similarity between papers with embeddings.
+
+        Adds semantic edges for pairs above threshold. Uses pure-Python math
+        (no numpy) — fine for n < 50 papers.
+
+        Returns count of edges added.
+        """
+        # Collect paper nodes with embeddings
+        papers = []
+        for nid, node in self._nodes.items():
+            if node["type"] == "paper" and "_specter_embedding" in node:
+                papers.append((nid, node["_specter_embedding"]))
+
+        if len(papers) < 2:
+            return 0
+
+        def _cosine(a, b):
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = math.sqrt(sum(x * x for x in a))
+            norm_b = math.sqrt(sum(x * x for x in b))
+            if norm_a == 0 or norm_b == 0:
+                return 0.0
+            return dot / (norm_a * norm_b)
+
+        # Existing semantic edge pairs (avoid duplicates)
+        existing = set()
+        for e in self._edges:
+            if e["type"] == "semantic":
+                s = e["source"]
+                t = e["target"]
+                existing.add((s, t))
+                existing.add((t, s))
+
+        count = 0
+        for i in range(len(papers)):
+            for j in range(i + 1, len(papers)):
+                nid_a, emb_a = papers[i]
+                nid_b, emb_b = papers[j]
+                if (nid_a, nid_b) in existing:
+                    continue
+                score = _cosine(emb_a, emb_b)
+                if score >= threshold:
+                    self.add_semantic_edge(nid_a, nid_b, round(score, 3))
+                    count += 1
+
+        logger.info(f"Computed {count} semantic edges from SPECTER2 (threshold={threshold})")
+        return count
+
+    def fill_citation_gaps(self, reference_map: Dict[str, List[str]]) -> int:
+        """Add citation edges from CrossRef reference data.
+
+        Only adds edges between papers that already exist as nodes.
+
+        Args:
+            reference_map: {doi: [referenced_dois]} for papers in the graph
+
+        Returns count of edges added.
+        """
+        # Build DOI → node ID lookup
+        doi_to_nid: Dict[str, str] = {}
+        for nid, node in self._nodes.items():
+            if node["type"] == "paper":
+                doi = (node.get("metadata") or {}).get("doi")
+                if doi:
+                    doi_to_nid[doi.lower()] = nid
+
+        # Existing citation edges
+        existing = set()
+        for e in self._edges:
+            if e["type"] == "citation":
+                existing.add((e["source"], e["target"]))
+
+        count = 0
+        for doi, ref_dois in reference_map.items():
+            src_nid = doi_to_nid.get(doi.lower())
+            if not src_nid:
+                continue
+            for ref_doi in ref_dois:
+                tgt_nid = doi_to_nid.get(ref_doi.lower())
+                if tgt_nid and tgt_nid != src_nid and (src_nid, tgt_nid) not in existing:
+                    self.add_citation_edge(src_nid, tgt_nid)
+                    existing.add((src_nid, tgt_nid))
+                    count += 1
+
+        if count:
+            logger.info(f"CrossRef added {count} citation edges")
+        return count
+
+    @staticmethod
+    def diff(old_data: dict, new_data: dict) -> dict:
+        """Compute node/edge delta between two graph states.
+
+        Returns dict with addNodes, removeNodes, addLinks, removeLinks.
+        """
+        old_node_ids = {n["id"] for n in old_data.get("nodes", [])}
+        new_node_ids = {n["id"] for n in new_data.get("nodes", [])}
+        new_node_map = {n["id"]: n for n in new_data.get("nodes", [])}
+
+        add_nodes = [new_node_map[nid] for nid in (new_node_ids - old_node_ids)]
+        remove_nodes = list(old_node_ids - new_node_ids)
+
+        def _link_key(l):
+            s = l["source"]["id"] if isinstance(l["source"], dict) else l["source"]
+            t = l["target"]["id"] if isinstance(l["target"], dict) else l["target"]
+            return (s, t, l.get("type", ""))
+
+        old_links = {_link_key(l) for l in old_data.get("links", [])}
+        new_links_list = new_data.get("links", [])
+        new_links_set = {_link_key(l) for l in new_links_list}
+        new_links_map = {_link_key(l): l for l in new_links_list}
+
+        add_links = [new_links_map[k] for k in (new_links_set - old_links)]
+        remove_links = [{"source": k[0], "target": k[1], "type": k[2]} for k in (old_links - new_links_set)]
+
+        return {
+            "addNodes": add_nodes,
+            "removeNodes": remove_nodes,
+            "addLinks": add_links,
+            "removeLinks": remove_links,
+        }
+
+    def to_dict(
+        self,
+        active_layer: str = "soc",
+        highlight_terms: list | None = None,
+        context_items: dict | None = None,
+    ) -> dict:
+        """Return D3-compatible dict with nodes, links, and layer metadata.
+
+        Strips internal-only fields (_specter_embedding) from node data.
+        """
+        # Deep-copy nodes and strip large internal fields
+        clean_nodes = []
+        for node in self._nodes.values():
+            n = dict(node)
+            n.pop("_specter_embedding", None)
+            clean_nodes.append(n)
+
         result = {
-            "nodes": list(self._nodes.values()),
+            "nodes": clean_nodes,
             "links": self._edges,
             "active_layer": active_layer,
         }
         if highlight_terms:
             result["highlight_terms"] = highlight_terms
+        if context_items:
+            result["context_items"] = context_items
         return result
 
     def to_json(self, active_layer: str = "soc", highlight_terms: list | None = None) -> str:

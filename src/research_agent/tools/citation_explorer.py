@@ -16,7 +16,10 @@ import logging
 
 import httpx
 
-from research_agent.tools.academic_search import AcademicSearchTools, retry_with_backoff
+from research_agent.models.paper import BasePaper
+from research_agent.tools.academic_search import AcademicSearchTools
+from research_agent.utils.openalex import normalize_openalex_id, is_openalex_id
+from research_agent.utils.retry import retry_with_backoff
 
 if TYPE_CHECKING:
     from research_agent.tools.researcher_lookup import ResearcherProfile, AuthorPaper
@@ -25,17 +28,13 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class CitationPaper:
-    """Represents a paper in a citation network."""
+class CitationPaper(BasePaper):
+    """A paper in a citation network.
 
-    paper_id: str
-    title: str
-    year: Optional[int] = None
-    authors: Optional[List[str]] = None
-    citation_count: Optional[int] = None
-    abstract: Optional[str] = None
-    venue: Optional[str] = None
-    url: Optional[str] = None
+    Inherits all fields from BasePaper. No additional fields needed.
+    """
+
+    pass
 
 
 @dataclass
@@ -163,7 +162,7 @@ class CitationExplorer:
                         citation_counts[ref_id] = {"paper": ref, "count": 0}
                     citation_counts[ref_id]["count"] += 1
             except Exception as e:
-                print(f"Error processing paper {pid}: {e}")
+                logger.warning(f"Error processing paper {pid}: {e}")
                 continue
 
         # Filter and sort by connection count
@@ -221,6 +220,7 @@ class CitationExplorer:
                         "overlap_percentage": overlap / len(target_refs),
                     }
             except Exception as e:
+                logger.debug(f"suggest_related skipped paper: {e}")
                 continue
 
         # Sort by overlap score
@@ -490,7 +490,7 @@ class CitationExplorer:
                 paper_id=s2_data.get("paperId", paper_id),
                 title=s2_data.get("title", "Unknown Title"),
                 year=s2_data.get("year"),
-                authors=[a.get("name", "") for a in s2_data.get("authors", [])],
+                authors=[a.get("name", "") for a in s2_data.get("authors") or []],
                 citation_count=s2_data.get("citationCount"),
                 abstract=s2_data.get("abstract"),
                 venue=s2_data.get("venue"),
@@ -622,22 +622,13 @@ class CitationExplorer:
             logger.warning(f"Error getting cited papers for {paper_id}: {e}")
             return []
 
-    def _normalize_openalex_id(self, paper_id: str) -> str:
-        if paper_id.startswith("https://openalex.org/"):
-            return paper_id.replace("https://openalex.org/", "")
-        return paper_id
-
-    def _is_openalex_id(self, paper_id: str) -> bool:
-        normalized = self._normalize_openalex_id(paper_id)
-        return normalized.startswith("W")
-
     async def _resolve_to_s2_id(self, paper_id: str) -> Optional[str]:
         """Resolve OpenAlex IDs to Semantic Scholar IDs when possible."""
         if not paper_id:
             return None
 
-        normalized = self._normalize_openalex_id(paper_id)
-        if not self._is_openalex_id(normalized):
+        normalized = normalize_openalex_id(paper_id)
+        if not is_openalex_id(normalized):
             return normalized
 
         try:
@@ -648,14 +639,14 @@ class CitationExplorer:
             if paper.doi:
                 results = await self.search.search_semantic_scholar(paper.doi, limit=1)
                 if results:
-                    return results[0].id
+                    return results[0].paper_id
 
             if paper.title:
                 results = await self.search.search_semantic_scholar(
                     paper.title, limit=3
                 )
                 if results:
-                    return results[0].id
+                    return results[0].paper_id
         except Exception as e:
             logger.warning("Failed to resolve OpenAlex ID %s: %s", paper_id, e)
 

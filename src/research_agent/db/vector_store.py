@@ -139,6 +139,9 @@ class ResearchVectorStore:
             embeddings: Embedding vectors for each chunk
             metadata: Paper metadata (title, year, authors, etc.)
         """
+        if not paper_id or not paper_id.strip():
+            raise ValueError("paper_id cannot be empty")
+
         if len(chunks) != len(embeddings):
             raise ValueError("Number of chunks must match number of embeddings")
 
@@ -188,6 +191,13 @@ class ResearchVectorStore:
             embedding: Embedding vector
             metadata: Note metadata (title, tags, etc.)
         """
+        if not note_id or not note_id.strip():
+            raise ValueError("note_id cannot be empty")
+
+        if not content or not content.strip():
+            logger.warning(f"No content for note {note_id}, skipping")
+            return
+
         # Add timestamp
         note_metadata = {
             **metadata,
@@ -223,6 +233,9 @@ class ResearchVectorStore:
             embeddings: Embedding vectors for each chunk
             metadata: Source metadata (url, title, etc.)
         """
+        if not source_id or not source_id.strip():
+            raise ValueError("source_id cannot be empty")
+
         if len(chunks) != len(embeddings):
             raise ValueError("Number of chunks must match number of embeddings")
 
@@ -470,7 +483,8 @@ class ResearchVectorStore:
             self.notes.delete(ids=[note_id])
             logger.info(f"Deleted note {note_id}")
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to delete note {note_id}: {e}")
             return False
 
     def delete_web_source(self, source_id: str) -> bool:
@@ -589,8 +603,8 @@ class ResearchVectorStore:
                         "year": meta.get("year"),
                         "authors": meta.get("authors", ""),
                         "added_at": meta.get("added_at", ""),
-                        "citations": meta.get("citations")
-                        or meta.get("citation_count"),
+                        "citation_count": meta.get("citation_count")
+                        or meta.get("citations"),
                         "venue": meta.get("venue", ""),
                         "fields": meta.get("fields", ""),
                         "source": meta.get("source", ""),

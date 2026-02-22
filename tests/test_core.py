@@ -1,7 +1,5 @@
 """
 Core unit tests for Research Agent components.
-
-Note: Some tests are skipped when modules are not yet implemented.
 """
 
 import pytest
@@ -11,16 +9,19 @@ from pathlib import Path
 
 
 # ============================================
-# Vector Store Tests (SKIP - not yet migrated)
+# Vector Store Tests
 # ============================================
 
-@pytest.mark.skip(reason="Vector store not yet migrated to research_agent package")
 class TestVectorStore:
     """Tests for the ChromaDB vector store."""
 
     def test_initialization(self):
         """Test vector store initializes correctly."""
-        pass
+        from research_agent.db.vector_store import ResearchVectorStore
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ResearchVectorStore(persist_dir=tmp)
+            assert store is not None
 
     def test_add_and_retrieve_paper(self):
         """Test adding and retrieving papers."""
@@ -32,16 +33,19 @@ class TestVectorStore:
 
 
 # ============================================
-# Embedding Model Tests (SKIP - not yet migrated)
+# Embedding Model Tests
 # ============================================
 
-@pytest.mark.skip(reason="Embedding model not yet migrated to research_agent package")
 class TestEmbeddingModel:
     """Tests for the embedding model."""
 
     def test_initialization(self):
-        """Test embedding model loads correctly."""
-        pass
+        """Test embedding model loads correctly (lazy — no actual model load)."""
+        from research_agent.db.embeddings import EmbeddingModel
+        embedder = EmbeddingModel(model_name="BAAI/bge-base-en-v1.5")
+        assert embedder.model_name == "BAAI/bge-base-en-v1.5"
+        # Model is lazy-loaded; _model is None until first use
+        assert embedder._model is None
 
     def test_single_embedding(self):
         """Test embedding a single text."""
@@ -112,10 +116,9 @@ class TestAcademicSearch:
 
 
 # ============================================
-# Web Search Tests (SKIP - not yet migrated)
+# Web Search Tests
 # ============================================
 
-@pytest.mark.skip(reason="Web search not yet migrated to research_agent package")
 class TestWebSearch:
     """Tests for web search functionality."""
 
@@ -126,10 +129,9 @@ class TestWebSearch:
 
 
 # ============================================
-# Researcher Lookup Tests (SKIP - not yet migrated)
+# Researcher Lookup Tests
 # ============================================
 
-@pytest.mark.skip(reason="Researcher lookup not yet migrated to research_agent package")
 class TestResearcherLookup:
     """Tests for researcher lookup functionality."""
 
@@ -140,10 +142,9 @@ class TestResearcherLookup:
 
 
 # ============================================
-# Research Agent Tests (SKIP - not yet migrated)
+# Research Agent Tests
 # ============================================
 
-@pytest.mark.skip(reason="Research agent not yet migrated to research_agent package")
 class TestResearchAgent:
     """Tests for the research agent."""
 
@@ -153,49 +154,25 @@ class TestResearchAgent:
 
     def test_agent_config(self):
         """Test agent configuration."""
-        pass
+        from research_agent.agents.research_agent import AgentConfig
+        config = AgentConfig()
+        assert config.max_local_results == 5
+        assert config.max_external_results == 10
+        assert config.auto_ingest is False
 
 
 # ============================================
-# Ollama Integration Tests (SKIP - not yet migrated)
+# Ollama Integration Tests
+# TODO: add tests for research_agent.models.llm_utils.OllamaModel
+# (requires a live Ollama server — skip or mock in CI)
 # ============================================
 
-@pytest.mark.skip(reason="Ollama integration not yet migrated to research_agent package")
-class TestOllamaIntegration:
-    """Tests for Ollama model integration."""
 
-    def test_ollama_model_wrapper(self):
-        """Test OllamaModel wrapper."""
-        pass
-
-    def test_ollama_generation(self):
-        """Test generating text with Ollama."""
-        pass
-
-    def test_ollama_list_models(self):
-        """Test listing available Ollama models."""
-        pass
-
-    def test_ollama_model_switch(self):
-        """Test switching between Ollama models."""
-        pass
-
-    def test_qwen3_generation(self):
-        """Test qwen3 generation with thinking mode."""
-        pass
-
-
-@pytest.mark.skip(reason="Agent model switch not yet migrated to research_agent package")
-class TestAgentModelSwitch:
-    """Tests for agent model switching functionality."""
-
-    def test_agent_switch_model(self):
-        """Test switching models via the agent."""
-        pass
-
-    def test_agent_list_models(self):
-        """Test listing models via the agent."""
-        pass
+# ============================================
+# Agent Model Switch Tests
+# TODO: add tests for ResearchAgent.switch_model / list_available_models
+# (requires a live Ollama/OpenAI-compatible server — skip or mock in CI)
+# ============================================
 
 
 # ============================================
@@ -207,6 +184,7 @@ class TestCitationExplorer:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    @pytest.mark.network
     async def test_get_citations(self):
         """Test fetching citations for a paper."""
         from research_agent.tools.citation_explorer import CitationExplorer

@@ -147,7 +147,7 @@ class IngestionManager:
     def _assess_quality(self, source: Dict) -> SourceQuality:
         """Heuristic quality assessment."""
         source_type = source.get("source", "")
-        citations = source.get("citations", 0)
+        citations = source.get("citation_count", source.get("citations", 0))
 
         if source_type in ["semantic_scholar", "openalex"]:
             if citations and citations > 50:

@@ -39,6 +39,7 @@ def make_state(query: str, **overrides):
     return state
 
 
+@pytest.mark.unit
 class TestQueryClassification:
     """Tests for query understanding and classification."""
 
@@ -87,6 +88,7 @@ class TestQueryClassification:
         assert result["query_type"] == "general"
 
 
+@pytest.mark.unit
 class TestLocalSearch:
     """Tests for local vector store search."""
 
@@ -95,20 +97,30 @@ class TestLocalSearch:
         """Test local search returns formatted results."""
         from research_agent.agents.research_agent import ResearchAgent
 
-        # Mock vector store
-        mock_store = MagicMock()
-        mock_store.search.return_value = {
+        # Mock vector store — return results only for the papers collection
+        papers_result = {
             "documents": ["Content about climate change..."],
             "metadatas": [{"title": "Climate Paper", "authors": "Smith", "year": 2023, "paper_id": "123"}],
             "distances": [0.2],
         }
+        empty_result = {"documents": [], "metadatas": [], "distances": []}
+
+        mock_store = MagicMock()
+        mock_store.search.side_effect = lambda **kwargs: (
+            papers_result if kwargs.get("collection") == "papers" else empty_result
+        )
 
         # Mock embedder
         mock_embedder = MagicMock()
         mock_embedder.encode.return_value = MagicMock(tolist=lambda: [0.1] * 384)
 
         agent = ResearchAgent(vector_store=mock_store, embedder=mock_embedder, use_ollama=False)
-        state = make_state("climate change", query_type="literature_review", should_search_external=True)
+        state = make_state(
+            "climate change",
+            query_type="literature_review",
+            search_query="climate change",
+            should_search_external=True,
+        )
 
         result = await agent._search_local(state)
 
@@ -122,7 +134,9 @@ class TestLocalSearch:
         from research_agent.agents.research_agent import ResearchAgent
 
         agent = ResearchAgent(vector_store=None, embedder=None, use_ollama=False)
-        state = make_state("test query", query_type="general")
+        state = make_state(
+            "test query", query_type="factual", search_query="test query"
+        )
 
         result = await agent._search_local(state)
 
@@ -130,6 +144,7 @@ class TestLocalSearch:
         assert result["should_search_external"] is True
 
 
+@pytest.mark.unit
 class TestSynthesis:
     """Tests for result synthesis."""
 
@@ -185,9 +200,10 @@ class TestSynthesis:
         agent = ResearchAgent(use_ollama=False)
         formatted = agent._format_results_without_llm("test query", [])
 
-        assert "No relevant results" in formatted
+        assert "No retrieved sources" in formatted
 
 
+@pytest.mark.unit
 class TestIngestionOffer:
     """Tests for ingestion offer logic."""
 
@@ -231,6 +247,7 @@ class TestIngestionOffer:
         assert result["final_answer"] == "Answer."
 
 
+@pytest.mark.unit
 class TestGraphExecution:
     """Tests for full graph execution."""
 

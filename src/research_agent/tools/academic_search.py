@@ -16,15 +16,26 @@ import asyncio
 import logging
 import random
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Callable
 from functools import wraps
 
 import httpx
 
-from research_agent.utils.cache import TTLCache, make_cache_key
+from research_agent.models.paper import BasePaper
+from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
+from research_agent.utils.openalex import reconstruct_abstract
+from research_agent.utils.retry import retry_with_backoff
+from research_agent.utils.observability import timed
 
 logger = logging.getLogger(__name__)
+
+# ── Cache TTL tiers (seconds) ──────────────────────────────────
+CACHE_TTL_SEARCH = 3600        # 1 hour — search results change frequently
+CACHE_TTL_PAPER = 21600        # 6 hours — paper details are stable
+CACHE_TTL_OA = 86400           # 24 hours — OA status rarely changes
+CACHE_TTL_EMBEDDINGS = 604800  # 7 days — SPECTER2 embeddings are immutable
+CACHE_TTL_CROSSREF = 86400     # 24 hours — reference lists are stable
 
 
 class RateLimiter:
@@ -87,106 +98,20 @@ class RateLimiter:
         return max(0, self.max_calls - len(recent_calls))
 
 
-async def retry_with_backoff(
-    func: Callable,
-    max_retries: int = 3,
-    base_delay: float = 1.0,
-    max_delay: float = 60.0,
-    exponential_base: float = 2.0,
-    jitter: bool = True,
-    retry_on: tuple = (429, 503, 504)
-):
-    """
-    Execute an async function with exponential backoff retry.
-
-    Args:
-        func: Async function to execute (should return httpx.Response)
-        max_retries: Maximum number of retry attempts
-        base_delay: Initial delay in seconds
-        max_delay: Maximum delay in seconds
-        exponential_base: Base for exponential backoff
-        jitter: Add random jitter to prevent thundering herd
-        retry_on: HTTP status codes to retry on
-
-    Returns:
-        The response from the function
-
-    Raises:
-        httpx.HTTPError: If all retries fail
-    """
-    last_exception = None
-
-    for attempt in range(max_retries + 1):
-        try:
-            response = await func()
-
-            # Check if we should retry based on status code
-            if response.status_code in retry_on:
-                if attempt < max_retries:
-                    delay = min(base_delay * (exponential_base ** attempt), max_delay)
-                    if jitter:
-                        delay = delay * (0.5 + random.random())
-
-                    # Check for Retry-After header
-                    retry_after = response.headers.get("Retry-After")
-                    if retry_after:
-                        try:
-                            delay = max(delay, float(retry_after))
-                        except ValueError:
-                            pass
-
-                    logger.warning(
-                        f"Request failed with {response.status_code}, "
-                        f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                else:
-                    response.raise_for_status()
-
-            return response
-
-        except httpx.HTTPError as e:
-            last_exception = e
-            if attempt < max_retries:
-                delay = min(base_delay * (exponential_base ** attempt), max_delay)
-                if jitter:
-                    delay = delay * (0.5 + random.random())
-                logger.warning(
-                    f"Request error: {e}, retrying in {delay:.1f}s "
-                    f"(attempt {attempt + 1}/{max_retries})"
-                )
-                await asyncio.sleep(delay)
-            else:
-                raise
-
-    if last_exception:
-        raise last_exception
-    raise RuntimeError("Unexpected retry loop exit")
-
 
 @dataclass
-class Paper:
-    """Standardized paper representation across sources."""
-    id: str
-    title: str
-    abstract: Optional[str]
-    year: Optional[int]
-    authors: List[str]
-    citations: Optional[int]
-    doi: Optional[str]
-    open_access_url: Optional[str]
-    source: str  # "semantic_scholar", "openalex", etc.
-    fields: Optional[List[str]] = None
-    venue: Optional[str] = None
-    url: Optional[str] = None
+class Paper(BasePaper):
+    """Standardized paper representation from academic search APIs.
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return asdict(self)
+    Extends BasePaper with open-access info, TLDR summaries, and SPECTER embeddings.
+    """
+    open_access_url: Optional[str] = None
+    oa_status: Optional[str] = None  # gold/green/hybrid/bronze from Unpaywall
+    tldr: Optional[str] = None  # S2 TLDR summary
+    specter_embedding: Optional[List[float]] = None  # S2 SPECTER2 768d vector
 
     def __str__(self) -> str:
-        return f"{self.title} ({self.year}) - {self.citations or 0} citations"
+        return f"{self.title} ({self.year}) - {self.citation_count or 0} citations"
 
 
 class AcademicSearchTools:
@@ -217,7 +142,8 @@ class AcademicSearchTools:
         s2_rate_limit: int = 95,  # Slightly under 100 to be safe
         s2_rate_window: int = 300,  # 5 minutes
         cache_ttl: int = 3600,  # 1 hour default cache TTL
-        cache_enabled: bool = True
+        cache_enabled: bool = True,
+        persistent_cache_dir: Optional[str] = None,
     ):
         """
         Initialize academic search tools.
@@ -230,6 +156,7 @@ class AcademicSearchTools:
             s2_rate_window: Semantic Scholar rate window in seconds
             cache_ttl: Cache time-to-live in seconds (default: 1 hour)
             cache_enabled: Enable response caching (default: True)
+            persistent_cache_dir: Directory for disk-backed cache (survives restarts)
         """
         self.config = config or {}
         self.email = email
@@ -242,9 +169,20 @@ class AcademicSearchTools:
             window_seconds=s2_rate_window
         )
 
-        # Response cache
+        # Response cache — disk-backed if persistent_cache_dir provided
         self.cache_enabled = cache_enabled
-        self._cache = TTLCache(default_ttl=cache_ttl, max_size=2000) if cache_enabled else None
+        if cache_enabled and persistent_cache_dir:
+            self._cache = PersistentCache(
+                cache_dir=persistent_cache_dir,
+                name="academic_search",
+                default_ttl=cache_ttl,
+                max_size=5000,
+            )
+            logger.info(f"Using persistent cache at {persistent_cache_dir}")
+        elif cache_enabled:
+            self._cache = TTLCache(default_ttl=cache_ttl, max_size=2000)
+        else:
+            self._cache = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
@@ -259,10 +197,12 @@ class AcademicSearchTools:
         return self._client
 
     async def close(self):
-        """Close HTTP client."""
+        """Close HTTP client and persistent cache."""
         if self._client:
             await self._client.aclose()
             self._client = None
+        if self._cache and hasattr(self._cache, "close"):
+            self._cache.close()
 
     def get_cache_stats(self) -> Dict:
         """Get cache statistics."""
@@ -276,6 +216,7 @@ class AcademicSearchTools:
             self._cache.clear()
             logger.info("API response cache cleared")
 
+    @timed
     async def search_semantic_scholar(
         self,
         query: str,
@@ -361,12 +302,12 @@ class AcademicSearchTools:
                     oa_url = item["openAccessPdf"].get("url")
 
                 paper = Paper(
-                    id=item.get("paperId", ""),
+                    paper_id=item.get("paperId", ""),
                     title=item.get("title", ""),
                     abstract=item.get("abstract"),
                     year=item.get("year"),
                     authors=[a.get("name", "") for a in (item.get("authors") or [])],
-                    citations=item.get("citationCount"),
+                    citation_count=item.get("citationCount"),
                     doi=doi,
                     open_access_url=oa_url,
                     source="semantic_scholar",
@@ -378,7 +319,7 @@ class AcademicSearchTools:
 
             # Cache the results
             if self._cache:
-                self._cache.set(cache_key, papers)
+                self._cache.set(cache_key, papers, ttl=CACHE_TTL_SEARCH)
 
             logger.info(f"Semantic Scholar found {len(papers)} papers for: {query} ({self._s2_rate_limiter.calls_remaining} calls remaining)")
             return papers
@@ -387,6 +328,7 @@ class AcademicSearchTools:
             logger.error(f"Semantic Scholar API error: {e}")
             return []
 
+    @timed
     async def search_openalex(
         self,
         query: str,
@@ -448,9 +390,14 @@ class AcademicSearchTools:
             params["filter"] = ",".join(filters)
 
         try:
-            response = await client.get(
-                f"{self.OPENALEX_API}/works",
-                params=params
+            response = await retry_with_backoff(
+                lambda: client.get(
+                    f"{self.OPENALEX_API}/works",
+                    params=params
+                ),
+                max_retries=2,
+                base_delay=1.0,
+                retry_on=(429, 503, 504),
             )
             response.raise_for_status()
             data = response.json()
@@ -462,38 +409,38 @@ class AcademicSearchTools:
 
                 # Extract authors
                 authors = []
-                for authorship in item.get("authorships", []):
-                    author = authorship.get("author", {})
+                for authorship in item.get("authorships") or []:
+                    author = authorship.get("author") or {}
                     if author.get("display_name"):
                         authors.append(author["display_name"])
 
                 # Extract fields/concepts
                 fields = []
-                for concept in item.get("concepts", [])[:5]:  # Top 5 concepts
+                for concept in (item.get("concepts") or [])[:5]:  # Top 5 concepts
                     if concept.get("display_name"):
                         fields.append(concept["display_name"])
 
                 # Get open access URL
                 oa_url = None
-                oa_info = item.get("open_access", {})
+                oa_info = item.get("open_access") or {}
                 if oa_info.get("oa_url"):
                     oa_url = oa_info["oa_url"]
 
                 # Get venue/journal
                 venue = None
-                primary_location = item.get("primary_location", {})
+                primary_location = item.get("primary_location") or {}
                 if primary_location:
-                    source = primary_location.get("source", {})
+                    source = primary_location.get("source") or {}
                     if source:
                         venue = source.get("display_name")
 
                 paper = Paper(
-                    id=item.get("id", "").replace("https://openalex.org/", ""),
-                    title=item.get("title", ""),
+                    paper_id=item.get("id", "").replace("https://openalex.org/", ""),
+                    title=item.get("title") or "",
                     abstract=abstract,
                     year=item.get("publication_year"),
                     authors=authors,
-                    citations=item.get("cited_by_count"),
+                    citation_count=item.get("cited_by_count"),
                     doi=item.get("doi", "").replace("https://doi.org/", "") if item.get("doi") else None,
                     open_access_url=oa_url,
                     source="openalex",
@@ -505,7 +452,7 @@ class AcademicSearchTools:
 
             # Cache the results
             if self._cache:
-                self._cache.set(cache_key, papers)
+                self._cache.set(cache_key, papers, ttl=CACHE_TTL_SEARCH)
 
             logger.info(f"OpenAlex found {len(papers)} papers for: {query}")
             return papers
@@ -515,24 +462,8 @@ class AcademicSearchTools:
             return []
 
     def _reconstruct_abstract(self, inverted_index: Optional[Dict]) -> Optional[str]:
-        """
-        Reconstruct abstract from OpenAlex inverted index format.
-
-        OpenAlex stores abstracts as {word: [positions]} for compression.
-        """
-        if not inverted_index:
-            return None
-
-        try:
-            word_positions = []
-            for word, positions in inverted_index.items():
-                for pos in positions:
-                    word_positions.append((pos, word))
-
-            word_positions.sort()
-            return " ".join([word for _, word in word_positions])
-        except Exception:
-            return None
+        """Reconstruct abstract from OpenAlex inverted index format."""
+        return reconstruct_abstract(inverted_index)
 
     async def get_open_access_pdf(self, doi: str) -> Optional[str]:
         """
@@ -576,18 +507,71 @@ class AcademicSearchTools:
                 if best_oa:
                     url = best_oa.get("url_for_pdf") or best_oa.get("url")
                     if self._cache:
-                        self._cache.set(cache_key, url, ttl=86400)  # 24 hour cache
+                        self._cache.set(cache_key, url, ttl=CACHE_TTL_OA)
                     return url
 
             # Cache negative result too
             if self._cache:
-                self._cache.set(cache_key, "__none__", ttl=86400)
+                self._cache.set(cache_key, "__none__", ttl=CACHE_TTL_OA)
             return None
 
         except httpx.HTTPError as e:
             logger.error(f"Unpaywall API error: {e}")
             return None
 
+    async def get_oa_status(self, doi: str) -> Dict:
+        """
+        Get detailed OA status from Unpaywall.
+
+        Returns:
+            Dict with is_oa, oa_status (gold/green/hybrid/bronze), best_oa_url
+        """
+        result = {"is_oa": False, "oa_status": "closed", "best_oa_url": None}
+        if not doi:
+            return result
+        if not self.email:
+            return result
+
+        doi = doi.replace("https://doi.org/", "")
+        cache_key = make_cache_key("oa_status", doi)
+        if self._cache:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        client = await self._get_client()
+        try:
+            response = await client.get(
+                f"{self.UNPAYWALL_API}/{doi}",
+                params={"email": self.email}
+            )
+            if response.status_code == 200:
+                data = response.json()
+                result["is_oa"] = data.get("is_oa", False)
+                result["oa_status"] = data.get("oa_status", "closed") or "closed"
+                best_oa = data.get("best_oa_location")
+                if best_oa:
+                    result["best_oa_url"] = best_oa.get("url_for_pdf") or best_oa.get("url")
+        except httpx.HTTPError as e:
+            logger.debug(f"Unpaywall OA status error for {doi}: {e}")
+
+        if self._cache:
+            self._cache.set(cache_key, result, ttl=CACHE_TTL_OA)
+        return result
+
+    async def enrich_papers_oa_status(self, papers: List[Paper]) -> None:
+        """Enrich a list of papers with OA status from Unpaywall (in-place)."""
+        if not self.email:
+            return
+        for paper in papers:
+            if paper.doi and not paper.oa_status:
+                oa = await self.get_oa_status(paper.doi)
+                if oa["oa_status"] != "closed":
+                    paper.oa_status = oa["oa_status"]
+                    if not paper.open_access_url and oa["best_oa_url"]:
+                        paper.open_access_url = oa["best_oa_url"]
+
+    @timed
     async def get_paper_details(self, paper_id: str, source: str = "semantic_scholar") -> Optional[Paper]:
         """
         Get detailed information about a specific paper.
@@ -619,7 +603,7 @@ class AcademicSearchTools:
                     lambda: client.get(
                         f"{self.SEMANTIC_SCHOLAR_API}/paper/{paper_id}",
                         params={
-                            "fields": "paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,venue,openAccessPdf,externalIds,references,citations"
+                            "fields": "paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,venue,openAccessPdf,externalIds,references,citations,tldr,embedding"
                         }
                     ),
                     max_retries=3,
@@ -638,19 +622,32 @@ class AcademicSearchTools:
                 if item.get("openAccessPdf"):
                     oa_url = item["openAccessPdf"].get("url")
 
+                # Extract TLDR and embedding
+                tldr_text = None
+                tldr_data = item.get("tldr")
+                if tldr_data and isinstance(tldr_data, dict):
+                    tldr_text = tldr_data.get("text")
+
+                embedding_vec = None
+                embedding_data = item.get("embedding")
+                if embedding_data and isinstance(embedding_data, dict):
+                    embedding_vec = embedding_data.get("vector")
+
                 paper = Paper(
-                    id=item.get("paperId", ""),
+                    paper_id=item.get("paperId", ""),
                     title=item.get("title", ""),
                     abstract=item.get("abstract"),
                     year=item.get("year"),
                     authors=[a.get("name", "") for a in (item.get("authors") or [])],
-                    citations=item.get("citationCount"),
+                    citation_count=item.get("citationCount"),
                     doi=doi,
                     open_access_url=oa_url,
                     source="semantic_scholar",
                     fields=item.get("fieldsOfStudy"),
                     venue=item.get("venue"),
-                    url=f"https://www.semanticscholar.org/paper/{item.get('paperId', '')}"
+                    url=f"https://www.semanticscholar.org/paper/{item.get('paperId', '')}",
+                    tldr=tldr_text,
+                    specter_embedding=embedding_vec,
                 )
 
             except httpx.HTTPError as e:
@@ -659,33 +656,41 @@ class AcademicSearchTools:
 
         elif source == "openalex":
             try:
-                response = await client.get(
-                    f"{self.OPENALEX_API}/works/{paper_id}"
+                response = await retry_with_backoff(
+                    lambda: client.get(
+                        f"{self.OPENALEX_API}/works/{paper_id}"
+                    ),
+                    max_retries=2,
+                    base_delay=1.0,
+                    retry_on=(429, 503, 504),
                 )
                 response.raise_for_status()
                 item = response.json()
 
                 abstract = self._reconstruct_abstract(item.get("abstract_inverted_index"))
-                authors = [a.get("author", {}).get("display_name", "") for a in item.get("authorships", [])]
-                fields = [c.get("display_name", "") for c in item.get("concepts", [])[:5]]
+                authors = [(a.get("author") or {}).get("display_name", "") for a in item.get("authorships") or []]
+                fields = [c.get("display_name", "") for c in (item.get("concepts") or [])[:5]]
 
                 oa_url = None
-                oa_info = item.get("open_access", {})
+                oa_info = item.get("open_access") or {}
                 if oa_info.get("oa_url"):
                     oa_url = oa_info["oa_url"]
 
+                primary_loc = item.get("primary_location") or {}
+                venue_source = primary_loc.get("source") or {}
+
                 paper = Paper(
-                    id=item.get("id", "").replace("https://openalex.org/", ""),
-                    title=item.get("title", ""),
+                    paper_id=item.get("id", "").replace("https://openalex.org/", ""),
+                    title=item.get("title") or "",
                     abstract=abstract,
                     year=item.get("publication_year"),
                     authors=authors,
-                    citations=item.get("cited_by_count"),
+                    citation_count=item.get("cited_by_count"),
                     doi=item.get("doi", "").replace("https://doi.org/", "") if item.get("doi") else None,
                     open_access_url=oa_url,
                     source="openalex",
                     fields=fields,
-                    venue=item.get("primary_location", {}).get("source", {}).get("display_name"),
+                    venue=venue_source.get("display_name"),
                     url=item.get("id")
                 )
 
@@ -695,9 +700,144 @@ class AcademicSearchTools:
 
         # Cache the result
         if paper and self._cache:
-            self._cache.set(cache_key, paper, ttl=21600)  # 6 hour cache
+            self._cache.set(cache_key, paper, ttl=CACHE_TTL_PAPER)
 
         return paper
+
+    async def get_paper_embeddings(self, paper_ids: List[str]) -> Dict[str, List[float]]:
+        """
+        Batch-fetch SPECTER2 embeddings from Semantic Scholar.
+
+        Uses POST /paper/batch endpoint for efficiency.
+        Caches each embedding individually (7-day TTL — embeddings are immutable).
+
+        Args:
+            paper_ids: List of S2 paper IDs
+
+        Returns:
+            Dict mapping paper_id → embedding vector
+        """
+        if not paper_ids:
+            return {}
+
+        result = {}
+        uncached_ids = []
+
+        # Check cache first
+        for pid in paper_ids:
+            cache_key = make_cache_key("specter_emb", pid)
+            if self._cache:
+                cached = self._cache.get(cache_key)
+                if cached is not None:
+                    result[pid] = cached
+                    continue
+            uncached_ids.append(pid)
+
+        if not uncached_ids:
+            logger.debug(f"All {len(paper_ids)} embeddings from cache")
+            return result
+
+        # Batch fetch from S2
+        await self._s2_rate_limiter.wait_if_needed()
+        client = await self._get_client()
+
+        try:
+            # S2 batch endpoint: POST with up to 500 IDs
+            for i in range(0, len(uncached_ids), 100):
+                batch = uncached_ids[i:i+100]
+                if i > 0:
+                    await self._s2_rate_limiter.wait_if_needed()
+
+                response = await retry_with_backoff(
+                    lambda b=batch: client.post(
+                        f"{self.SEMANTIC_SCHOLAR_API}/paper/batch",
+                        params={"fields": "paperId,embedding,tldr"},
+                        json={"ids": b},
+                    ),
+                    max_retries=2,
+                    base_delay=3.0,
+                    retry_on=(429, 503, 504),
+                )
+                response.raise_for_status()
+                items = response.json()
+                if not isinstance(items, list):
+                    logger.warning("S2 batch endpoint returned non-list: %s", type(items).__name__)
+                    continue
+
+                for item in items:
+                    if not item:
+                        continue
+                    pid = item.get("paperId")
+                    if not pid:
+                        continue
+
+                    emb_data = item.get("embedding")
+                    if emb_data and isinstance(emb_data, dict):
+                        vec = emb_data.get("vector")
+                        if vec:
+                            result[pid] = vec
+                            if self._cache:
+                                self._cache.set(
+                                    make_cache_key("specter_emb", pid),
+                                    vec, ttl=CACHE_TTL_EMBEDDINGS,
+                                )
+
+            logger.info(f"Fetched {len(result)} SPECTER2 embeddings ({len(uncached_ids)} from API)")
+        except httpx.HTTPError as e:
+            logger.error(f"S2 batch embedding error: {e}")
+
+        return result
+
+    async def get_crossref_references(self, doi: str) -> List[str]:
+        """
+        Get reference DOIs for a paper from CrossRef.
+
+        Args:
+            doi: DOI of the paper
+
+        Returns:
+            List of referenced DOIs
+        """
+        if not doi:
+            return []
+
+        doi = doi.replace("https://doi.org/", "")
+        cache_key = make_cache_key("crossref_refs", doi)
+        if self._cache:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        client = await self._get_client()
+        try:
+            headers = {}
+            if self.email:
+                headers["User-Agent"] = f"ResearchAgent/1.0 (mailto:{self.email})"
+
+            response = await client.get(
+                f"https://api.crossref.org/works/{doi}",
+                headers=headers,
+            )
+            if response.status_code != 200:
+                return []
+
+            data = response.json()
+            refs = (data.get("message") or {}).get("reference") or []
+            ref_dois = []
+            for ref in refs:
+                ref_doi = ref.get("DOI")
+                if ref_doi:
+                    ref_dois.append(ref_doi.lower())
+
+            if self._cache:
+                self._cache.set(cache_key, ref_dois, ttl=CACHE_TTL_CROSSREF)
+
+            logger.info(f"CrossRef found {len(ref_dois)} references for DOI {doi}")
+            return ref_dois
+
+        except httpx.HTTPError as e:
+            logger.debug(f"CrossRef error for {doi}: {e}")
+            return []
 
     async def search_all(
         self,
@@ -743,7 +883,7 @@ class AcademicSearchTools:
         unique_papers = self._deduplicate(all_papers)
 
         # Sort by citation count (descending)
-        unique_papers.sort(key=lambda p: p.citations or 0, reverse=True)
+        unique_papers.sort(key=lambda p: p.citation_count or 0, reverse=True)
 
         logger.info(f"Combined search found {len(unique_papers)} unique papers for: {query}")
         return unique_papers

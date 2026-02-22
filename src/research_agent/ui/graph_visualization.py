@@ -175,7 +175,7 @@ def build_kb_graph(vector_store) -> Tuple[Any, str]:
         year = paper.get("year", "")
         authors = paper.get("authors", "") or ""
         source = paper.get("source", "papers")
-        citations = paper.get("citations") or paper.get("citation_count") or 0
+        citations = paper.get("citation_count") or paper.get("citations") or 0
 
         G.add_node(pid)
         node_labels[pid] = title
@@ -528,7 +528,7 @@ def build_citation_graph(
                     "paper_id": p.get("paper_id"),
                     "title": p.get("title", "Unknown"),
                     "year": p.get("year"),
-                    "citations": p.get("citations") or p.get("citation_count", 0),
+                    "citations": p.get("citation_count") or p.get("citations") or 0,
                     "references": [],
                 }
                 for p in kb_papers
@@ -557,7 +557,7 @@ def build_citation_graph(
             continue
         title = (paper.get("title", "Unknown") or "Unknown")[:45]
         year = paper.get("year", "")
-        ccount = int(paper.get("citationCount") or paper.get("citations") or 0)
+        ccount = int(paper.get("citationCount") or paper.get("citation_count") or paper.get("citations") or 0)
 
         G.add_node(pid)
         seed_ids.add(pid)

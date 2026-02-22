@@ -12,7 +12,9 @@
       <svg width="14" height="2"><line x1="0" y1="1" x2="14" y2="1" stroke="#c45c4a" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.6"/></svg>
       <span>SEMANTIC</span>
       <span class="explorer-legend-sep"></span>
-      <span class="explorer-oa-dot" style="border-color:#22c55e"></span><span>OA</span>
+      <span class="explorer-oa-dot" style="border-color:#22c55e"></span><span>GOLD</span>
+      <span class="explorer-oa-dot" style="border-color:#16a34a"></span><span>GREEN</span>
+      <span class="explorer-oa-dot" style="border-color:#d97706"></span><span>BRONZE</span>
       <span class="explorer-oa-dot" style="border-color:#eab308"></span><span>PREPRINT</span>
       <span class="explorer-oa-dot" style="border-color:#64748b"></span><span>PAYWALLED</span>
       <span class="explorer-legend-sep"></span>
@@ -360,6 +362,23 @@
     color: #c45c4a;
   }
 
+  #knowledge-explorer .explorer-btn-loading {
+    animation: explorer-pulse 1.2s infinite ease-in-out;
+    border-color: rgba(196, 92, 74, 0.3);
+    color: #c45c4a;
+    pointer-events: none;
+  }
+
+  @keyframes explorer-pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+
+  #knowledge-explorer .explorer-btn-success {
+    border-color: rgba(34, 197, 94, 0.3);
+    color: #22c55e;
+  }
+
   #knowledge-explorer .explorer-detail-deselect {
     padding: 8px 14px;
     border-top: 1px solid #1a1f2e;
@@ -411,7 +430,11 @@
 
   // ── OA config ─────────────────────────────────────
   var OA = {
-    open:     { color: "#22c55e", label: "OPEN ACCESS", dash: null },
+    gold:     { color: "#22c55e", label: "GOLD OA",     dash: null },
+    green:    { color: "#16a34a", label: "GREEN OA",    dash: null },
+    hybrid:   { color: "#65a30d", label: "HYBRID OA",   dash: null },
+    bronze:   { color: "#d97706", label: "BRONZE OA",   dash: null },
+    open:     { color: "#22c55e", label: "OPEN ACCESS",  dash: null },
     preprint: { color: "#eab308", label: "PREPRINT",    dash: null },
     closed:   { color: "#64748b", label: "PAYWALLED",   dash: "2,2" }
   };
@@ -778,7 +801,9 @@
         html += '</div>';
       }
       html += '<div style="display:flex;flex-direction:column;gap:3px;margin-top:4px">';
-      html += '<button class="explorer-detail-btn" style="color:' + c + '">LOAD ALL PAPERS</button>';
+      var primaryLabel = activeLayer === "chat" ? "DISCOVER RELATED" : "LOAD ALL PAPERS";
+      var primaryAction = activeLayer === "chat" ? "discover-related" : "load-papers";
+      html += '<button class="explorer-detail-btn explorer-action-btn" data-action="' + primaryAction + '" data-node-id="' + esc(d.id) + '" data-researcher-name="' + esc(d.label) + '" style="color:' + c + '">' + primaryLabel + '</button>';
       html += '<button class="explorer-detail-btn">CO-AUTHOR NETWORK</button>';
       html += '<button class="explorer-detail-btn">VIEW PROFILE \u2192</button>';
       html += '</div>';
@@ -792,18 +817,22 @@
         });
         html += '</div>';
       }
-      if (m.abstract) {
-        html += '<div><div class="explorer-detail-field-label">TLDR</div><div class="explorer-detail-field-value">' + esc(m.abstract) + '</div></div>';
+      if (m.tldr || m.abstract) {
+        var summaryLabel = m.tldr ? "TLDR" : "ABSTRACT";
+        var summaryText = m.tldr || m.abstract;
+        html += '<div><div class="explorer-detail-field-label">' + summaryLabel + '</div><div class="explorer-detail-field-value">' + esc(summaryText) + '</div></div>';
       }
       if (m.doi) {
         html += '<div><div class="explorer-detail-field-label">DOI</div><div style="font-size:7px;color:#5a7eaa;word-break:break-all">' + esc(m.doi) + '</div></div>';
       }
       html += '<div style="display:flex;flex-direction:column;gap:3px;margin-top:4px">';
-      if (m.oa_status === "open") html += '<button class="explorer-detail-btn" style="color:#22c55e">\u2193 DOWNLOAD PDF</button>';
+      var oaCfg = OA[m.oa_status] || OA.closed;
+      if (m.oa_status === "gold" || m.oa_status === "green" || m.oa_status === "hybrid" || m.oa_status === "open") html += '<button class="explorer-detail-btn" style="color:' + oaCfg.color + '">\u2193 DOWNLOAD PDF</button>';
+      else if (m.oa_status === "bronze") html += '<button class="explorer-detail-btn" style="color:#d97706">\u2193 VIEW (BRONZE OA)</button>';
       else if (m.oa_status === "preprint") html += '<button class="explorer-detail-btn" style="color:#eab308">\u2193 GET PREPRINT</button>';
       else html += '<div style="font-size:7px;color:#5a6580;text-align:center;padding:5px;background:rgba(255,255,255,0.01);border-radius:4px;border:1px solid #1a1f2e">\uD83D\uDD12 Abstract + metadata only</div>';
-      html += '<button class="explorer-detail-btn">EXPAND CITATIONS \u2192</button>';
-      html += '<button class="explorer-detail-btn">FIND SIMILAR PAPERS</button>';
+      html += '<button class="explorer-detail-btn explorer-action-btn" data-action="expand-citations" data-node-id="' + esc(d.id) + '" data-paper-title="' + esc(d.label) + '">EXPAND CITATIONS \u2192</button>';
+      html += '<button class="explorer-detail-btn explorer-action-btn" data-action="find-similar" data-node-id="' + esc(d.id) + '" data-paper-title="' + esc(d.label) + '">FIND SIMILAR PAPERS</button>';
       html += '</div>';
     }
 
@@ -871,6 +900,51 @@
     detailEl.classList.remove("explorer-detail-open");
   });
 
+  // ── Action button delegation (detail panel → parent → Python) ───
+  var _actionTimeout = null;
+
+  function _resetActionBtn() {
+    clearTimeout(_actionTimeout);
+    _actionTimeout = null;
+    var btn = detailEl.querySelector(".explorer-btn-loading");
+    if (btn) {
+      btn.classList.remove("explorer-btn-loading");
+      btn.textContent = btn._originalLabel || "LOAD ALL PAPERS";
+    }
+  }
+
+  detailEl.addEventListener("click", function(ev) {
+    var btn = ev.target.closest(".explorer-action-btn");
+    if (!btn || btn.classList.contains("explorer-btn-loading")) return;
+
+    var action = btn.getAttribute("data-action");
+    var nodeId = btn.getAttribute("data-node-id");
+    if (!action || !nodeId) return;
+
+    // Set loading state
+    btn._originalLabel = btn.textContent;
+    btn.textContent = "LOADING\u2026";
+    btn.classList.add("explorer-btn-loading");
+
+    // Safety timeout — unlock after 25s if no response
+    clearTimeout(_actionTimeout);
+    _actionTimeout = setTimeout(function() {
+      _resetActionBtn();
+    }, 25000);
+
+    // Send action to parent frame
+    parent.postMessage({
+      type: "explorer-action",
+      payload: {
+        action: action,
+        nodeId: nodeId,
+        researcherName: btn.getAttribute("data-researcher-name") || "",
+        paperTitle: btn.getAttribute("data-paper-title") || "",
+        layer: activeLayer,
+      }
+    }, "*");
+  });
+
   // ── Search ────────────────────────────────────────
   var searchInput = container.querySelector(".explorer-search");
   var searchBtn = container.querySelector(".explorer-search-btn");
@@ -913,9 +987,22 @@
     activeLayer = layer;
     var ht = data.highlight_terms || [];
 
+    // Pre-compute disabled labels per layer
+    var ci = (data.context_items) || {};
+    var socDisabled = (ci.soc || []).filter(function(it) { return it.enabled === false; })
+                       .map(function(it) { return it.label.toLowerCase(); });
+    var authDisabled = (ci.auth || []).filter(function(it) { return it.enabled === false; })
+                        .map(function(it) { return it.label.toLowerCase(); });
+    var chatEnabled = (ci.chat || []).filter(function(it) { return it.enabled !== false; })
+                       .map(function(it) { return it.label.toLowerCase(); });
+
     // Node emphasis
     node.transition().duration(400).attr("opacity", function(d) {
       if (layer === "soc") {
+        if (d.type === "domain" || d.type === "field") {
+          var lbl = d.label.toLowerCase();
+          if (socDisabled.some(function(dl) { return lbl === dl; })) return 0.03;
+        }
         if (d.type === "domain") return 0.9;
         if (d.type === "field") return 1;
         if (d.type === "researcher") return 0.15;
@@ -923,16 +1010,37 @@
         if (d.type === "query") return 0.2;
         return 0.2;
       } else if (layer === "auth") {
-        if (d.type === "researcher") return 1;
-        if (d.type === "paper") return 1;
+        var ai = (ci.auth || []);
+        var authLabels = ai.filter(function(it) { return it.enabled !== false; })
+                           .map(function(it) { return (it.label || it).toLowerCase(); });
+        if (d.type === "researcher") {
+          var rLbl = d.label.toLowerCase();
+          if (authDisabled.some(function(dl) { return rLbl === dl; })) return 0.1;
+          return 1;
+        }
+        if (d.type === "paper") {
+          // Dim papers if their researcher is disabled
+          if (d._authorColor) {
+            var authorNode = data.nodes.find(function(n) { return n.type === "researcher"; });
+            if (authorNode && authDisabled.some(function(dl) { return authorNode.label.toLowerCase() === dl; })) return 0.1;
+          }
+          return 1;
+        }
+        if (authLabels.length > 0) {
+          var lbl = d.label.toLowerCase();
+          if (authLabels.some(function(t) { return lbl.indexOf(t) !== -1; })) return 1;
+        }
         if (d.type === "query") return 0.8;
         if (d.type === "field") return 0.2;
         if (d.type === "domain") return 0.1;
         return 0.5;
       } else if (layer === "chat") {
         var label = d.label.toLowerCase();
-        var matched = ht.length > 0 && ht.some(function(t) {
-          return label.indexOf(t.toLowerCase()) !== -1;
+        // Use enabled chat items if context exists, else fall back to highlight_terms
+        var hasCtxChat = ci.chat && ci.chat.length > 0;
+        var terms = hasCtxChat ? chatEnabled : ht.map(function(t) { return t.toLowerCase(); });
+        var matched = terms.length > 0 && terms.some(function(t) {
+          return label.indexOf(t) !== -1;
         });
         if (matched) return 1;
         if (d.type === "researcher") return 0.6;
@@ -970,21 +1078,40 @@
       var glowColor = d._authorColor || d.color || "#c45c4a";
 
       if (layer === "soc") {
-        // SOC: highlight fields and domains
+        // SOC: highlight fields and domains (skip disabled)
         if (d.type === "domain" || d.type === "field") {
-          highlighted = true;
-          glowColor = d.color || "#2e5a88";
+          var sLbl = d.label.toLowerCase();
+          if (!socDisabled.some(function(dl) { return sLbl === dl; })) {
+            highlighted = true;
+            glowColor = d.color || "#2e5a88";
+          }
         }
       } else if (layer === "auth") {
-        // AUTH: highlight researcher and papers
-        if (d.type === "researcher" || d.type === "paper") {
-          highlighted = true;
+        // AUTH: highlight researcher, papers, and pinned items (skip disabled)
+        if (d.type === "researcher") {
+          var rLbl = d.label.toLowerCase();
+          highlighted = !authDisabled.some(function(dl) { return rLbl === dl; });
+        } else if (d.type === "paper") {
+          var authorNode = data.nodes.find(function(n) { return n.type === "researcher"; });
+          if (authorNode && authDisabled.some(function(dl) { return authorNode.label.toLowerCase() === dl; })) {
+            highlighted = false;
+          } else {
+            highlighted = true;
+          }
+        } else {
+          var ai2 = (ci.auth || []).filter(function(it) { return it.enabled !== false; });
+          var lbl2 = d.label.toLowerCase();
+          if (ai2.some(function(it) { return lbl2.indexOf((it.label || it).toLowerCase()) !== -1; })) {
+            highlighted = true;
+          }
         }
       } else if (layer === "chat") {
-        // CHAT: highlight keyword-matched nodes
-        if (ht.length > 0) {
+        // CHAT: highlight keyword-matched nodes (only enabled terms)
+        var hasCtxChat2 = ci.chat && ci.chat.length > 0;
+        var terms2 = hasCtxChat2 ? chatEnabled : ht.map(function(t) { return t.toLowerCase(); });
+        if (terms2.length > 0) {
           var label = d.label.toLowerCase();
-          highlighted = ht.some(function(t) { return label.indexOf(t.toLowerCase()) !== -1; });
+          highlighted = terms2.some(function(t) { return label.indexOf(t) !== -1; });
         }
       }
 
@@ -994,6 +1121,15 @@
       el.select(".body").transition().duration(400)
         .attr("opacity", highlighted ? 0.85 : (d.type === "domain" ? 0.25 : d.type === "field" ? 0.5 : 0.9));
     });
+
+    // Update action button labels in open detail panel
+    var actionBtn = detailEl.querySelector(".explorer-action-btn");
+    if (actionBtn && !actionBtn.classList.contains("explorer-btn-loading")) {
+      if (actionBtn.getAttribute("data-researcher-name")) {
+        actionBtn.textContent = layer === "chat" ? "DISCOVER RELATED" : "LOAD ALL PAPERS";
+        actionBtn.setAttribute("data-action", layer === "chat" ? "discover-related" : "load-papers");
+      }
+    }
   }
 
   // Set initial button state
@@ -1019,7 +1155,258 @@
       data.highlight_terms = e.data.terms;
       if (activeLayer === "chat") applyLayerEmphasis("chat");
     }
+    if (e.data && e.data.type === "set-context-items") {
+      data.context_items = e.data.items;
+      applyLayerEmphasis(activeLayer);
+    }
+    if (e.data && e.data.type === "update-graph" && e.data.delta) {
+      rebindGraph(e.data.delta);
+    }
+    if (e.data && e.data.type === "action-result") {
+      var result = e.data.result || {};
+      clearTimeout(_actionTimeout);
+      _actionTimeout = null;
+      var loadingBtn = detailEl.querySelector(".explorer-btn-loading");
+      if (loadingBtn) {
+        loadingBtn.classList.remove("explorer-btn-loading");
+        if (result.success) {
+          var count = (result.delta && result.delta.addNodes)
+            ? result.delta.addNodes.filter(function(n) { return n.type === "paper"; }).length
+            : 0;
+          loadingBtn.textContent = "\u2713 " + count + " PAPERS ADDED";
+          loadingBtn.classList.add("explorer-btn-success");
+          setTimeout(function() {
+            loadingBtn.classList.remove("explorer-btn-success");
+            loadingBtn.textContent = loadingBtn._originalLabel || "LOAD ALL PAPERS";
+          }, 2500);
+        } else {
+          loadingBtn.textContent = result.error ? result.error.substring(0, 30) : "FAILED";
+          setTimeout(function() {
+            loadingBtn.textContent = loadingBtn._originalLabel || "LOAD ALL PAPERS";
+          }, 3000);
+        }
+      }
+      if (result.delta) {
+        rebindGraph(result.delta);
+      }
+    }
   });
+
+  // ── Incremental graph update (enter/update/exit) ──────
+  function rebindGraph(delta) {
+    var addNodes = delta.addNodes || [];
+    var removeIds = new Set(delta.removeNodes || []);
+    var addLinks = delta.addLinks || [];
+    var removeLinks = delta.removeLinks || [];
+
+    // Remove nodes
+    if (removeIds.size > 0) {
+      data.nodes = data.nodes.filter(function(n) { return !removeIds.has(n.id); });
+      removeIds.forEach(function(id) { delete nodeMap[id]; });
+    }
+
+    // Remove links
+    if (removeLinks.length > 0) {
+      var rlSet = new Set(removeLinks.map(function(l) { return l.source + "|" + l.target + "|" + l.type; }));
+      data.links = data.links.filter(function(l) {
+        var s = l.source.id !== undefined ? l.source.id : l.source;
+        var t = l.target.id !== undefined ? l.target.id : l.target;
+        return !rlSet.has(s + "|" + t + "|" + (l.type || ""));
+      });
+    }
+
+    // Add nodes
+    addNodes.forEach(function(n) {
+      n.x = width / 2 + (Math.random() - 0.5) * 100;
+      n.y = height / 2 + (Math.random() - 0.5) * 100;
+      data.nodes.push(n);
+      nodeMap[n.id] = n;
+    });
+
+    // Pre-compute paper colors for new authorship edges
+    addLinks.forEach(function(l) {
+      if (l.type === "authorship") {
+        var tid = l.target.id !== undefined ? l.target.id : l.target;
+        var sid = l.source.id !== undefined ? l.source.id : l.source;
+        var tNode = nodeMap[tid];
+        var sNode = nodeMap[sid];
+        if (tNode && sNode && tNode.type === "paper") tNode._authorColor = sNode.color;
+      }
+    });
+
+    // Add links
+    addLinks.forEach(function(l) { data.links.push(l); });
+
+    // Create gradients for new nodes
+    addNodes.forEach(function(n) {
+      var c = n.type === "paper" ? (n._authorColor || n.color) : n.color;
+      var gr = defs.append("radialGradient").attr("id", "ng-" + n.id.replace(/[^a-zA-Z0-9]/g, "_")).attr("cx", "35%").attr("cy", "35%");
+      gr.append("stop").attr("offset", "0%").attr("stop-color", c).attr("stop-opacity", 0.28);
+      gr.append("stop").attr("offset", "100%").attr("stop-color", c).attr("stop-opacity", 0.04);
+    });
+
+    // Rebind links
+    link = linkG.selectAll("line").data(data.links, function(d) {
+      var s = d.source.id !== undefined ? d.source.id : d.source;
+      var t = d.target.id !== undefined ? d.target.id : d.target;
+      return s + "|" + t + "|" + (d.type || "");
+    });
+    link.exit().remove();
+    var linkEnter = link.enter().append("line").each(function(d) {
+      var s = edgeStyle(d);
+      d3.select(this).attr("stroke", s.stroke).attr("stroke-width", s.width).attr("opacity", 0);
+      if (s.dash) d3.select(this).attr("stroke-dasharray", s.dash);
+    });
+    linkEnter.transition().duration(500).attr("opacity", function(d) { return edgeStyle(d).opacity; });
+    link = linkEnter.merge(link);
+
+    // Rebind score labels
+    scoreLabels = linkG.selectAll("text")
+      .data(data.links.filter(function(l) { return l.type === "semantic" && l.metadata && l.metadata.score > 0.3; }))
+      .join("text")
+      .text(function(d) { return Math.round(d.metadata.score * 100) + "%"; })
+      .attr("font-size", "7px").attr("fill", "#c45c4a").attr("opacity", 0)
+      .attr("text-anchor", "middle").attr("font-family", "inherit")
+      .style("pointer-events", "none");
+
+    // Rebind nodes
+    node = nodeG.selectAll("g").data(data.nodes, function(d) { return d.id; });
+    node.exit().transition().duration(300).attr("opacity", 0).remove();
+    var nodeEnter = node.enter().append("g").style("cursor", "pointer").attr("opacity", 0);
+    setupNodeVisuals(nodeEnter);
+    nodeEnter.transition().duration(500).attr("opacity", 1);
+
+    // Re-apply drag + events to entering nodes
+    nodeEnter.call(d3.drag()
+      .on("start", function(ev, d) { d.fx = d.x; d.fy = d.y; })
+      .on("drag", function(ev, d) { d.fx = ev.x; d.fy = ev.y; simulation.alphaTarget(0.02).restart(); })
+      .on("end", function(ev, d) { d.fx = null; d.fy = null; simulation.alphaTarget(0); })
+    );
+    nodeEnter.on("mouseenter", function(ev, d) {
+      if (selectedNode) return;
+      var conn = getConnected(d.id);
+      node.transition().duration(250).ease(d3.easeCubicOut)
+        .attr("opacity", function(n) { return conn.has(n.id) ? 1 : 0.15; });
+      link.transition().duration(250).ease(d3.easeCubicOut)
+        .attr("opacity", function(l) { return isConnectedLink(l, d.id) ? 0.6 : 0.03; });
+    });
+    nodeEnter.on("mouseleave", function() { if (!selectedNode) resetVisuals(); });
+    nodeEnter.on("click", function(ev, d) {
+      ev.stopPropagation();
+      if (selectedNode && selectedNode.id === d.id) { selectedNode = null; resetVisuals(); detailEl.classList.remove("explorer-detail-open"); return; }
+      selectedNode = d; applySelection(d); showDetail(d);
+    });
+
+    node = nodeEnter.merge(node);
+
+    // Rebind halos
+    var haloNodes2 = data.nodes.filter(function(n) { return n.type !== "paper" && n.type !== "field"; });
+    haloSelection = root.select(".explorer-halos").selectAll("circle").data(haloNodes2, function(d) { return d.id; });
+    haloSelection.exit().remove();
+    var haloEnter = haloSelection.enter().append("circle")
+      .attr("r", function(d) { return d.type === "domain" ? d.size * 4 : d.size * 2.2; })
+      .attr("fill", function(d) { return d.color; })
+      .attr("opacity", function(d) { return d.type === "domain" ? 0.008 : 0.015; });
+    haloSelection = haloEnter.merge(haloSelection);
+
+    // Gentle restart — preserves zoom/pan, avoids full re-layout
+    simulation.nodes(data.nodes);
+    simulation.force("link").links(data.links);
+    simulation.alpha(0.15).restart();
+  }
+
+  // ── Reusable node visual setup ─────────────────────
+  function setupNodeVisuals(sel) {
+    // OA rings
+    sel.filter(function(d) { return d.type === "paper"; }).append("circle")
+      .attr("class", "oa-ring")
+      .attr("r", function(d) { return d.size + 2.5; })
+      .attr("fill", "none")
+      .each(function(d) {
+        var oa = (d.metadata && d.metadata.oa_status) || "closed";
+        var cfg = OA[oa] || OA.closed;
+        d3.select(this).attr("stroke", cfg.color).attr("stroke-width", 1.5).attr("opacity", 0.5);
+        if (cfg.dash) d3.select(this).attr("stroke-dasharray", cfg.dash);
+      });
+    // Researcher outer ring
+    sel.filter(function(d) { return d.type === "researcher"; }).append("circle")
+      .attr("class", "outer-ring")
+      .attr("r", function(d) { return d.size + 3; })
+      .attr("fill", "none").attr("stroke", function(d) { return d.color; })
+      .attr("stroke-width", 0.4).attr("opacity", 0.15);
+    // Domain outer ring
+    sel.filter(function(d) { return d.type === "domain"; }).append("circle")
+      .attr("class", "outer-ring")
+      .attr("r", function(d) { return d.size + 5; })
+      .attr("fill", "none").attr("stroke", function(d) { return d.color; })
+      .attr("stroke-width", 0.6).attr("opacity", 0.12).attr("stroke-dasharray", "4,3");
+    // Field outer ring
+    sel.filter(function(d) { return d.type === "field"; }).append("circle")
+      .attr("class", "outer-ring")
+      .attr("r", function(d) { return d.size + 2; })
+      .attr("fill", "none").attr("stroke", function(d) { return d.color; })
+      .attr("stroke-width", 0.5).attr("opacity", 0.2);
+    // Main body
+    sel.append("circle").attr("class", "body")
+      .attr("r", function(d) { return d.size; })
+      .attr("fill", function(d) { return "url(#ng-" + d.id.replace(/[^a-zA-Z0-9]/g, "_") + ")"; })
+      .attr("stroke", function(d) { return d.type === "query" ? "#c45c4a" : (d._authorColor || d.color); })
+      .attr("stroke-width", function(d) {
+        if (d.type === "domain") return 0.4; if (d.type === "field") return 0.6;
+        return d.type === "researcher" ? 1.5 : d.type === "query" ? 1.2 : 0.8;
+      })
+      .attr("stroke-dasharray", function(d) { return d.type === "query" ? "3,2" : d.type === "domain" ? "4,3" : null; })
+      .attr("opacity", function(d) { if (d.type === "domain") return 0.25; if (d.type === "field") return 0.5; return 0.9; })
+      .attr("filter", function(d) { return (d.type === "researcher" || d.type === "query") ? "url(#glow)" : null; });
+    // Icons
+    sel.filter(function(d) { return d.type === "researcher"; }).append("text")
+      .text("\u25CE").attr("text-anchor", "middle").attr("dy", 4).attr("font-size", "12px")
+      .attr("fill", function(d) { return d.color; }).attr("opacity", 0.3).style("pointer-events", "none");
+    sel.filter(function(d) { return d.type === "query"; }).append("text")
+      .text("\u2299").attr("text-anchor", "middle").attr("dy", 4).attr("font-size", "10px")
+      .attr("fill", "#c45c4a").attr("opacity", 0.35).style("pointer-events", "none");
+    sel.filter(function(d) { return d.type === "field"; }).append("text")
+      .text("\u25C7").attr("text-anchor", "middle").attr("dy", 4).attr("font-size", "9px")
+      .attr("fill", function(d) { return d.color; }).attr("opacity", 0.25).style("pointer-events", "none");
+    sel.filter(function(d) { return d.type === "domain"; }).append("text")
+      .text("\u2B21").attr("text-anchor", "middle").attr("dy", 5).attr("font-size", "14px")
+      .attr("fill", function(d) { return d.color; }).attr("opacity", 0.15).style("pointer-events", "none");
+    // Labels
+    sel.append("text").attr("class", "label")
+      .text(function(d) { return d.label.length > 24 ? d.label.slice(0, 22) + "\u2026" : d.label; })
+      .attr("text-anchor", "middle").attr("dy", function(d) { return -d.size - 6; })
+      .attr("font-size", function(d) {
+        if (d.type === "domain") return "10px"; if (d.type === "field") return "7.5px";
+        return d.type === "researcher" ? "9px" : d.type === "query" ? "8px" : "6.5px";
+      })
+      .attr("font-weight", function(d) {
+        return (d.type === "researcher" || d.type === "query" || d.type === "domain") ? 600 : d.type === "field" ? 500 : 400;
+      })
+      .attr("fill", function(d) {
+        if (d.type === "domain") return d.color; if (d.type === "field") return d.color;
+        return d.type === "query" ? "#c45c4a" : d.type === "researcher" ? d.color : "#6a7590";
+      })
+      .attr("opacity", function(d) { if (d.type === "domain") return 0.25; if (d.type === "field") return 0.45; return 1; })
+      .attr("letter-spacing", function(d) { return (d.type === "researcher" || d.type === "domain") ? "0.8px" : "0.2px"; })
+      .attr("font-family", "inherit").style("pointer-events", "none");
+    // Sub-labels
+    sel.append("text").attr("class", "sub-label")
+      .text(function(d) {
+        if (d.type === "researcher") { var m = d.metadata || {}; return "h-index: " + (m.h_index || "?") + " \u00B7 " + ((m.affiliations && m.affiliations[0]) || ""); }
+        if (d.type === "paper") { var m2 = d.metadata || {}; return (m2.year || "") + " \u00B7 " + (m2.citations || 0) + " cites"; }
+        if (d.type === "field" || d.type === "domain") { var conn = getConnected(d.id); return (conn.size - 1) + " connected"; }
+        return "";
+      })
+      .attr("text-anchor", "middle").attr("dy", function(d) { return d.size + 12; })
+      .attr("font-size", "6px").attr("fill", "#4a5568").attr("opacity", 0)
+      .attr("font-family", "inherit").style("pointer-events", "none");
+    // Field tags
+    sel.filter(function(d) { return d.type === "paper"; }).append("text").attr("class", "field-tag")
+      .text(function(d) { return (d.metadata && d.metadata.fields && d.metadata.fields[0]) || ""; })
+      .attr("text-anchor", "middle").attr("dy", function(d) { return d.size + 22; })
+      .attr("font-size", "5.5px").attr("fill", function(d) { return d._authorColor || d.color; }).attr("opacity", 0)
+      .attr("font-family", "inherit").style("pointer-events", "none");
+  }
 
   // ── Simulation ────────────────────────────────────
   var simulation = d3.forceSimulation(data.nodes)

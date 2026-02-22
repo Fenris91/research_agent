@@ -83,8 +83,8 @@ class TestCitationExplorerUI:
 
         assert result is not None
         assert len(result) == 2
-        assert result[0] == ["Test Paper 1", 2023, 100, "paper_001"]
-        assert result[1] == ["Test Paper 2", 2024, 50, "paper_002"]
+        assert result[0] == [False, "Test Paper 1", 2023, 100, "paper_001"]
+        assert result[1] == [False, "Test Paper 2", 2024, 50, "paper_002"]
 
     def test_papers_to_dataframe_empty(self):
         """Test _papers_to_dataframe with empty list."""
@@ -109,7 +109,7 @@ class TestCitationExplorerUI:
 
         assert result is not None
         assert len(result) == 1
-        assert result[0] == ["Unknown Title", "Unknown", 0, "paper_001"]
+        assert result[0] == [False, "Unknown Title", "Unknown", 0, "paper_001"]
 
 
 # ============================================
@@ -351,15 +351,6 @@ class TestBibTeXExport:
 
     def test_paper_to_bibtex_basic(self):
         """Test basic BibTeX conversion."""
-        # Import the function from app module
-        import sys
-        from pathlib import Path
-
-        # Add src to path for this test
-        src_path = Path(__file__).parent.parent / "src"
-        if str(src_path) not in sys.path:
-            sys.path.insert(0, str(src_path))
-
         # We can't easily import _paper_to_bibtex since it's defined inside create_app
         # So we'll test the format manually
         paper = {

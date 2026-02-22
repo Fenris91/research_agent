@@ -1,8 +1,7 @@
 """Gradio components for the Citation Explorer tab."""
 
-from pathlib import Path
-
 import gradio as gr
+from research_agent.utils.config import load_config as _load_config
 import matplotlib.pyplot as plt
 import networkx as nx
 
@@ -342,7 +341,7 @@ async def explore_citations(paper_input: str, direction: str, depth: int):
                         paper_id=network.seed_paper.paper_id,
                         title=network.seed_paper.title,
                         year=network.seed_paper.year,
-                        citations=network.seed_paper.citation_count,
+                        citation_count=network.seed_paper.citation_count,
                         source=network.seed_paper.source,
                         doi=network.seed_paper.doi,
                     )
@@ -354,7 +353,7 @@ async def explore_citations(paper_input: str, direction: str, depth: int):
                         paper_id=p.paper_id,
                         title=p.title,
                         year=p.year,
-                        citations=p.citation_count,
+                        citation_count=p.citation_count,
                         source=p.source,
                         doi=p.doi,
                     )
@@ -404,20 +403,6 @@ def _clear_checks(table_data):
         updated.append(row_list)
 
     return updated
-
-
-def _load_config():
-    config_path = Path("configs/config.yaml")
-    if not config_path.exists():
-        return {}
-
-    try:
-        import yaml
-
-        with config_path.open("r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except Exception:
-        return {}
 
 
 def _get_kb_resources():
@@ -489,7 +474,7 @@ async def save_selected_to_kb(table_data):
                 venue = paper.venue or ""
                 authors = paper.authors or []
                 fields = paper.fields or []
-                citations = paper.citations
+                citations = paper.citation_count
                 doi = paper.doi
                 source = paper.source
             else:
@@ -512,7 +497,7 @@ async def save_selected_to_kb(table_data):
                 fields=fields,
                 doi=doi,
                 year=paper.year if paper else row[2],
-                citations=citations,
+                citation_count=citations,
                 authors=authors,
                 source=source,
                 extra_metadata={"ingest_source": "citation_explorer"},
@@ -791,7 +776,7 @@ async def explore_researcher_network(researcher_name: str, depth: int):
                         paper_id=p.paper_id,
                         title=p.title,
                         year=p.year,
-                        citations=p.citation_count,
+                        citation_count=p.citation_count,
                         source=p.source,
                         doi=p.doi,
                     )

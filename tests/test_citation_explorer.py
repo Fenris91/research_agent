@@ -8,18 +8,23 @@ Tests are organized into:
 """
 
 import pytest
-import pytest_asyncio
+try:
+    import pytest_asyncio
+except ImportError:
+    pytest.skip("pytest-asyncio not installed", allow_module_level=True)
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from dataclasses import asdict
 
 from tests.test_config import Config, TestPaperIDs, ExpectedResults, Timeouts
+from tests.fixtures import make_citation_paper
 
 
 # ============================================
 # Unit Tests (Mocked)
 # ============================================
 
+@pytest.mark.unit
 class TestCitationExplorerUnit:
     """Unit tests using mocked API responses."""
 
@@ -160,6 +165,7 @@ class TestCitationExplorerUnit:
 # ============================================
 
 @pytest.mark.integration
+@pytest.mark.network
 class TestCitationExplorerIntegration:
     """Integration tests with real API calls (limited)."""
 
@@ -234,6 +240,7 @@ class TestCitationExplorerIntegration:
 # Error Handling Tests
 # ============================================
 
+@pytest.mark.unit
 class TestCitationExplorerErrors:
     """Tests for error handling and edge cases."""
 
@@ -365,6 +372,7 @@ class TestCitationExplorerErrors:
 # Suggest Related Tests
 # ============================================
 
+@pytest.mark.unit
 class TestSuggestRelated:
     """Tests for the suggest_related functionality."""
 
@@ -393,7 +401,7 @@ class TestSuggestRelated:
             from research_agent.tools.citation_explorer import CitationNetwork, CitationPaper
 
             mock_network = CitationNetwork(
-                seed_paper=CitationPaper(paper_id="seed", title="Seed"),
+                seed_paper=CitationPaper(**make_citation_paper(paper_id="seed", title="Seed")),
                 citing_papers=[],
                 cited_papers=[],
                 highly_connected=[]

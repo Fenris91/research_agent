@@ -22,6 +22,7 @@ from research_agent.tools.researcher_file_parser import (
     parse_researchers_file,
     parse_researchers_text,
 )
+from research_agent.utils.config import load_config
 
 
 # Configure logging
@@ -31,23 +32,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
-
-
-def load_config(project_root: Path) -> dict:
-    """Load configuration from config.yaml if available."""
-    import yaml
-
-    config_paths = [
-        project_root / "configs" / "config.local.yaml",
-        project_root / "configs" / "config.yaml",
-    ]
-
-    for config_path in config_paths:
-        if config_path.exists():
-            with open(config_path, encoding="utf-8") as f:
-                return yaml.safe_load(f)
-
-    return {}
 
 
 def print_profile(profile: ResearcherProfile):
@@ -154,8 +138,7 @@ Examples:
 
     args = parser.parse_args()
 
-    project_root = Path(__file__).resolve().parents[3]
-    config = load_config(project_root)
+    config = load_config()
     researcher_config = config.get("researcher_lookup", {})
 
     # Determine input source
