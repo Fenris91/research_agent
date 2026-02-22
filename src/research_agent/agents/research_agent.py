@@ -1242,6 +1242,9 @@ Response:"""
             search_filters: Optional filters (year_from, year_to, min_citations)
             context: Optional context from UI (researcher, paper_id)
         """
+        from research_agent.utils.observability import new_request_id
+        new_request_id()
+
         # Extract context
         context = context or {}
         current_researcher = context.get("researcher")

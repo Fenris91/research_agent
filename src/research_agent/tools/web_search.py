@@ -15,6 +15,9 @@ from dataclasses import dataclass
 
 import httpx
 
+from research_agent.utils.observability import timed
+from research_agent.utils.retry import retry_with_backoff
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +66,7 @@ class WebSearchTool:
             await self._client.aclose()
             self._client = None
 
+    @timed
     async def search(
         self,
         query: str,
@@ -120,7 +124,16 @@ class WebSearchTool:
                     ddgs = DDGS()
                     return list(ddgs.text(query, max_results=max_results))
 
-            raw_results = await loop.run_in_executor(None, do_search)
+            for attempt in range(2):
+                try:
+                    raw_results = await loop.run_in_executor(None, do_search)
+                    break
+                except Exception as e:
+                    if attempt == 0:
+                        logger.debug(f"DuckDuckGo attempt 1 failed: {e}, retrying...")
+                        await asyncio.sleep(1.0)
+                    else:
+                        raise
 
             results = []
             for r in raw_results:
@@ -157,14 +170,17 @@ class WebSearchTool:
         client = await self._get_client()
 
         try:
-            response = await client.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": self.api_key,
-                    "query": query,
-                    "max_results": max_results,
-                    "include_raw_content": False
-                }
+            response = await retry_with_backoff(
+                lambda: client.post(
+                    "https://api.tavily.com/search",
+                    json={
+                        "api_key": self.api_key,
+                        "query": query,
+                        "max_results": max_results,
+                        "include_raw_content": False
+                    }
+                ),
+                max_retries=2, base_delay=1.0, retry_on=(429, 503, 504),
             )
             response.raise_for_status()
             data = response.json()
@@ -203,13 +219,16 @@ class WebSearchTool:
         client = await self._get_client()
 
         try:
-            response = await client.post(
-                "https://google.serper.dev/search",
-                headers={"X-API-KEY": self.api_key},
-                json={
-                    "q": query,
-                    "num": max_results
-                }
+            response = await retry_with_backoff(
+                lambda: client.post(
+                    "https://google.serper.dev/search",
+                    headers={"X-API-KEY": self.api_key},
+                    json={
+                        "q": query,
+                        "num": max_results
+                    }
+                ),
+                max_retries=2, base_delay=1.0, retry_on=(429, 503, 504),
             )
             response.raise_for_status()
             data = response.json()

@@ -24,6 +24,7 @@ import httpx
 
 from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
 from research_agent.utils.retry import retry_with_backoff
+from research_agent.utils.observability import timed
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +226,7 @@ class AcademicSearchTools:
             self._cache.clear()
             logger.info("API response cache cleared")
 
+    @timed
     async def search_semantic_scholar(
         self,
         query: str,
@@ -336,6 +338,7 @@ class AcademicSearchTools:
             logger.error(f"Semantic Scholar API error: {e}")
             return []
 
+    @timed
     async def search_openalex(
         self,
         query: str,
@@ -594,6 +597,7 @@ class AcademicSearchTools:
                     if not paper.open_access_url and oa["best_oa_url"]:
                         paper.open_access_url = oa["best_oa_url"]
 
+    @timed
     async def get_paper_details(self, paper_id: str, source: str = "semantic_scholar") -> Optional[Paper]:
         """
         Get detailed information about a specific paper.

@@ -22,6 +22,7 @@ import httpx
 from research_agent.tools.academic_search import RateLimiter
 from research_agent.utils.retry import retry_with_backoff
 from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
+from research_agent.utils.observability import timed
 
 logger = logging.getLogger(__name__)
 
@@ -571,6 +572,7 @@ class ResearcherLookup:
             logger.error(f"Web search error for {name}: {e}")
             return []
 
+    @timed
     async def lookup_researcher(
         self, name: str, fetch_papers: bool = True, papers_limit: int = 10
     ) -> ResearcherProfile:
