@@ -759,15 +759,13 @@ class ResearchVectorStore:
         # Also clear matching SQLite table
         if self._meta:
             try:
-                if collection == "papers":
-                    with self._meta._connect() as conn:
-                        conn.execute("DELETE FROM papers")
-                elif collection == "notes":
-                    with self._meta._connect() as conn:
-                        conn.execute("DELETE FROM notes")
-                elif collection == "web_sources":
-                    with self._meta._connect() as conn:
-                        conn.execute("DELETE FROM web_sources")
+                clear_fn = {
+                    "papers": self._meta.clear_papers,
+                    "notes": self._meta.clear_notes,
+                    "web_sources": self._meta.clear_web_sources,
+                }.get(collection)
+                if clear_fn:
+                    clear_fn()
             except Exception as e:
                 logger.warning(f"Failed to clear SQLite collection {collection}: {e}")
 

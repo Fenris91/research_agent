@@ -489,6 +489,21 @@ class KBMetadataStore:
             f"{len(note_metas)} notes, {len(web_meta)} web sources"
         )
 
+    def clear_papers(self) -> None:
+        """Delete all paper metadata."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM papers")
+
+    def clear_notes(self) -> None:
+        """Delete all note metadata."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM notes")
+
+    def clear_web_sources(self) -> None:
+        """Delete all web source metadata."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM web_sources")
+
     def clear(self) -> None:
         """Delete all metadata."""
         with self._connect() as conn:
