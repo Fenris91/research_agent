@@ -203,7 +203,6 @@ def create_app(agent=None):
         font-size: 8px;
         color: #5a6580;
         padding: 3px 7px;
-        cursor: default;
         white-space: nowrap;
         display: inline-flex;
         align-items: center;
@@ -212,6 +211,47 @@ def create_app(agent=None):
     }
     .si-star { color: #c45c4a; margin-right: 2px; }
     .si-val { color: #c8d0e0; margin-left: 4px; }
+    .si-click {
+        cursor: pointer;
+        border-radius: 3px;
+        transition: background 0.15s;
+    }
+    .si-click:hover { background: #1a1f2e; }
+    .si-click.si-active { background: #1a1f2e; border-bottom: 1px solid #c45c4a; }
+
+    /* Status bar expand panels */
+    #sb-user-panel, #sb-ai-panel {
+        padding: 0; border: none; background: none; min-height: 0;
+    }
+    #sb-user-panel > div, #sb-ai-panel > div {
+        padding: 0; border: none; background: none; min-height: 0;
+    }
+    .sb-panel {
+        background: #0e1219;
+        border-bottom: 1px solid #1a1f2e;
+        padding: 6px 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .sb-panel label, .sb-panel .label-wrap { display: none; }
+    .sb-panel input, .sb-panel textarea {
+        font-size: 11px;
+        padding: 4px 8px;
+        background: #141822;
+        border: 1px solid #1a1f2e;
+        color: #c8d0e0;
+        border-radius: 3px;
+    }
+    .sb-panel .sb-hint {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 8px;
+        color: #3e4a64;
+    }
+    .sb-panel button {
+        font-size: 9px;
+        padding: 3px 10px;
+    }
 
     /* ── Chat layer buttons (left pane) ──────── */
     #chat-layers {
@@ -488,7 +528,13 @@ def create_app(agent=None):
         # User
         researcher = state.get("researcher")
         is_anon = state.get("is_anon", True)
-        user_name = researcher if researcher and not is_anon else "anon"
+        email = state.get("email")
+        if researcher and not is_anon:
+            user_name = researcher
+        elif email:
+            user_name = email.split("@")[0]
+        else:
+            user_name = "anon"
         # Data
         data_val = "\u2014"
         try:
@@ -508,6 +554,8 @@ def create_app(agent=None):
             pass
         # AI
         short = state.get("model_name") or "unknown"
+        if short in ("unknown", "none"):
+            short = "retrieval-only"
         if "/" in short:
             short = short.split("/")[-1]
         if len(short) > 20:
@@ -516,9 +564,11 @@ def create_app(agent=None):
 
         return (
             f'<div class="status-bar">'
-            f'<span class="si"><span class="si-star">*</span>user<span class="si-val">{html_mod.escape(user_name)}</span></span>'
+            f'<span class="si si-click" onclick="setBusValue(\'#sb-toggle-bus\',\'user:\'+Date.now())">'
+            f'<span class="si-star">*</span>user<span class="si-val">{html_mod.escape(user_name)}</span></span>'
             f'<span class="si"><span class="si-star">*</span>data<span class="si-val">{data_val}</span></span>'
-            f'<span class="si"><span class="si-star">*</span>ai<span class="si-val">{short}</span></span>'
+            f'<span class="si si-click" onclick="setBusValue(\'#sb-toggle-bus\',\'ai:\'+Date.now())">'
+            f'<span class="si-star">*</span>ai<span class="si-val">{short}</span></span>'
             f'</div>'
         )
 
@@ -571,7 +621,8 @@ def create_app(agent=None):
         else:
             _init_pills_html = ""
 
-        # Hidden buses (pill commands, explorer actions, right-layer sync)
+        # Hidden buses (pill commands, explorer actions, right-layer sync, status bar)
+        sb_toggle_bus = gr.Textbox(value="", visible=False, elem_id="sb-toggle-bus")
         ctx_command_bus = gr.Textbox(value="", visible=False, elem_id="ctx-command-bus")
         ctx_items_json = gr.Textbox(value="", visible=False, elem_id="ctx-items-json")
         explorer_action_bus = gr.Textbox(value="", visible=False, elem_id="explorer-action-bus")
@@ -625,6 +676,39 @@ def create_app(agent=None):
                 value=_render_status_bar({"is_anon": True, "model_name": "loading"}),
                 elem_id="status-bar",
             )
+            # ── Status bar expand panels ──
+            with gr.Row(visible=False, elem_id="sb-user-panel") as sb_user_panel:
+                gr.HTML('<div class="sb-panel"><span class="sb-hint">name:</span></div>', show_label=False)
+                sb_user_input = gr.Textbox(
+                    show_label=False, container=False, placeholder="Type your name...",
+                    scale=3, elem_classes=["sb-panel"],
+                )
+                sb_user_set = gr.Button("Set", variant="primary", scale=0, min_width=40)
+
+            with gr.Row(visible=False, elem_id="sb-ai-panel") as sb_ai_panel:
+                gr.HTML(
+                    '<div class="sb-panel">'
+                    '<span class="sb-hint">provider:</span>'
+                    '</div>',
+                    show_label=False,
+                )
+                sb_ai_provider = gr.Dropdown(
+                    choices=[
+                        ("Groq (Free)", "groq"),
+                        ("OpenAI", "openai"),
+                        ("Anthropic (Claude)", "anthropic"),
+                        ("OpenRouter (Free models)", "openrouter"),
+                    ],
+                    value="groq",
+                    show_label=False, container=False, scale=2,
+                )
+                sb_ai_key = gr.Textbox(
+                    show_label=False, container=False,
+                    placeholder="API key",
+                    type="password", scale=3,
+                )
+                sb_ai_connect = gr.Button("Connect", variant="primary", scale=0, min_width=60)
+
             # Layer tabs
             with gr.Row(elem_id="chat-layers"):
                 layer_context_btn = gr.Button(
@@ -1120,6 +1204,87 @@ def create_app(agent=None):
                     cm_plot = gr.Plot(label="Concept Map", show_label=False)
 
         # Event handlers
+
+        # ── Status bar panel toggle (via JS bus) ──
+        def _on_sb_toggle(toggle_val, state):
+            """Toggle user/ai panels from status bar clicks."""
+            if not toggle_val:
+                return gr.update(), gr.update(), state
+            panel = toggle_val.split(":")[0]
+            # Toggle: if same panel clicked again, hide it
+            active = state.get("_sb_active")
+            if active == panel:
+                new_state = dict(state)
+                new_state["_sb_active"] = None
+                return gr.update(visible=False), gr.update(visible=False), new_state
+            new_state = dict(state)
+            new_state["_sb_active"] = panel
+            return (
+                gr.update(visible=(panel == "user")),
+                gr.update(visible=(panel == "ai")),
+                new_state,
+            )
+
+        sb_toggle_bus.change(
+            _on_sb_toggle,
+            inputs=[sb_toggle_bus, context_state],
+            outputs=[sb_user_panel, sb_ai_panel, context_state],
+        )
+
+        # ── User name set ──
+        def _on_user_set(name, state):
+            """Set user name from status bar panel."""
+            new_state = dict(state)
+            name = (name or "").strip()
+            if name:
+                new_state["researcher"] = name
+                new_state["is_anon"] = False
+            else:
+                new_state["researcher"] = None
+                new_state["is_anon"] = True
+            new_state["_sb_active"] = None
+            return (
+                _render_status_bar(new_state),
+                new_state,
+                gr.update(visible=False),
+            )
+
+        sb_user_set.click(
+            _on_user_set,
+            inputs=[sb_user_input, context_state],
+            outputs=[status_bar, context_state, sb_user_panel],
+        )
+        sb_user_input.submit(
+            _on_user_set,
+            inputs=[sb_user_input, context_state],
+            outputs=[status_bar, context_state, sb_user_panel],
+        )
+
+        # ── AI provider connect (BYOK) ──
+        def _on_ai_connect(provider_key, api_key, state):
+            """Connect to a cloud provider with a user-supplied API key."""
+            if not api_key or not api_key.strip():
+                return state, _render_status_bar(state), gr.update(visible=True)
+            if agent is None:
+                return state, _render_status_bar(state), gr.update(visible=True)
+
+            success = agent.connect_provider(provider_key, api_key.strip())
+            new_state = dict(state)
+            if success:
+                model_name = agent.get_current_model()
+                new_state["model_name"] = model_name
+                new_state["_sb_active"] = None
+            return (
+                new_state,
+                _render_status_bar(new_state),
+                gr.update(visible=not success),
+            )
+
+        sb_ai_connect.click(
+            _on_ai_connect,
+            inputs=[sb_ai_provider, sb_ai_key, context_state],
+            outputs=[context_state, status_bar, sb_ai_panel],
+        )
 
         def get_available_models():
             """Get list of available models for the current provider."""
