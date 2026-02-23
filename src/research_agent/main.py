@@ -57,6 +57,10 @@ PROVIDER_PIPELINE_DEFAULTS: dict[str, dict[str, str]] = {
         "fast": "grok-3-mini-fast",
         "default": "grok-3-fast",
     },
+    "perplexity": {
+        "fast": "sonar",
+        "default": "sonar-pro",
+    },
 }
 
 
