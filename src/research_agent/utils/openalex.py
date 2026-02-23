@@ -40,6 +40,41 @@ def is_openalex_id(paper_id: str) -> bool:
     return normalize_openalex_id(paper_id).startswith("W")
 
 
+def extract_openalex_fields(
+    work: dict,
+    limit: int = 5,
+    min_score: float = 0.3,
+    max_level: int = 2,
+) -> List[str]:
+    """Extract high-signal fields from an OpenAlex work's concepts/topics.
+
+    Filters by relevance score (>=*min_score*) and hierarchy level (<=*max_level*),
+    then returns the top *limit* display names.  Falls back to unfiltered top-N
+    when no concepts pass the filter.
+    """
+    concepts = work.get("concepts", []) or []
+    scored = []
+    for concept in concepts:
+        if not concept or not concept.get("display_name"):
+            continue
+        score = concept.get("score", 0) or concept.get("relevance_score", 0) or 0
+        level = concept.get("level")
+        scored.append((concept["display_name"], score, level))
+
+    filtered = [
+        item
+        for item in scored
+        if item[1] >= min_score and (item[2] is None or item[2] <= max_level)
+    ]
+    ranked = sorted(filtered or scored, key=lambda x: x[1], reverse=True)
+
+    fields: List[str] = []
+    for name, _score, _level in ranked[:limit]:
+        if name not in fields:
+            fields.append(name)
+    return fields
+
+
 # ---------------------------------------------------------------------------
 # Source-type label mappings — used in prompt construction and UI display
 # ---------------------------------------------------------------------------

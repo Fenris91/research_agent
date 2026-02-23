@@ -22,7 +22,7 @@ import httpx
 from research_agent.models.paper import BasePaper
 from research_agent.tools.academic_search import RateLimiter
 from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
-from research_agent.utils.openalex import reconstruct_abstract
+from research_agent.utils.openalex import reconstruct_abstract, extract_openalex_fields
 from research_agent.utils.retry import retry_with_backoff
 from research_agent.utils.observability import timed
 
@@ -368,7 +368,7 @@ class ResearcherLookup:
                     abstract=self._reconstruct_abstract(
                         work.get("abstract_inverted_index")
                     ),
-                    fields=self._extract_openalex_fields(work),
+                    fields=extract_openalex_fields(work),
                     source="openalex",
                 )
                 papers.append(paper)
@@ -384,31 +384,6 @@ class ResearcherLookup:
     def _reconstruct_abstract(self, inverted_index: Optional[dict]) -> Optional[str]:
         """Reconstruct abstract from OpenAlex inverted index format."""
         return reconstruct_abstract(inverted_index)
-
-    def _extract_openalex_fields(self, work: dict, limit: int = 5) -> List[str]:
-        """Extract high-signal fields from OpenAlex work concepts."""
-        concepts = work.get("concepts", []) or []
-        scored = []
-        for concept in concepts:
-            if not concept or not concept.get("display_name"):
-                continue
-            score = concept.get("score", 0) or concept.get("relevance_score", 0) or 0
-            level = concept.get("level")
-            scored.append((concept["display_name"], score, level))
-
-        filtered = [
-            item
-            for item in scored
-            if item[1] >= 0.3 and (item[2] is None or item[2] <= 2)
-        ]
-        ranked = sorted(filtered or scored, key=lambda x: x[1], reverse=True)
-
-        fields = []
-        for name, _score, _level in ranked[:limit]:
-            if name not in fields:
-                fields.append(name)
-
-        return fields
 
     async def fetch_author_papers_semantic_scholar(
         self, author_id: str, limit: int = 10

@@ -226,6 +226,14 @@ class KBMetadataStore:
             ).fetchone()
             return row is not None
 
+    def update_paper_fields(self, paper_id: str, fields: str) -> bool:
+        """Update just the fields column for an existing paper."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE papers SET fields = ? WHERE paper_id = ?", (fields, paper_id)
+            )
+            return cur.rowcount > 0
+
     def paper_exists_by_doi(self, doi: str) -> bool:
         with self._connect() as conn:
             row = conn.execute(

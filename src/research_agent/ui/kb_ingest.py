@@ -1,6 +1,11 @@
 """Unified KB ingestion helpers for UI flows."""
 
+import logging
 from typing import Any, Dict, List, Optional, Tuple
+
+from research_agent.utils.field_enrichment import enrich_fields
+
+logger = logging.getLogger(__name__)
 
 
 def _build_paper_content(
@@ -46,6 +51,12 @@ def ingest_paper_to_kb(
 
     if store.get_paper(paper_id):
         return False, "duplicate"
+
+    # Enrich coarse/missing fields via OpenAlex + LLM fallback
+    try:
+        fields = enrich_fields(fields=fields, doi=doi, title=title, abstract=abstract)
+    except Exception:
+        logger.debug("Field enrichment failed, using original fields", exc_info=True)
 
     content = _build_paper_content(
         title=title,
