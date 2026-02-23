@@ -12,10 +12,16 @@ from typing import List, Optional
 import httpx
 
 from research_agent.utils.openalex import extract_openalex_fields
+from research_agent.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
 OPENALEX_API = "https://api.openalex.org"
+
+
+def _openalex_email() -> str:
+    """Return the configured email for OpenAlex polite pool access."""
+    return os.environ.get("OPENALEX_EMAIL", "research-agent@example.com")
 
 # Coarse S2 top-level categories that don't add much signal for the
 # field→domain scaffold in the Knowledge Explorer.
@@ -74,10 +80,16 @@ def _titles_match(a: str, b: str, threshold: float = 0.5) -> bool:
 def _lookup_openalex_by_doi(doi: str) -> Optional[List[str]]:
     """Try OpenAlex /works/doi:{doi} and extract concepts."""
     try:
-        resp = httpx.get(
-            f"{OPENALEX_API}/works/doi:{doi}",
-            headers={"User-Agent": "research-agent/1.0"},
-            timeout=10,
+        resp = retry_with_backoff(
+            lambda: httpx.get(
+                f"{OPENALEX_API}/works/doi:{doi}",
+                params={"mailto": _openalex_email()},
+                headers={"User-Agent": "research-agent/1.0"},
+                timeout=10,
+            ),
+            max_retries=2,
+            base_delay=1.0,
+            retry_on=(429, 503, 504),
         )
         if resp.status_code == 200:
             fields = extract_openalex_fields(resp.json())
@@ -92,11 +104,16 @@ def _lookup_openalex_by_doi(doi: str) -> Optional[List[str]]:
 def _lookup_openalex_by_title(title: str) -> Optional[List[str]]:
     """Search OpenAlex by title and verify with Jaccard similarity."""
     try:
-        resp = httpx.get(
-            f"{OPENALEX_API}/works",
-            params={"search": title, "per_page": 1},
-            headers={"User-Agent": "research-agent/1.0"},
-            timeout=10,
+        resp = retry_with_backoff(
+            lambda: httpx.get(
+                f"{OPENALEX_API}/works",
+                params={"search": title, "per_page": 1, "mailto": _openalex_email()},
+                headers={"User-Agent": "research-agent/1.0"},
+                timeout=10,
+            ),
+            max_retries=2,
+            base_delay=1.0,
+            retry_on=(429, 503, 504),
         )
         if resp.status_code == 200:
             results = resp.json().get("results", [])
