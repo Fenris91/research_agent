@@ -17,6 +17,8 @@ from typing import List, Dict, Optional, Any, Union, cast
 import chromadb
 from chromadb.config import Settings
 
+from research_agent.db.kb_metadata_store import KBMetadataStore
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +47,7 @@ class ResearchVectorStore:
         embedding_function: Optional[Any] = None,
         reranker: Optional[Any] = None,
         rerank_top_k: Optional[int] = None,
+        metadata_store_path: Optional[str] = "./data/kb_metadata.sqlite",
     ):
         """
         Initialize the vector store.
@@ -52,6 +55,7 @@ class ResearchVectorStore:
         Args:
             persist_dir: Directory to persist the database
             embedding_function: Optional ChromaDB embedding function
+            metadata_store_path: Path for SQLite metadata index (None to disable)
         """
         self.persist_dir = Path(persist_dir)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
@@ -88,7 +92,33 @@ class ResearchVectorStore:
             ),
         )
 
+        # SQLite metadata index (fast listing / counting / filtering)
+        self._meta: Optional[KBMetadataStore] = None
+        if metadata_store_path:
+            try:
+                self._meta = KBMetadataStore(path=metadata_store_path)
+                self._auto_rebuild_if_needed()
+            except Exception as e:
+                logger.warning(f"Failed to init KB metadata store: {e}")
+                self._meta = None
+
         logger.info(f"Initialized vector store at {self.persist_dir}")
+
+    def _auto_rebuild_if_needed(self) -> None:
+        """If SQLite is empty but ChromaDB has data, rebuild the index."""
+        if self._meta is None:
+            return
+        stats = self._meta.get_stats()
+        sqlite_total = stats["total_papers"] + stats["total_notes"] + stats["total_web_sources"]
+        if sqlite_total > 0:
+            return
+        chroma_total = self.papers.count() + self.notes.count() + self.web_sources.count()
+        if chroma_total > 0:
+            logger.info("SQLite metadata index is empty but ChromaDB has data — rebuilding...")
+            try:
+                self._meta.rebuild_from_chromadb(self)
+            except Exception as e:
+                logger.warning(f"Auto-rebuild failed: {e}")
 
     def _get_collection(self, collection: str):
         """Get collection by name."""
@@ -173,6 +203,15 @@ class ResearchVectorStore:
             metadatas=metadatas_any,
         )  # type: ignore[arg-type]
 
+        # Dual-write to SQLite metadata index
+        if self._meta:
+            try:
+                self._meta.upsert_paper_from_metadata(
+                    paper_id, base_metadata, chunk_count=len(chunks)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to write paper metadata to SQLite: {e}")
+
         logger.info(f"Added paper {paper_id} with {len(chunks)} chunks")
 
     def add_note(
@@ -214,6 +253,13 @@ class ResearchVectorStore:
             documents=[content],
             metadatas=cast(Any, [note_metadata]),
         )  # type: ignore[arg-type]
+
+        # Dual-write to SQLite metadata index
+        if self._meta:
+            try:
+                self._meta.upsert_note_from_metadata(note_id, note_metadata, content)
+            except Exception as e:
+                logger.warning(f"Failed to write note metadata to SQLite: {e}")
 
         logger.info(f"Added note {note_id}")
 
@@ -265,6 +311,15 @@ class ResearchVectorStore:
             documents=chunks,
             metadatas=metadatas_any,
         )  # type: ignore[arg-type]
+
+        # Dual-write to SQLite metadata index
+        if self._meta:
+            try:
+                self._meta.upsert_web_source_from_metadata(
+                    source_id, base_metadata, chunk_count=len(chunks)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to write web source metadata to SQLite: {e}")
 
         logger.info(f"Added web source {source_id} with {len(chunks)} chunks")
 
@@ -474,6 +529,13 @@ class ResearchVectorStore:
             return False
 
         self.papers.delete(ids=result_ids)
+
+        if self._meta:
+            try:
+                self._meta.delete_paper(paper_id)
+            except Exception as e:
+                logger.warning(f"Failed to delete paper from SQLite: {e}")
+
         logger.info(f"Deleted paper {paper_id} ({len(result_ids)} chunks)")
         return True
 
@@ -481,6 +543,13 @@ class ResearchVectorStore:
         """Remove a note from the knowledge base."""
         try:
             self.notes.delete(ids=[note_id])
+
+            if self._meta:
+                try:
+                    self._meta.delete_note(note_id)
+                except Exception as e:
+                    logger.warning(f"Failed to delete note from SQLite: {e}")
+
             logger.info(f"Deleted note {note_id}")
             return True
         except Exception as e:
@@ -498,17 +567,30 @@ class ResearchVectorStore:
             return False
 
         self.web_sources.delete(ids=result_ids)
+
+        if self._meta:
+            try:
+                self._meta.delete_web_source(source_id)
+            except Exception as e:
+                logger.warning(f"Failed to delete web source from SQLite: {e}")
+
         logger.info(f"Deleted web source {source_id}")
         return True
 
     def get_stats(self) -> Dict[str, int]:
         """Get knowledge base statistics."""
-        # Count unique papers/sources by looking at metadata
+        # Fast path: delegate to SQLite index
+        if self._meta:
+            try:
+                return self._meta.get_stats()
+            except Exception as e:
+                logger.warning(f"SQLite stats failed, falling back to ChromaDB: {e}")
+
+        # Fallback: full ChromaDB scan
         paper_chunks = self.papers.count()
         note_count = self.notes.count()
         web_chunks = self.web_sources.count()
 
-        # Estimate unique papers (get sample to count unique paper_ids)
         unique_papers = 0
         if paper_chunks > 0:
             all_papers = cast(Dict[str, Any], self.papers.get(include=["metadatas"]))
@@ -541,14 +623,20 @@ class ResearchVectorStore:
         Returns:
             List of paper metadata dicts
         """
-        # Get all paper metadata
+        # Fast path: delegate to SQLite index
+        if self._meta:
+            try:
+                return self._meta.list_papers(limit=limit, offset=offset)
+            except Exception as e:
+                logger.warning(f"SQLite list_papers failed, falling back to ChromaDB: {e}")
+
+        # Fallback: full ChromaDB scan
         all_results = cast(Dict[str, Any], self.papers.get(include=["metadatas"]))
         all_metadatas = all_results.get("metadatas") or []
 
         if not all_metadatas:
             return []
 
-        # Get unique papers
         seen_ids = set()
         papers = []
 
@@ -566,10 +654,7 @@ class ResearchVectorStore:
                     }
                 )
 
-        # Sort by added_at (newest first)
         papers.sort(key=lambda x: x.get("added_at", ""), reverse=True)
-
-        # Apply pagination
         return papers[offset : offset + limit]
 
     def list_papers_detailed(self, limit: int = 1000, offset: int = 0) -> List[Dict]:
@@ -583,6 +668,14 @@ class ResearchVectorStore:
         Returns:
             List of paper metadata dicts
         """
+        # Fast path: delegate to SQLite index
+        if self._meta:
+            try:
+                return self._meta.list_papers_detailed(limit=limit, offset=offset)
+            except Exception as e:
+                logger.warning(f"SQLite list_papers_detailed failed, falling back: {e}")
+
+        # Fallback: full ChromaDB scan
         all_results = cast(Dict[str, Any], self.papers.get(include=["metadatas"]))
         all_metadatas = all_results.get("metadatas") or []
 
@@ -619,6 +712,14 @@ class ResearchVectorStore:
 
     def list_notes(self, limit: int = 100, offset: int = 0) -> List[Dict]:
         """List notes in the knowledge base."""
+        # Fast path: delegate to SQLite index
+        if self._meta:
+            try:
+                return self._meta.list_notes(limit=limit, offset=offset)
+            except Exception as e:
+                logger.warning(f"SQLite list_notes failed, falling back to ChromaDB: {e}")
+
+        # Fallback: full ChromaDB scan
         results = cast(
             Dict[str, Any], self.notes.get(include=["metadatas", "documents"])
         )
@@ -655,6 +756,19 @@ class ResearchVectorStore:
             coll.delete(ids=all_ids)
             logger.info(f"Cleared {len(all_ids)} documents from {collection}")
 
+        # Also clear matching SQLite table
+        if self._meta:
+            try:
+                clear_fn = {
+                    "papers": self._meta.clear_papers,
+                    "notes": self._meta.clear_notes,
+                    "web_sources": self._meta.clear_web_sources,
+                }.get(collection)
+                if clear_fn:
+                    clear_fn()
+            except Exception as e:
+                logger.warning(f"Failed to clear SQLite collection {collection}: {e}")
+
     def reset(self) -> None:
         """Reset the entire database (delete all data)."""
         self.client.reset()
@@ -668,4 +782,25 @@ class ResearchVectorStore:
         self.web_sources = self.client.get_or_create_collection(
             name="web_sources", metadata={"hnsw:space": "cosine"}
         )
+
+        # Clear SQLite index
+        if self._meta:
+            try:
+                self._meta.clear()
+            except Exception as e:
+                logger.warning(f"Failed to clear SQLite metadata: {e}")
+
         logger.info("Reset vector store")
+
+    def rebuild_metadata(self) -> Dict[str, int]:
+        """Wipe and rebuild the SQLite metadata index from ChromaDB.
+
+        Returns:
+            Stats dict after rebuild (same keys as get_stats()).
+        """
+        if not self._meta:
+            return self.get_stats()
+
+        self._meta.clear()
+        self._meta.rebuild_from_chromadb(self)
+        return self._meta.get_stats()

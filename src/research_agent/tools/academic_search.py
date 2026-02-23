@@ -191,7 +191,7 @@ class AcademicSearchTools:
                 "User-Agent": "ResearchAgent/1.0 (Academic Research Tool)"
             }
             self._client = httpx.AsyncClient(
-                timeout=30.0,
+                timeout=10.0,
                 headers=headers
             )
         return self._client

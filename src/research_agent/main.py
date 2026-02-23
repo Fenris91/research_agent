@@ -368,6 +368,7 @@ def build_agent_from_config(config: dict):
     academic_search = AcademicSearchTools(
         config=search_cfg,
         email=openalex_email or unpaywall_email,
+        persistent_cache_dir="./data/cache",
     )
 
     web_cfg = search_cfg.get("web_search", {}) or {}

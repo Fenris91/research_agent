@@ -66,10 +66,12 @@ python -m research_agent.main --mode ui
 - **ResearcherRegistry**: singleton for sharing researcher profiles across UI tabs
 - **CSS**: minimal `!important` — uses elem_id selectors; `footer_links=[]` hides footer natively
 - **Port handling**: auto-detects and kills stale research_agent processes, increments port if busy
+- **Dual-write storage**: ChromaDB owns vectors and semantic search; SQLite (`KBMetadataStore`) owns listing, counting, and filtering. Every write goes to both, every read goes to whichever is fast. Never scan all ChromaDB chunks to count or list — that's SQLite's job. If you add a new metadata field, add it to both stores. See [STORAGE_PHILOSOPHY.md](docs/STORAGE_PHILOSOPHY.md).
 
 ## Docs
 - [ROADMAP.md](docs/ROADMAP.md) — active priorities and future ideas
 - [DATA_SOURCES.md](docs/DATA_SOURCES.md) — API landscape (OpenAlex, Semantic Scholar, CrossRef, Unpaywall, CORE)
+- [STORAGE_PHILOSOPHY.md](docs/STORAGE_PHILOSOPHY.md) — vectors for meaning, tables for facts: the dual-write architecture
 - [CHANGELOG.md](docs/CHANGELOG.md) — implementation history by date
 - [SETUP.md](docs/SETUP.md) — environment setup and troubleshooting
 

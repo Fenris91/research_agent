@@ -37,10 +37,8 @@ class ResearchState(TypedDict):
     current_query: str
     search_query: str  # Concise keywords extracted for API searches
     query_type: str  # "literature_review", "factual", "analysis", "general"
-    search_results: List[Dict]
     local_results: List[Dict]
     external_results: List[Dict]
-    context: str
     should_search_external: bool
     candidates_for_ingestion: List[Dict]
     final_answer: str
@@ -324,10 +322,19 @@ class ResearchAgent:
             return False
 
         cloud_cfg = CLOUD_PROVIDERS[provider_key]
+        base_url = cloud_cfg.get("base_url")
+        if not base_url:
+            logger.error("No base_url configured for provider: %s", provider_key)
+            return False
+
+        if provider_key == "anthropic" and not api_key.startswith("sk-ant-"):
+            logger.warning("Anthropic keys start with 'sk-ant-' — check your key")
+            return False
+
         try:
             self.model = OpenAICompatibleModel(
                 model_name=cloud_cfg["default_model"],
-                base_url=cloud_cfg["base_url"],
+                base_url=base_url,
                 api_key=api_key,
                 fallback_models=cloud_cfg["models"],
             )
@@ -336,7 +343,7 @@ class ResearchAgent:
             self.use_ollama = False
             self._load_model_on_demand = False
             self._openai_api_key = api_key
-            self._openai_base_url = cloud_cfg["base_url"]
+            self._openai_base_url = base_url
             self._openai_fallback_models = cloud_cfg["models"]
             logger.info("Connected to %s via BYOK", cloud_cfg["name"])
             return True
@@ -360,7 +367,7 @@ class ResearchAgent:
         """
         try:
             if self.provider in {"ollama", "openai", "openai_compatible"}:
-                # Use Ollama
+                # Use API-based model (Ollama, OpenAI, Groq, Anthropic, etc.)
                 return self.model.generate(
                     prompt, max_tokens=max_tokens, temperature=0.7
                 )
@@ -670,39 +677,48 @@ Keywords:"""
                 if context_paper:
                     logger.info(f"Using paper context: {context_paper.get('metadata', {}).get('title', 'Unknown')[:50]}")
 
-            # Search all collections: papers, notes, and web_sources
-            # Papers get year filter, others don't
-            paper_results = self.vector_store.search(
-                query_embedding=query_embedding,
-                collection="papers",
-                n_results=self.config.max_local_results * 2,  # Get more for re-ranking
-                filter_dict=filter_dict,
-                query_text=query,
+            # Search all collections concurrently (ChromaDB is sync, so use executor)
+            _empty = {"documents": [], "metadatas": [], "distances": []}
+            loop = asyncio.get_running_loop()
+
+            def _search_papers():
+                return self.vector_store.search(
+                    query_embedding=query_embedding,
+                    collection="papers",
+                    n_results=self.config.max_local_results * 2,
+                    filter_dict=filter_dict,
+                    query_text=query,
+                )
+
+            def _search_notes():
+                try:
+                    return self.vector_store.search(
+                        query_embedding=query_embedding,
+                        collection="notes",
+                        n_results=max(3, self.config.max_local_results // 2),
+                        query_text=query,
+                    )
+                except Exception as e:
+                    logger.debug(f"Notes search skipped: {e}")
+                    return _empty
+
+            def _search_web():
+                try:
+                    return self.vector_store.search(
+                        query_embedding=query_embedding,
+                        collection="web_sources",
+                        n_results=max(3, self.config.max_local_results // 2),
+                        query_text=query,
+                    )
+                except Exception as e:
+                    logger.debug(f"Web sources search skipped: {e}")
+                    return _empty
+
+            paper_results, notes_results, web_results = await asyncio.gather(
+                loop.run_in_executor(None, _search_papers),
+                loop.run_in_executor(None, _search_notes),
+                loop.run_in_executor(None, _search_web),
             )
-
-            # Search notes collection (gracefully handle empty/incompatible collections)
-            try:
-                notes_results = self.vector_store.search(
-                    query_embedding=query_embedding,
-                    collection="notes",
-                    n_results=max(3, self.config.max_local_results // 2),
-                    query_text=query,
-                )
-            except Exception as e:
-                logger.debug(f"Notes search skipped: {e}")
-                notes_results = {"documents": [], "metadatas": [], "distances": []}
-
-            # Search web sources collection (gracefully handle empty/incompatible collections)
-            try:
-                web_results = self.vector_store.search(
-                    query_embedding=query_embedding,
-                    collection="web_sources",
-                    n_results=max(3, self.config.max_local_results // 2),
-                    query_text=query,
-                )
-            except Exception as e:
-                logger.debug(f"Web sources search skipped: {e}")
-                web_results = {"documents": [], "metadatas": [], "distances": []}
 
             # Format paper results
             for i, doc in enumerate(paper_results.get("documents", [])):
@@ -880,68 +896,98 @@ Keywords:"""
             query = f"{current_researcher} {query}"
             logger.info(f"Added researcher context to search query: {query}")
 
-        # Search academic databases
+        # Extract year filters from config for API calls
+        year_range = self.config.year_range
+        from_year = year_range[0] if year_range else None
+        to_year = year_range[1] if year_range else None
+
+        # Helper: normalize title for dedup (lowercase, first 80 chars)
+        def _title_key(title: str) -> str:
+            return (title or "").strip().lower()[:80]
+
+        seen_dois = set()
+        seen_titles = set()
+
+        def _is_duplicate(paper) -> bool:
+            if paper.doi and paper.doi in seen_dois:
+                return True
+            tk = _title_key(paper.title)
+            if tk and tk in seen_titles:
+                return True
+            return False
+
+        def _mark_seen(paper):
+            if paper.doi:
+                seen_dois.add(paper.doi)
+            tk = _title_key(paper.title)
+            if tk:
+                seen_titles.add(tk)
+
+        def _paper_to_dict(paper, source_label: str) -> dict:
+            return {
+                "content": paper.abstract or "",
+                "title": paper.title,
+                "authors": ", ".join(paper.authors) if paper.authors else "",
+                "year": paper.year,
+                "paper_id": paper.paper_id,
+                "doi": paper.doi,
+                "citation_count": paper.citation_count or 0,
+                "url": paper.url,
+                "source": source_label,
+            }
+
+        # Search academic databases — OpenAlex primary (2/3 budget), S2 fills remainder
+        max_ext = self.config.max_external_results
+        openalex_limit = max(1, (max_ext * 2) // 3)
+        s2_limit = max_ext - openalex_limit
+
         if self.academic_search:
-            try:
-                # Search Semantic Scholar
-                papers = await self.academic_search.search_semantic_scholar(
-                    query, limit=self.config.max_external_results // 2
-                )
-
-                for paper in papers:
-                    citation_count = paper.citation_count or 0
-                    if min_citations and citation_count < min_citations:
-                        continue
-                    external_results.append(
-                        {
-                            "content": paper.abstract or "",
-                            "title": paper.title,
-                            "authors": ", ".join(paper.authors)
-                            if paper.authors
-                            else "",
-                            "year": paper.year,
-                            "paper_id": paper.paper_id,
-                            "doi": paper.doi,
-                            "citation_count": citation_count,
-                            "url": paper.url,
-                            "source": "semantic_scholar",
-                        }
+            # Run both searches concurrently — each wrapped in its own error handler
+            async def _fetch_openalex():
+                try:
+                    return await self.academic_search.search_openalex(
+                        query, limit=openalex_limit,
+                        from_year=from_year, to_year=to_year,
                     )
+                except Exception as e:
+                    logger.error(f"OpenAlex search error: {e}")
+                    return []
 
-                # Search OpenAlex
-                openalex_papers = await self.academic_search.search_openalex(
-                    query, limit=self.config.max_external_results // 2
-                )
-
-                for paper in openalex_papers:
-                    # Avoid duplicates by DOI
-                    if paper.doi and any(
-                        r.get("doi") == paper.doi for r in external_results
-                    ):
-                        continue
-                    citation_count = paper.citation_count or 0
-                    if min_citations and citation_count < min_citations:
-                        continue
-                    external_results.append(
-                        {
-                            "content": paper.abstract or "",
-                            "title": paper.title,
-                            "authors": ", ".join(paper.authors)
-                            if paper.authors
-                            else "",
-                            "year": paper.year,
-                            "paper_id": paper.paper_id,
-                            "doi": paper.doi,
-                            "citation_count": citation_count,
-                            "url": paper.url,
-                            "source": "openalex",
-                        }
+            async def _fetch_s2():
+                try:
+                    return await self.academic_search.search_semantic_scholar(
+                        query, limit=s2_limit,
+                        year_range=year_range,
                     )
+                except Exception as e:
+                    logger.error(f"Semantic Scholar search error: {e}")
+                    return []
 
-                logger.info(f"Found {len(external_results)} academic results")
+            openalex_papers, s2_papers = await asyncio.gather(
+                _fetch_openalex(), _fetch_s2()
+            )
 
-            except Exception as e:
-                logger.error(f"Academic search error: {e}")
+            # Process OpenAlex results first (primary source)
+            for paper in openalex_papers:
+                citation_count = paper.citation_count or 0
+                if min_citations and citation_count < min_citations:
+                    continue
+                if _is_duplicate(paper):
+                    continue
+                _mark_seen(paper)
+                external_results.append(_paper_to_dict(paper, "openalex"))
+
+            # Then S2 results (fills remaining, deduped)
+            for paper in s2_papers:
+                citation_count = paper.citation_count or 0
+                if min_citations and citation_count < min_citations:
+                    continue
+                if _is_duplicate(paper):
+                    continue
+                _mark_seen(paper)
+                external_results.append(_paper_to_dict(paper, "semantic_scholar"))
+
+            logger.info(f"Found {len(external_results)} academic results (OpenAlex: {len(openalex_papers)}, S2: {len(s2_papers)})")
 
         # Search web if configured and query type warrants it
         if self.web_search and self.config.include_web_search:
@@ -1010,12 +1056,6 @@ Keywords:"""
                 "final_answer": "Hello! I'm your research assistant. I can help you search your knowledge base, find academic papers, and analyze research topics. What would you like to explore?",
             }
 
-        if not all_results and not self.model:
-            return {
-                **state,
-                "final_answer": "I couldn't find relevant information and no LLM is available for generation.",
-            }
-
         # Build synthesis prompt with context
         prompt = self._build_synthesis_prompt(
             query, query_type, all_results,
@@ -1025,19 +1065,22 @@ Keywords:"""
             chat_context_items=state.get("chat_context_items"),
         )
 
-        # Generate response
+        # Generate response — LLM synthesis or formatted fallback
         try:
             if self.model:
                 answer = self.infer(prompt, max_tokens=1024)
             else:
-                # Fallback: format results without LLM
                 answer = self._format_results_without_llm(query, all_results)
 
             logger.info("Synthesis complete")
 
         except Exception as e:
             logger.error(f"Synthesis error: {e}")
-            answer = f"Error generating response: {str(e)}"
+            # Graceful fallback: show formatted results instead of an error
+            if all_results:
+                answer = self._format_results_without_llm(query, all_results)
+            else:
+                answer = f"Error generating response: {str(e)}"
 
         return {**state, "final_answer": answer}
 
@@ -1061,30 +1104,31 @@ User: {query}
 
 Response:"""
 
-        # Build context section if we have selection context
+        # Build context section from selection + pinned/chat items
+        context_parts = []
+        if current_researcher:
+            context_parts.append(f"The user is currently focused on researcher: {current_researcher}")
+        if current_paper_id:
+            # Find the paper title from results if possible
+            paper_title = None
+            for r in results:
+                if r.get("paper_id") == current_paper_id:
+                    paper_title = r.get("title")
+                    break
+            if paper_title:
+                context_parts.append(f"The user is currently focused on the paper: \"{paper_title}\"")
+            else:
+                context_parts.append(f"The user has selected a specific paper (ID: {current_paper_id[:20]}...)")
+        # Add pinned/active context items (independent of researcher/paper selection)
+        auth_items = auth_context_items or []
+        chat_items = chat_context_items or []
+        if auth_items:
+            context_parts.append(f"The user has pinned these topics: {', '.join(auth_items)}")
+        if chat_items:
+            context_parts.append(f"Recent conversation topics include: {', '.join(chat_items)}")
+
         context_section = ""
-        if current_researcher or current_paper_id:
-            context_parts = []
-            if current_researcher:
-                context_parts.append(f"The user is currently focused on researcher: {current_researcher}")
-            if current_paper_id:
-                # Find the paper title from results if possible
-                paper_title = None
-                for r in results:
-                    if r.get("paper_id") == current_paper_id:
-                        paper_title = r.get("title")
-                        break
-                if paper_title:
-                    context_parts.append(f"The user is currently focused on the paper: \"{paper_title}\"")
-                else:
-                    context_parts.append(f"The user has selected a specific paper (ID: {current_paper_id[:20]}...)")
-            # Add pinned/active context items if available
-            auth_items = auth_context_items or []
-            chat_items = chat_context_items or []
-            if auth_items:
-                context_parts.append(f"The user has pinned these topics: {', '.join(auth_items)}")
-            if chat_items:
-                context_parts.append(f"Recent conversation topics include: {', '.join(chat_items)}")
+        if context_parts:
             context_section = "\n\nContext: " + ". ".join(context_parts) + ". Prioritize information relevant to this context."
 
         # Format sources
@@ -1294,10 +1338,8 @@ Response:"""
             "current_query": user_query,
             "search_query": "",
             "query_type": "general",
-            "search_results": [],
             "local_results": [],
             "external_results": [],
-            "context": "",
             "should_search_external": True,
             "candidates_for_ingestion": [],
             "final_answer": "",
@@ -1347,8 +1389,8 @@ Response:"""
 
         except Exception as e:
             logger.error(f"Graph execution error: {e}")
-            # Fallback to direct inference
-            if self.model and (self.tokenizer or self.use_ollama):
+            # Fallback to direct inference (works for all provider types)
+            if self.model:
                 result["answer"] = self.infer(user_query, max_tokens=1024)
                 result["fallback"] = True
             else:

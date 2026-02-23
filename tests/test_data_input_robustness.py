@@ -52,6 +52,7 @@ def fake_store():
     store.notes = _FakeCollection()
     store.web_sources = _FakeCollection()
     store.reranker = None
+    store._meta = None
     return store
 
 
