@@ -284,6 +284,15 @@ class KBMetadataStore:
         with self._connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
 
+    def list_researchers(self) -> List[str]:
+        """Return distinct researcher names from papers table."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT researcher FROM papers "
+                "WHERE researcher IS NOT NULL AND researcher != ''"
+            ).fetchall()
+            return [r[0] for r in rows]
+
     # ------------------------------------------------------------------
     # Notes
     # ------------------------------------------------------------------

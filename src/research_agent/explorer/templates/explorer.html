@@ -900,72 +900,112 @@
     var chatEnabled = (ci.chat_items || ci.chat || []).filter(function(it) { return it.enabled !== false; })
                        .map(function(it) { return it.label.toLowerCase(); });
 
-    // Node emphasis
+    // Node emphasis — consistent tiers: focal 1.0, related 0.7, bg 0.25, dim 0.08, off 0.03
+    var htLower = ht.map(function(t) { return t.toLowerCase(); });
+    var hasHt = htLower.length > 0;
+
+    // Helper: is this node linked (via authorship) to a highlight-matched researcher?
+    function linkedToHighlight(d) {
+      if (!hasHt) return false;
+      return data.links.filter(function(l) { return l.type === "authorship"; }).some(function(l) {
+        var src = typeof l.source === "object" ? l.source.id : l.source;
+        var tgt = typeof l.target === "object" ? l.target.id : l.target;
+        if (tgt !== d.id && src !== d.id) return false;
+        var resId = (src === d.id) ? tgt : src;
+        var resNode = data.nodes.find(function(n) { return n.id === resId && n.type === "researcher"; });
+        if (!resNode) return false;
+        return htLower.some(function(t) { return resNode.label.toLowerCase().indexOf(t) !== -1; });
+      });
+    }
+
+    // Helper: is this field/domain connected to any paper via structural edges?
+    function connectedToPapers(d) {
+      return data.links.some(function(l) {
+        if (l.type !== "field_membership" && l.type !== "domain_mapping") return false;
+        var src = typeof l.source === "object" ? l.source.id : l.source;
+        var tgt = typeof l.target === "object" ? l.target.id : l.target;
+        return src === d.id || tgt === d.id;
+      });
+    }
+
     node.transition().duration(400).attr("opacity", function(d) {
+      var lbl = d.label.toLowerCase();
+
       if (layer === "structure") {
-        if (d.type === "domain" || d.type === "field") {
-          var lbl = d.label.toLowerCase();
+        // Structure = academic landscape of the current content
+        // Fields/domains connected to papers pop; orphan scaffold fades
+        if (d.type === "field" || d.type === "domain") {
           if (socDisabled.some(function(dl) { return lbl === dl; })) return 0.03;
+          var connected = connectedToPapers(d);
+          if (d.type === "field") return connected ? 1.0 : 0.2;
+          return connected ? 0.8 : 0.12;
         }
-        if (d.type === "domain") return 0.9;
-        if (d.type === "field") return 1;
+        // Papers visible so you can trace field connections
+        if (d.type === "paper") return 0.3;
         if (d.type === "researcher") return 0.15;
-        if (d.type === "paper") return 0.1;
-        if (d.type === "query") return 0.2;
-        return 0.2;
+        return 0.1;
+
       } else if (layer === "people") {
-        var ai = (ci.auth_items || ci.auth || []);
-        var authLabels = ai.filter(function(it) { return it.enabled !== false; })
-                           .map(function(it) { return (it.label || it).toLowerCase(); });
+        // Focal: researchers + papers; scaffold fades
         if (d.type === "researcher") {
-          var rLbl = d.label.toLowerCase();
-          if (authDisabled.some(function(dl) { return rLbl === dl; })) return 0.1;
-          return 1;
+          if (authDisabled.some(function(dl) { return lbl === dl; })) return 0.03;
+          if (hasHt) return htLower.some(function(t) { return lbl.indexOf(t) !== -1; }) ? 1.0 : 0.25;
+          return 1.0;
         }
         if (d.type === "paper") {
-          // Dim papers if their researcher is disabled
-          if (d._authorColor) {
-            var authorNode = data.nodes.find(function(n) { return n.type === "researcher"; });
-            if (authorNode && authDisabled.some(function(dl) { return authorNode.label.toLowerCase() === dl; })) return 0.1;
-          }
-          return 1;
+          if (hasHt) return linkedToHighlight(d) ? 0.85 : 0.15;
+          return 0.7;
         }
-        if (authLabels.length > 0) {
-          var lbl = d.label.toLowerCase();
-          if (authLabels.some(function(t) { return lbl.indexOf(t) !== -1; })) return 1;
-        }
-        if (d.type === "query") return 0.8;
-        if (d.type === "field") return 0.2;
-        if (d.type === "domain") return 0.1;
-        return 0.5;
+        if (d.type === "query") return 0.25;
+        return 0.08;
+
       } else if (layer === "topics") {
-        var label = d.label.toLowerCase();
-        // Use enabled chat items if context exists, else fall back to highlight_terms
+        // Topics = paper relationships (citation + semantic)
+        // Researchers fade, papers + their inter-connections are focal
         var chatItems = ci.chat_items || ci.chat || [];
-        var hasCtxChat = chatItems.length > 0;
-        var terms = hasCtxChat ? chatEnabled : ht.map(function(t) { return t.toLowerCase(); });
-        var matched = terms.length > 0 && terms.some(function(t) {
-          return label.indexOf(t) !== -1;
+        var terms = chatEnabled.length > 0 ? chatEnabled : [];
+        var hasTerms = terms.length > 0;
+
+        // Check if this paper has citation/semantic edges
+        var hasPaperEdges = (d.type === "paper") && data.links.some(function(l) {
+          if (l.type !== "citation" && l.type !== "semantic") return false;
+          var src = typeof l.source === "object" ? l.source.id : l.source;
+          var tgt = typeof l.target === "object" ? l.target.id : l.target;
+          return src === d.id || tgt === d.id;
         });
-        if (matched) return 1;
-        if (d.type === "researcher") return 0.6;
-        if (d.type === "paper") return 0.2;
-        return 0.1;
+
+        if (hasTerms) {
+          var matched = terms.some(function(t) { return lbl.indexOf(t) !== -1; });
+          if (matched) return 1.0;
+          if (d.type === "paper") return hasPaperEdges ? 0.7 : 0.3;
+          if (d.type === "researcher") return 0.12;
+          return 0.06;
+        }
+        // No chat terms — show paper relationship network
+        if (d.type === "paper") return hasPaperEdges ? 1.0 : 0.5;
+        if (d.type === "researcher") return 0.15;
+        if (d.type === "field") return 0.1;
+        if (d.type === "domain") return 0.06;
+        return 0.12;
       }
       return 1;
     });
 
-    // Edge emphasis
+    // Edge emphasis — focal edges boosted, off-layer edges dimmed uniformly
     link.transition().duration(400).attr("opacity", function(l) {
       var base = edgeStyle(l).opacity;
+      var FOCAL = Math.min(base * 2.5, 0.7);
+      var DIM = base * 0.15;
+
       if (layer === "structure") {
-        if (l.type === "field_membership" || l.type === "domain_mapping") return Math.min(base * 3, 0.8);
-        return base * 0.1;
+        return (l.type === "field_membership" || l.type === "domain_mapping") ? FOCAL : DIM;
       } else if (layer === "people") {
-        if (l.type === "authorship" || l.type === "citation" || l.type === "semantic") return Math.min(base * 2, 0.8);
-        return base * 0.2;
+        return (l.type === "authorship" || l.type === "citation" || l.type === "semantic") ? FOCAL : DIM;
       } else if (layer === "topics") {
-        return base * 0.5;
+        // Citation + semantic edges are focal (paper relationships)
+        if (l.type === "citation" || l.type === "semantic") return FOCAL;
+        // Authorship fades — this layer is about how papers relate, not who wrote them
+        return DIM;
       }
       return base;
     });
@@ -1018,6 +1058,18 @@
         if (terms2.length > 0) {
           var label = d.label.toLowerCase();
           highlighted = terms2.some(function(t) { return label.indexOf(t) !== -1; });
+          // Papers connected to a matched researcher also get highlighted
+          if (!highlighted && d.type === "paper") {
+            highlighted = data.links.filter(function(l) { return l.type === "authorship"; }).some(function(l) {
+              var src = typeof l.source === "object" ? l.source.id : l.source;
+              var tgt = typeof l.target === "object" ? l.target.id : l.target;
+              if (tgt !== d.id && src !== d.id) return false;
+              var resId = (src === d.id) ? tgt : src;
+              var resNode = data.nodes.find(function(n) { return n.id === resId && n.type === "researcher"; });
+              if (!resNode) return false;
+              return terms2.some(function(t) { return resNode.label.toLowerCase().indexOf(t) !== -1; });
+            });
+          }
         }
       }
 

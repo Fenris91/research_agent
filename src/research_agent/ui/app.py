@@ -20,6 +20,24 @@ from research_agent.utils.openalex import SOURCE_LABELS_SHORT
 logger = logging.getLogger(__name__)
 
 
+def _get_kb_graph_data() -> dict:
+    """Build graph data from KB papers, falling back to mock data if KB is empty."""
+    try:
+        from research_agent.db.vector_store import ResearchVectorStore
+        store = ResearchVectorStore()
+        papers = store.list_papers_detailed(limit=500)
+        if papers:
+            logger.info("[Explorer] Building KB graph: %d papers", len(papers))
+            gb = GraphBuilder()
+            gb.build_from_kb_papers(papers)
+            return gb.to_dict()
+        else:
+            logger.info("[Explorer] KB is empty, using mock data")
+    except Exception as e:
+        logger.warning("[Explorer] KB graph build failed, using mock data: %s", e)
+    return get_mock_graph_data()
+
+
 def create_app(agent=None):
     """
     Create the Gradio application.
@@ -583,7 +601,7 @@ def create_app(agent=None):
         app._explorer_css = explorer_css
         app._pwa_head = _pwa_head
         # Build initial soc_items from mock graph nodes
-        _mock_data = get_mock_graph_data()
+        _mock_data = _get_kb_graph_data()
         _initial_soc = [
             {"label": n["label"], "type": n["type"], "auto": True, "enabled": True}
             for n in _mock_data.get("nodes", [])
@@ -607,6 +625,10 @@ def create_app(agent=None):
             "author": "auth_items",
             "chat": "chat_items",
         }
+
+        # Bidirectional left↔right layer mapping
+        _LEFT_TO_RIGHT = {"context": "structure", "author": "people", "chat": "topics"}
+        _RIGHT_TO_LEFT = {v: k for k, v in _LEFT_TO_RIGHT.items()}
 
         # Pre-render initial SOC pills
         _has_initial_pills = bool(_initial_soc)
@@ -1458,6 +1480,24 @@ def create_app(agent=None):
                 if title and title != "Unknown":
                     keywords.append(title)
 
+            # Researcher/author names from sources
+            for s in (sources or []):
+                authors = s.get("authors")
+                if isinstance(authors, str) and authors:
+                    for a in authors.split(","):
+                        name = a.strip()
+                        if len(name) > 3:
+                            keywords.append(name)
+                elif isinstance(authors, list):
+                    for a in authors:
+                        name = (a if isinstance(a, str) else a.get("name", "")).strip()
+                        if len(name) > 3:
+                            keywords.append(name)
+
+            # Bold phrases from response (e.g. **Britt Kramvig**)
+            bold = re.findall(r'\*\*([^*]{3,60})\*\*', response_text)
+            keywords.extend(bold)
+
             # Numbered/bulleted items (e.g. "1. **Key Theme**" or "- Something")
             items = re.findall(
                 r'(?:^|\n)\s*(?:\d+[\.\)]\s*|[-*]\s+)\**(.+?)\**(?:\n|$|:)',
@@ -1481,9 +1521,40 @@ def create_app(agent=None):
                     seen.add(lower)
                     unique.append(kw)
 
-            return {"keywords": unique[:15], "paper_titles": [
+            return {"keywords": unique[:20], "paper_titles": [
                 s.get("title", "") for s in (sources or []) if s.get("title")
             ]}
+
+        def _detect_researcher_from_chat(text: str) -> str | None:
+            """Check if *text* mentions a researcher known in registry or KB.
+
+            Returns the canonical name or None.  Only full-name matches
+            (both first + last name present in the text) to avoid false
+            positives on common surnames like "Harvey".
+            """
+            if not text:
+                return None
+            text_lower = text.lower()
+            # 1. Check ResearcherRegistry (previously looked-up researchers)
+            try:
+                from research_agent.tools.researcher_registry import get_researcher_registry
+                for name in get_researcher_registry().list_names():
+                    parts = name.strip().split()
+                    if len(parts) >= 2 and name.lower() in text_lower:
+                        return name
+            except Exception:
+                pass
+            # 2. Check KBMetadataStore (ingested/seeded researchers)
+            try:
+                from research_agent.db.kb_metadata_store import KBMetadataStore
+                kb_meta = KBMetadataStore()
+                for name in kb_meta.list_researchers():
+                    parts = name.strip().split()
+                    if len(parts) >= 2 and name.lower() in text_lower:
+                        return name
+            except Exception:
+                pass
+            return None
 
         def generate_response(history, year_from, year_to, min_citations, context_state):
             """Process the last user message and generate a response."""
@@ -1555,60 +1626,6 @@ def create_app(agent=None):
                             source_parts.append(part)
                         response += "\n\n---\n*" + " · ".join(source_parts) + "*"
 
-                    # Extract chat keywords for CHAT layer
-                    chat_ctx = _extract_chat_keywords(response, sources)
-                    new_state["chat_context"] = chat_ctx
-                    # Build typed chat_items for pills
-                    title_set = set(chat_ctx.get("paper_titles", []))
-                    chat_items = []
-                    for kw in chat_ctx.get("keywords", []):
-                        chat_items.append({
-                            "label": kw,
-                            "type": "paper_title" if kw in title_set else "keyword",
-                            "auto": True,
-                            "enabled": True,
-                        })
-                    new_state["chat_items"] = chat_items
-
-                    # Auto-switch left pane to Chat layer, right pane to Topics
-                    if chat_ctx["keywords"]:
-                        new_state["active_layer_left"] = "chat"
-                        new_state["active_layer_right"] = "topics"
-                        layer_updates = _left_layer_btn_classes("chat")
-                        renderer = ExplorerRenderer()
-                        researcher_name = new_state.get("researcher")
-                        if researcher_name:
-                            from research_agent.tools.researcher_registry import get_researcher_registry
-                            registry = get_researcher_registry()
-                            profile = registry.get(researcher_name)
-                            if profile:
-                                gb = GraphBuilder()
-                                rid = gb.add_researcher(profile.to_dict())
-                                for paper in (profile.top_papers or []):
-                                    pid = gb.add_paper(paper)
-                                    gb.add_authorship_edge(rid, pid)
-                                gb.build_structural_context()
-                                ctx_items = {
-                                    "soc": new_state.get("soc_items", []),
-                                    "auth": new_state.get("auth_items", []),
-                                    "chat": chat_items,
-                                }
-                                explorer_update = renderer.render(
-                                    gb.to_dict(active_layer="topics",
-                                               highlight_terms=chat_ctx["keywords"],
-                                               context_items=ctx_items)
-                                )
-                            else:
-                                gd = get_mock_graph_data()
-                                gd["active_layer"] = "topics"
-                                gd["highlight_terms"] = chat_ctx["keywords"]
-                                explorer_update = renderer.render(gd)
-                        else:
-                            gd = get_mock_graph_data()
-                            gd["active_layer"] = "topics"
-                            gd["highlight_terms"] = chat_ctx["keywords"]
-                            explorer_update = renderer.render(gd)
-
                 except Exception as e:
                     logger.error(f"[Chat] generate_response error: {e}", exc_info=True)
                     error_msg = str(e)
@@ -1618,6 +1635,82 @@ def create_app(agent=None):
                         response = f"**Rate Limit Reached:** Too many API requests. Please wait a moment and try again.\n\n*Details: {error_msg}*"
                     else:
                         response = f"**Error:** {error_msg}"
+
+            # ── Explorer sync (runs for both demo and agent paths) ────
+            try:
+                # Extract chat keywords for CHAT layer
+                chat_ctx = _extract_chat_keywords(response, sources)
+                new_state["chat_context"] = chat_ctx
+                title_set = set(chat_ctx.get("paper_titles", []))
+                chat_items = []
+                for kw in chat_ctx.get("keywords", []):
+                    chat_items.append({
+                        "label": kw,
+                        "type": "paper_title" if kw in title_set else "keyword",
+                        "auto": True,
+                        "enabled": True,
+                    })
+                new_state["chat_items"] = chat_items
+
+                # Auto-detect researcher from user message + response
+                detected = (
+                    _detect_researcher_from_chat(message)
+                    or _detect_researcher_from_chat(response)
+                )
+                if detected and not new_state.get("researcher"):
+                    new_state["researcher"] = detected
+
+                # Decide target layer — researcher detection wins over keywords
+                # highlight_terms: researcher name for People layer focus
+                # chat keywords stay separate for Topics layer
+                focus_terms = []
+                if detected:
+                    new_state["active_layer_left"] = "author"
+                    new_state["active_layer_right"] = _LEFT_TO_RIGHT["author"]
+                    layer_updates = _left_layer_btn_classes("author")
+                    focus_terms = [detected]
+                elif chat_ctx["keywords"]:
+                    new_state["active_layer_left"] = "chat"
+                    new_state["active_layer_right"] = _LEFT_TO_RIGHT["chat"]
+                    layer_updates = _left_layer_btn_classes("chat")
+                target_layer = new_state.get("active_layer_right", "structure")
+
+                # Build graph: researcher profile if available, else KB-wide
+                renderer = ExplorerRenderer()
+                researcher_name = new_state.get("researcher")
+                profile = None
+                if researcher_name:
+                    from research_agent.tools.researcher_registry import get_researcher_registry
+                    profile = get_researcher_registry().get(researcher_name)
+
+                ctx_items = {
+                    "soc": new_state.get("soc_items", []),
+                    "auth": new_state.get("auth_items", []),
+                    "chat": chat_items,
+                }
+
+                if profile:
+                    gb = GraphBuilder()
+                    rid = gb.add_researcher(profile.to_dict())
+                    for paper in (profile.top_papers or []):
+                        pid = gb.add_paper(paper)
+                        gb.add_authorship_edge(rid, pid)
+                    gb.build_structural_context()
+                    graph_data = gb.to_dict(
+                        active_layer=target_layer,
+                        highlight_terms=focus_terms,
+                        context_items=ctx_items,
+                    )
+                else:
+                    graph_data = _get_kb_graph_data()
+                    graph_data["active_layer"] = target_layer
+                    graph_data["highlight_terms"] = focus_terms
+                    graph_data["context_items"] = ctx_items
+
+                new_state["_prev_graph"] = graph_data
+                explorer_update = renderer.render(graph_data)
+            except Exception as e:
+                logger.warning(f"[Chat] Explorer sync failed: {e}", exc_info=True)
 
             history.append({"role": "assistant", "content": response})
             pills_html = _render_context_pills(new_state)
@@ -4416,6 +4509,7 @@ def create_app(agent=None):
             """Handle layer switch from left-pane buttons."""
             new_state = dict(state or {})
             new_state["active_layer_left"] = layer
+            new_state["active_layer_right"] = _LEFT_TO_RIGHT.get(layer, "structure")
             ctx_btn, auth_btn, chat_btn = _left_layer_btn_classes(layer)
             pills_html = _render_context_pills(new_state)
             items_key = _LEFT_LAYER_ITEMS.get(layer, "soc_items")
@@ -4431,33 +4525,43 @@ def create_app(agent=None):
             lambda s: switch_left_layer("context", s),
             inputs=[context_state],
             outputs=_left_layer_outputs,
-        )
+        ).then(js="() => sendLayerToExplorer('structure')")
         layer_author_btn.click(
             lambda s: switch_left_layer("author", s),
             inputs=[context_state],
             outputs=_left_layer_outputs,
-        )
+        ).then(js="() => sendLayerToExplorer('people')")
         layer_chat_btn.click(
             lambda s: switch_left_layer("chat", s),
             inputs=[context_state],
             outputs=_left_layer_outputs,
-        )
+        ).then(js="() => sendLayerToExplorer('topics')")
 
         # ── Right-pane layer switching ────────────────────────────────
-        # Right-pane layer changes from explorer iframe — sync Python state
+        # Right-pane layer changes from explorer iframe — sync Python state + left UI
         def _handle_right_layer(layer_raw, state):
             if not layer_raw:
-                return state
+                return state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
             parts = layer_raw.rsplit(":", 1)
             layer = parts[0] if len(parts) > 1 and parts[-1].isdigit() else layer_raw
             new_state = dict(state or {})
             new_state["active_layer_right"] = layer
-            return new_state
+            left = _RIGHT_TO_LEFT.get(layer)
+            if left:
+                new_state["active_layer_left"] = left
+            else:
+                left = new_state.get("active_layer_left", "context")
+            ctx_btn, auth_btn, chat_btn = _left_layer_btn_classes(left)
+            pills_html = _render_context_pills(new_state)
+            items_key = _LEFT_LAYER_ITEMS.get(left, "soc_items")
+            has_items = bool(new_state.get(items_key, []))
+            return new_state, ctx_btn, auth_btn, chat_btn, pills_html, gr.update(visible=has_items)
 
         right_layer_bus.input(
             _handle_right_layer,
             inputs=[right_layer_bus, context_state],
-            outputs=[context_state],
+            outputs=[context_state, layer_context_btn, layer_author_btn, layer_chat_btn,
+                     ctx_pills_html, ctx_pills_row],
         )
 
         # ── Top bar: researcher lookup → explorer graph ──────────────────
@@ -4469,7 +4573,7 @@ def create_app(agent=None):
             if not researcher_name or not researcher_name.strip():
                 # Cleared field → reset everything
                 renderer = ExplorerRenderer()
-                mock_data = get_mock_graph_data()
+                mock_data = _get_kb_graph_data()
                 mock_data["active_layer"] = "structure"
                 mock_soc = [
                     {"label": n["label"], "type": n["type"], "auto": True, "enabled": True}
@@ -4610,7 +4714,7 @@ def create_app(agent=None):
                 new_state = dict(state or {})
                 new_state["researcher"] = profile.name
                 new_state["active_layer_left"] = "author"
-                new_state["active_layer_right"] = "people"
+                new_state["active_layer_right"] = _LEFT_TO_RIGHT["author"]
                 new_state["is_anon"] = False
 
                 new_state["auth_items"] = _build_auth_items(profile, state)
@@ -4624,7 +4728,7 @@ def create_app(agent=None):
                     "auth": new_state["auth_items"],
                     "chat": new_state.get("chat_items", []),
                 }
-                graph_data = gb.to_dict(active_layer="people", context_items=ctx_items)
+                graph_data = gb.to_dict(active_layer=_LEFT_TO_RIGHT["author"], context_items=ctx_items)
 
                 # Store graph data for incremental updates
                 new_state["_prev_graph"] = graph_data
@@ -4673,7 +4777,7 @@ def create_app(agent=None):
         def _instant_clear(state):
             """Instantly reset explorer to mock data — no API calls."""
             renderer = ExplorerRenderer()
-            mock = get_mock_graph_data()
+            mock = _get_kb_graph_data()
             mock["active_layer"] = "structure"
             mock_soc_items = [
                 {"label": n["label"], "type": n["type"], "auto": True, "enabled": True}
@@ -4751,7 +4855,7 @@ def create_app(agent=None):
 
             new_state = dict(state or {})
             new_state["active_layer_left"] = "author"
-            new_state["active_layer_right"] = "people"
+            new_state["active_layer_right"] = _LEFT_TO_RIGHT["author"]
             new_state["is_anon"] = False
             new_state["researcher"] = profile.name
             new_state["auth_items"] = _build_auth_items(profile, state)
@@ -4763,7 +4867,7 @@ def create_app(agent=None):
                 "auth": new_state["auth_items"],
                 "chat": new_state.get("chat_items", []),
             }
-            graph_data = gb.to_dict(active_layer="people", context_items=ctx_items)
+            graph_data = gb.to_dict(active_layer=_LEFT_TO_RIGHT["author"], context_items=ctx_items)
             new_state["_prev_graph"] = graph_data
             html = renderer.render(graph_data)
 
@@ -4863,7 +4967,7 @@ def create_app(agent=None):
             """
             if not name or not name.strip():
                 renderer = ExplorerRenderer()
-                mock = get_mock_graph_data()
+                mock = _get_kb_graph_data()
                 new_s = dict(state or {})
                 new_s["_prev_graph"] = mock
                 left_layer = new_s.get("active_layer_left", "context")
@@ -4881,7 +4985,7 @@ def create_app(agent=None):
 
             if not profile:
                 renderer = ExplorerRenderer()
-                mock = get_mock_graph_data()
+                mock = _get_kb_graph_data()
                 new_s = dict(state or {})
                 new_s["_prev_graph"] = mock
                 left_layer = new_s.get("active_layer_left", "context")
@@ -4903,7 +5007,7 @@ def create_app(agent=None):
 
             new_state = dict(state or {})
             new_state["active_layer_left"] = "author"
-            new_state["active_layer_right"] = "people"
+            new_state["active_layer_right"] = _LEFT_TO_RIGHT["author"]
             new_state["is_anon"] = False
             new_state["researcher"] = profile.name
             new_state["auth_items"] = _build_auth_items(profile, state)
@@ -4915,7 +5019,7 @@ def create_app(agent=None):
                 "auth": new_state["auth_items"],
                 "chat": new_state.get("chat_items", []),
             }
-            graph_data = gb.to_dict(active_layer="people", context_items=ctx_items)
+            graph_data = gb.to_dict(active_layer=_LEFT_TO_RIGHT["author"], context_items=ctx_items)
             new_state["_prev_graph"] = graph_data
             html = renderer.render(graph_data)
 
