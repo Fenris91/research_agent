@@ -598,3 +598,68 @@ class GraphBuilder:
     def to_json(self, active_layer: str = "structure", highlight_terms: list | None = None) -> str:
         """Return JSON string of graph data."""
         return json.dumps(self.to_dict(active_layer=active_layer, highlight_terms=highlight_terms), indent=2)
+
+    # ------------------------------------------------------------------
+    # Convenience: build graph from KB papers
+    # ------------------------------------------------------------------
+
+    def build_from_kb_papers(self, papers: list[dict]) -> "GraphBuilder":
+        """Populate the graph from a list of KB paper dicts.
+
+        Groups papers by ``researcher`` metadata, creates researcher nodes
+        with authorship edges, then builds structural context (fields/domains).
+        Returns self for chaining.
+        """
+        import json as _json
+        from collections import defaultdict
+
+        by_researcher: dict[str, list[dict]] = defaultdict(list)
+        orphans: list[dict] = []
+
+        for p in papers:
+            # Ensure fields is a list (SQLite stores as string)
+            raw_fields = p.get("fields", [])
+            if isinstance(raw_fields, str) and raw_fields:
+                try:
+                    parsed = _json.loads(raw_fields)
+                    if isinstance(parsed, list):
+                        p["fields"] = parsed
+                    else:
+                        p["fields"] = [s.strip() for s in raw_fields.split(",") if s.strip()]
+                except (ValueError, TypeError):
+                    p["fields"] = [s.strip() for s in raw_fields.split(",") if s.strip()]
+            elif not isinstance(raw_fields, list):
+                p["fields"] = []
+
+            researcher = p.get("researcher") or ""
+            if researcher:
+                by_researcher[researcher].append(p)
+            else:
+                orphans.append(p)
+
+        # Create researcher nodes + paper nodes with authorship edges
+        for name, rpapers in by_researcher.items():
+            total_cites = sum(
+                (pp.get("citation_count") or pp.get("citations") or 0) for pp in rpapers
+            )
+            # Collect all fields from this researcher's papers
+            all_fields: list[str] = []
+            for pp in rpapers:
+                all_fields.extend(pp.get("fields") or [])
+            rid = self.add_researcher({
+                "name": name,
+                "works_count": len(rpapers),
+                "citations_count": total_cites,
+                "fields": list(dict.fromkeys(all_fields)),  # deduplicated, order-preserving
+            })
+            for pp in rpapers:
+                pid = self.add_paper(pp)
+                self.add_authorship_edge(rid, pid)
+
+        # Orphan papers (no researcher tag) — add standalone
+        for pp in orphans:
+            self.add_paper(pp)
+
+        # Build field → domain scaffold
+        self.build_structural_context()
+        return self
