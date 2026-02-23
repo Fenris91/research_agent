@@ -101,13 +101,13 @@ class TestGetEmbedderFallback:
 
     def test_prefers_sentence_transformers_when_available(self):
         """When sentence-transformers IS installed, get EmbeddingModel."""
+        pytest.importorskip("sentence_transformers", reason="sentence-transformers not installed")
         from research_agent.db import embeddings
         from research_agent.db.embeddings import EmbeddingModel
 
         old = embeddings._default_embedder
         embeddings._default_embedder = None
         try:
-            # sentence_transformers is available in test env
             result = embeddings.get_embedder()
             assert isinstance(result, EmbeddingModel)
         finally:
