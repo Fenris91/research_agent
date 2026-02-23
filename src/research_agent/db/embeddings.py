@@ -167,25 +167,81 @@ class EmbeddingModel:
         return self.embed_batch(documents, batch_size, show_progress)
 
 
+class ChromaEmbeddingModel:
+    """Lightweight embedder using ChromaDB's built-in ONNX model (no torch).
+
+    Uses all-MiniLM-L6-v2 via ONNX runtime, producing 384-dim embeddings.
+    This is the default for cloud-only installs without sentence-transformers.
+    """
+
+    def __init__(self):
+        from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+        self._ef = DefaultEmbeddingFunction()
+        self._dimension = 384  # all-MiniLM-L6-v2
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    def embed(self, text: str) -> List[float]:
+        result = self._ef([text])
+        return list(result[0])
+
+    def embed_query(self, query: str) -> List[float]:
+        return self.embed(query)
+
+    def embed_batch(
+        self,
+        texts: List[str],
+        batch_size: int = 32,
+        show_progress: bool = False,
+    ) -> List[List[float]]:
+        if not texts:
+            return []
+        results = self._ef(texts)
+        return [list(r) for r in results]
+
+    def embed_documents(
+        self,
+        documents: List[str],
+        batch_size: int = 32,
+        show_progress: bool = True,
+    ) -> List[List[float]]:
+        return self.embed_batch(documents, batch_size, show_progress)
+
+
 # Singleton instance for convenience
-_default_embedder: Optional[EmbeddingModel] = None
+_default_embedder: Optional[Union[EmbeddingModel, ChromaEmbeddingModel]] = None
 
 
 def get_embedder(
     model_name: str = "BAAI/bge-base-en-v1.5",
     device: Optional[str] = None
-) -> EmbeddingModel:
+) -> Union[EmbeddingModel, ChromaEmbeddingModel]:
     """
     Get or create a default embedding model instance.
+
+    Tries sentence-transformers (full quality, requires torch) first.
+    Falls back to ChromaDB built-in ONNX embedder (lightweight, 384-dim).
 
     Args:
         model_name: Model name (only used on first call)
         device: Device (only used on first call)
 
     Returns:
-        EmbeddingModel instance
+        EmbeddingModel or ChromaEmbeddingModel instance
     """
     global _default_embedder
     if _default_embedder is None:
-        _default_embedder = EmbeddingModel(model_name, device)
+        try:
+            from sentence_transformers import SentenceTransformer  # noqa: F401
+            _default_embedder = EmbeddingModel(model_name, device)
+            logger.info("Using sentence-transformers embedder (%s)", model_name)
+        except ImportError:
+            _default_embedder = ChromaEmbeddingModel()
+            logger.info(
+                "sentence-transformers not installed — using ChromaDB built-in "
+                "embedder (all-MiniLM-L6-v2, 384-dim). Install research-agent[local] "
+                "for full-quality BGE embeddings."
+            )
     return _default_embedder

@@ -4,8 +4,13 @@ import logging
 
 import gradio as gr
 from research_agent.utils.config import load_config as _load_config
-import matplotlib.pyplot as plt
-import networkx as nx
+
+try:
+    import matplotlib.pyplot as plt
+    import networkx as nx
+except ImportError:
+    plt = None  # type: ignore[assignment]
+    nx = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 

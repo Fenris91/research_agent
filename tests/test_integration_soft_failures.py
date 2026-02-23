@@ -296,6 +296,14 @@ class TestProviderDetectionNoKeys:
 # ---------------------------------------------------------------------------
 
 
+try:
+    import matplotlib  # noqa: F401
+    _has_matplotlib = True
+except ImportError:
+    _has_matplotlib = False
+
+
+@pytest.mark.skipif(not _has_matplotlib, reason="matplotlib required (install research-agent[local])")
 class TestCitationAutoSaveSoftFailure:
     """Verify _auto_save_papers_to_kb handles failures gracefully."""
 

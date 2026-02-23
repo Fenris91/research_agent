@@ -5,7 +5,6 @@ Autonomous research assistant for social sciences using LangGraph workflow.
 Supports multiple LLM backends (Ollama, HuggingFace).
 """
 
-import torch
 import logging
 from typing import List, Dict, Optional, Callable, Any
 
@@ -19,9 +18,9 @@ from langgraph.graph import StateGraph, END
 
 from ..utils.openalex import SOURCE_LABELS, SOURCE_LABELS_LONG
 from ..models.llm_utils import (
-    get_qlora_pipeline,
     get_ollama_pipeline,
     OpenAICompatibleModel,
+    AnthropicNativeModel,
     check_vram,
     VRAMConstraintError,
     OllamaUnavailableError,
@@ -65,6 +64,100 @@ class AgentConfig:
     min_citations: int = 0
 
 
+# ---------------------------------------------------------------------------
+# Claude native tool definitions
+# ---------------------------------------------------------------------------
+
+CLAUDE_TOOLS = [
+    {
+        "name": "search_knowledge_base",
+        "description": (
+            "Search the user's local knowledge base (ingested papers, notes, web sources) "
+            "using semantic similarity. Returns the most relevant chunks with title, authors, "
+            "year, and content excerpts. Use this first for questions about topics the user "
+            "has already researched."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Semantic search query",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results to return",
+                    "default": 5,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "search_academic_papers",
+        "description": (
+            "Search OpenAlex and Semantic Scholar for academic papers across all of science. "
+            "Use for literature reviews, finding new papers, or discovering research the user "
+            "hasn't ingested yet. Returns titles, authors, years, citation counts, and abstracts."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Academic search query",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results to return",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "search_web",
+        "description": (
+            "Search the web for non-academic or current information. Use for recent events, "
+            "policy documents, news, or grey literature not found in academic databases."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Web search query",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results to return",
+                    "default": 5,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "get_paper_details",
+        "description": (
+            "Get full details for a specific paper by its Semantic Scholar ID, DOI, or "
+            "OpenAlex ID. Returns abstract, citation count, venue, open access URL, etc."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "paper_id": {
+                    "type": "string",
+                    "description": "Paper ID (DOI, S2 ID, or OpenAlex ID)",
+                },
+            },
+            "required": ["paper_id"],
+        },
+    },
+]
+
+
 class ResearchAgent:
     """
     Autonomous research assistant for social sciences.
@@ -103,6 +196,8 @@ class ResearchAgent:
         self._load_model_on_demand = True
         self.use_ollama = use_ollama
         self.provider = provider or ("ollama" if use_ollama else "huggingface")
+        self._actual_provider: Optional[str] = provider  # tracks the real provider name
+        self._claude_model: Optional[AnthropicNativeModel] = None
         self._openai_fallback_models = openai_models or []
         self._openai_compat_fallback_models = openai_compat_models or []
         self._ollama_base_url = ollama_base_url
@@ -154,7 +249,7 @@ class ResearchAgent:
                 print(f"Ollama unavailable: {str(e)}")
                 print("Falling back to HuggingFace models...")
                 try:
-                    self.model, self.tokenizer = get_qlora_pipeline()
+                    from ..models.llm_utils import get_qlora_pipeline; self.model, self.tokenizer = get_qlora_pipeline()
                     self._test_vram_on_initialization()
                     self._load_model_on_demand = False
                     self.use_ollama = False
@@ -164,7 +259,7 @@ class ResearchAgent:
         else:
             # Try HuggingFace models
             try:
-                self.model, self.tokenizer = get_qlora_pipeline()
+                from ..models.llm_utils import get_qlora_pipeline; self.model, self.tokenizer = get_qlora_pipeline()
                 self._test_vram_on_initialization()
                 self._load_model_on_demand = False
             except VRAMConstraintError as e:
@@ -292,7 +387,7 @@ class ResearchAgent:
 
             # HuggingFace
             try:
-                self.model, self.tokenizer = get_qlora_pipeline()
+                from ..models.llm_utils import get_qlora_pipeline; self.model, self.tokenizer = get_qlora_pipeline()
                 self._test_vram_on_initialization()
                 self.provider = provider
                 self.use_ollama = False
@@ -332,6 +427,8 @@ class ResearchAgent:
             logger.warning("Anthropic keys start with 'sk-ant-' — check your key")
             return False
 
+        self._actual_provider = provider_key
+
         try:
             self.model = OpenAICompatibleModel(
                 model_name=cloud_cfg["default_model"],
@@ -346,6 +443,21 @@ class ResearchAgent:
             self._openai_api_key = api_key
             self._openai_base_url = base_url
             self._openai_fallback_models = cloud_cfg["models"]
+
+            # Create native model for Claude tool-use bypass
+            if provider_key == "anthropic":
+                try:
+                    self._claude_model = AnthropicNativeModel(
+                        model_name=cloud_cfg["default_model"],
+                        api_key=api_key,
+                    )
+                    logger.info("Claude native tool-use enabled")
+                except ImportError:
+                    logger.warning("anthropic SDK not installed — using OpenAI-compatible mode")
+                    self._claude_model = None
+            else:
+                self._claude_model = None
+
             logger.info("Connected to %s via BYOK", cloud_cfg["name"])
             return True
         except Exception as e:
@@ -373,7 +485,9 @@ class ResearchAgent:
                     prompt, max_tokens=max_tokens, temperature=0.7
                 )
             else:
-                # Use HuggingFace model
+                # Use HuggingFace model (requires torch)
+                import torch
+
                 # Pre-alloc check
                 check_vram()
 
@@ -402,20 +516,19 @@ class ResearchAgent:
                 )
                 return response
 
-        except torch.OutOfMemoryError as e:
-            if max_tokens <= 32:
-                return "Error: Insufficient VRAM even for minimal generation."
-            max_tokens = max(32, max_tokens // 2)
-            print(f"Reducing max_tokens to {max_tokens} due to VRAM constraints")
-            return self.infer(prompt, max_tokens)  # Recurse with smaller output
-
         except VRAMConstraintError as e:
             # Fallback to CPU for critical operations
             print(f"Switching to CPU for critical operation: {e}")
             return self._cpu_inference_fallback(prompt)
 
         except Exception as e:
-            # General failure fallback
+            # Handle OOM (torch.OutOfMemoryError) without importing torch at module level
+            if "OutOfMemoryError" in type(e).__name__:
+                if max_tokens <= 32:
+                    return "Error: Insufficient VRAM even for minimal generation."
+                max_tokens = max(32, max_tokens // 2)
+                print(f"Reducing max_tokens to {max_tokens} due to VRAM constraints")
+                return self.infer(prompt, max_tokens)
             return f"Error: {str(e)}. Try simplifying your query or reducing output length."
 
     def configure_pipeline(self, pipeline: dict[str, str]):
@@ -426,9 +539,34 @@ class ResearchAgent:
                       Valid task types: classify, extract_keywords, synthesize.
         """
         valid_tasks = {"classify", "extract_keywords", "synthesize"}
+        rejected = {k for k in pipeline if k not in valid_tasks}
+        if rejected:
+            logger.warning(
+                "Pipeline: ignoring unknown task types: %s (valid: %s)",
+                ", ".join(sorted(rejected)),
+                ", ".join(sorted(valid_tasks)),
+            )
+
         self._pipeline = {k: v for k, v in pipeline.items() if k in valid_tasks}
+
         if self._pipeline:
-            logger.info("Pipeline configured: %s", self._pipeline)
+            for task, model in sorted(self._pipeline.items()):
+                logger.info("Pipeline: %s -> %s", task, model)
+
+            # Soft-warn if the model is not in the provider's known model list.
+            # Wrapped in try/except so partial init (e.g. tests) never crashes.
+            try:
+                known_models = self.list_available_models()
+            except Exception:
+                known_models = []
+            if known_models:
+                for task, model in self._pipeline.items():
+                    if model not in known_models:
+                        logger.warning(
+                            "Pipeline: model '%s' (task '%s') not in known model "
+                            "list %s — it may still work if the provider accepts it",
+                            model, task, known_models[:6],
+                        )
 
     def task_infer(self, task: str, prompt: str, max_tokens: int = 512) -> str:
         """Run inference with an optional per-task model override.
@@ -1325,6 +1463,330 @@ Response:"""
 
         return {**state, "final_answer": final_answer}
 
+    # ------------------------------------------------------------------
+    # Claude native tool-use path
+    # ------------------------------------------------------------------
+
+    def _execute_tool(self, tool_name: str, tool_input: dict) -> str:
+        """Execute a Claude tool call using existing agent capabilities."""
+        import json as _json
+
+        if tool_name == "search_knowledge_base":
+            return self._tool_search_kb(
+                tool_input.get("query", ""),
+                tool_input.get("max_results", 5),
+            )
+        elif tool_name == "search_academic_papers":
+            return self._tool_search_academic(
+                tool_input.get("query", ""),
+                tool_input.get("max_results", 10),
+            )
+        elif tool_name == "search_web":
+            return self._tool_search_web(
+                tool_input.get("query", ""),
+                tool_input.get("max_results", 5),
+            )
+        elif tool_name == "get_paper_details":
+            return self._tool_get_paper_details(
+                tool_input.get("paper_id", ""),
+            )
+        else:
+            return _json.dumps({"error": f"Unknown tool: {tool_name}"})
+
+    def _tool_search_kb(self, query: str, max_results: int = 5) -> str:
+        """Search local knowledge base via ChromaDB."""
+        import json as _json
+
+        if not self.vector_store or not self.embedder:
+            return _json.dumps({"results": [], "note": "Knowledge base not available"})
+
+        try:
+            # Generate embedding
+            if hasattr(self.embedder, "embed_query"):
+                q_emb = self.embedder.embed_query(query)
+            else:
+                q_emb = self.embedder.encode(query)
+            if hasattr(q_emb, "tolist"):
+                q_emb = q_emb.tolist()
+
+            results = []
+            for collection in ["academic_papers", "research_notes", "web_sources"]:
+                try:
+                    raw = self.vector_store.search(
+                        query_embedding=q_emb,
+                        collection_name=collection,
+                        n_results=max_results,
+                        query_text=query,
+                    )
+                    ids = raw.get("ids", [[]])[0]
+                    docs = raw.get("documents", [[]])[0]
+                    metas = raw.get("metadatas", [[]])[0]
+                    dists = raw.get("distances", [[]])[0]
+
+                    for i, doc_id in enumerate(ids):
+                        meta = metas[i] if i < len(metas) else {}
+                        dist = dists[i] if i < len(dists) else 1.0
+                        results.append({
+                            "title": meta.get("title", "Untitled"),
+                            "authors": meta.get("authors", ""),
+                            "year": meta.get("year"),
+                            "content": (docs[i] if i < len(docs) else "")[:600],
+                            "source": f"local_{collection}",
+                            "relevance": round(1 - dist, 3) if isinstance(dist, (int, float)) else 0,
+                            "url": meta.get("url", ""),
+                        })
+                except Exception as e:
+                    logger.debug("KB search '%s' failed: %s", collection, e)
+
+            # Sort by relevance, limit
+            results.sort(key=lambda r: r.get("relevance", 0), reverse=True)
+            return _json.dumps({"results": results[:max_results]})
+        except Exception as e:
+            logger.error("KB search failed: %s", e)
+            return _json.dumps({"results": [], "error": str(e)})
+
+    def _tool_search_academic(self, query: str, max_results: int = 10) -> str:
+        """Search OpenAlex + Semantic Scholar."""
+        import json as _json
+        import asyncio as _aio
+
+        if not self.academic_search:
+            return _json.dumps({"results": [], "note": "Academic search not available"})
+
+        async def _fetch():
+            oa_limit = max(1, max_results * 2 // 3)
+            s2_limit = max(1, max_results // 3)
+            try:
+                oa_papers, s2_papers = await _aio.gather(
+                    self.academic_search.search_openalex(query, limit=oa_limit),
+                    self.academic_search.search_semantic_scholar(query, limit=s2_limit),
+                    return_exceptions=True,
+                )
+            except Exception:
+                oa_papers, s2_papers = [], []
+
+            if isinstance(oa_papers, Exception):
+                oa_papers = []
+            if isinstance(s2_papers, Exception):
+                s2_papers = []
+
+            seen_dois = set()
+            results = []
+            for paper in list(oa_papers) + list(s2_papers):
+                doi = getattr(paper, "doi", None) or ""
+                if doi and doi in seen_dois:
+                    continue
+                if doi:
+                    seen_dois.add(doi)
+                results.append({
+                    "title": getattr(paper, "title", ""),
+                    "authors": getattr(paper, "authors", ""),
+                    "year": getattr(paper, "year", None),
+                    "doi": doi,
+                    "citation_count": getattr(paper, "citation_count", 0),
+                    "abstract": (getattr(paper, "abstract", "") or "")[:400],
+                    "source": getattr(paper, "source", "academic"),
+                    "url": getattr(paper, "url", ""),
+                })
+                if len(results) >= max_results:
+                    break
+            return results
+
+        try:
+            loop = _aio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                results = pool.submit(_aio.run, _fetch()).result()
+        else:
+            results = _aio.run(_fetch())
+
+        return _json.dumps({"results": results})
+
+    def _tool_search_web(self, query: str, max_results: int = 5) -> str:
+        """Search the web."""
+        import json as _json
+        import asyncio as _aio
+
+        if not self.web_search:
+            return _json.dumps({"results": [], "note": "Web search not available"})
+
+        async def _fetch():
+            try:
+                raw = await self.web_search.search(query, max_results=max_results)
+                return [
+                    {
+                        "title": getattr(r, "title", ""),
+                        "url": getattr(r, "url", ""),
+                        "content": (getattr(r, "content", "") or getattr(r, "snippet", "") or "")[:400],
+                        "source": "web",
+                    }
+                    for r in (raw or [])
+                ]
+            except Exception as e:
+                logger.error("Web search failed: %s", e)
+                return []
+
+        try:
+            loop = _aio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                results = pool.submit(_aio.run, _fetch()).result()
+        else:
+            results = _aio.run(_fetch())
+
+        return _json.dumps({"results": results})
+
+    def _tool_get_paper_details(self, paper_id: str) -> str:
+        """Get details for a specific paper."""
+        import json as _json
+        import asyncio as _aio
+
+        if not self.academic_search:
+            return _json.dumps({"error": "Academic search not available"})
+
+        async def _fetch():
+            try:
+                paper = await self.academic_search.get_paper_details(paper_id)
+                if paper is None:
+                    return {"error": f"Paper not found: {paper_id}"}
+                return {
+                    "title": getattr(paper, "title", ""),
+                    "authors": getattr(paper, "authors", ""),
+                    "year": getattr(paper, "year", None),
+                    "doi": getattr(paper, "doi", ""),
+                    "citation_count": getattr(paper, "citation_count", 0),
+                    "abstract": getattr(paper, "abstract", ""),
+                    "venue": getattr(paper, "venue", ""),
+                    "url": getattr(paper, "url", ""),
+                    "open_access_url": getattr(paper, "open_access_url", ""),
+                }
+            except Exception as e:
+                return {"error": str(e)}
+
+        try:
+            loop = _aio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                result = pool.submit(_aio.run, _fetch()).result()
+        else:
+            result = _aio.run(_fetch())
+
+        return _json.dumps(result)
+
+    async def _run_claude_native(
+        self,
+        user_query: str,
+        search_filters: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Run query using Claude's native tool use instead of LangGraph.
+
+        Claude decides which tools to call (KB search, academic search, web search)
+        based on the query, rather than following a fixed graph.
+        """
+        from research_agent.utils.observability import new_request_id
+        new_request_id()
+
+        context = context or {}
+        current_researcher = context.get("researcher")
+        current_paper_id = context.get("paper_id")
+        auth_items = context.get("auth_items", [])
+        chat_items = context.get("chat_items", [])
+
+        # Build system prompt with context
+        system_parts = [
+            "You are a research assistant with access to tools for searching a personal knowledge base, "
+            "academic databases (OpenAlex, Semantic Scholar), and the web. Use the tools when the user's "
+            "question requires finding information. For casual messages (greetings, thanks), respond "
+            "directly without using tools.",
+            "",
+            "When you find relevant sources, cite them in your answer using [1], [2], etc. "
+            "Provide substantive, well-structured answers grounded in the sources you find.",
+        ]
+        if current_researcher:
+            system_parts.append(f"\nThe user is currently focused on researcher: {current_researcher}.")
+        if current_paper_id:
+            system_parts.append(f"\nThe user has selected a specific paper (ID: {current_paper_id[:30]}).")
+        if auth_items:
+            system_parts.append(f"\nPinned topics: {', '.join(auth_items)}.")
+        if chat_items:
+            system_parts.append(f"\nRecent conversation topics: {', '.join(chat_items)}.")
+
+        system = "\n".join(system_parts)
+        messages = [{"role": "user", "content": user_query}]
+
+        result = {
+            "query": user_query,
+            "answer": "",
+            "query_type": "claude_native",
+            "sources": [],
+            "local_sources": 0,
+            "external_sources": 0,
+        }
+        if search_filters:
+            result["search_filters"] = search_filters
+
+        try:
+            response = self._claude_model.run_with_tools(
+                messages=messages,
+                tools=CLAUDE_TOOLS,
+                system=system,
+                tool_executor=self._execute_tool,
+                max_tokens=4096,
+            )
+
+            result["answer"] = response.get("answer", "")
+
+            # Collect sources from tool call results
+            import json as _json
+            sources = []
+            for tc in response.get("tool_calls", []):
+                try:
+                    data = _json.loads(tc.get("result", "{}"))
+                    for item in data.get("results", []):
+                        src = item.get("source", "")
+                        sources.append({
+                            "title": item.get("title", ""),
+                            "authors": item.get("authors", ""),
+                            "source": src,
+                            "year": item.get("year"),
+                            "url": item.get("url", ""),
+                        })
+                except (ValueError, TypeError):
+                    pass
+
+            result["sources"] = sources[:10]
+            result["local_sources"] = sum(
+                1 for s in sources if s.get("source", "").startswith("local_")
+            )
+            result["external_sources"] = sum(
+                1 for s in sources if not s.get("source", "").startswith("local_")
+            )
+
+        except Exception as e:
+            logger.error("Claude native execution error: %s", e)
+            # Fallback to direct inference via OpenAI-compatible model
+            if self.model:
+                result["answer"] = self.infer(user_query, max_tokens=1024)
+                result["fallback"] = True
+            else:
+                result["answer"] = f"Error processing query: {e}"
+                result["status"] = "error"
+
+        return result
+
     async def _run_async(
         self,
         user_query: str,
@@ -1338,6 +1800,10 @@ Response:"""
             search_filters: Optional filters (year_from, year_to, min_citations)
             context: Optional context from UI (researcher, paper_id)
         """
+        # Route to Claude native tool-use when Anthropic is the provider
+        if self._actual_provider == "anthropic" and self._claude_model is not None:
+            return await self._run_claude_native(user_query, search_filters, context)
+
         from research_agent.utils.observability import new_request_id
         new_request_id()
 

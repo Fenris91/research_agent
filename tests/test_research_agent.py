@@ -12,7 +12,7 @@ def mock_model_loading():
     """Prevent actual model loading in tests."""
     from research_agent.models.llm_utils import VRAMConstraintError
 
-    with patch("research_agent.agents.research_agent.get_qlora_pipeline") as mock_qlora, \
+    with patch("research_agent.models.llm_utils.get_qlora_pipeline") as mock_qlora, \
          patch("research_agent.agents.research_agent.get_ollama_pipeline") as mock_ollama:
         # Raise VRAMConstraintError which is properly caught
         mock_qlora.side_effect = VRAMConstraintError("Model loading disabled in tests")

@@ -701,9 +701,11 @@ class AcademicSearchTools:
 
         return paper
 
-    async def get_paper_embeddings(self, paper_ids: List[str]) -> Dict[str, List[float]]:
+    async def get_paper_embeddings(
+        self, paper_ids: List[str],
+    ) -> tuple[Dict[str, List[float]], Dict[str, str]]:
         """
-        Batch-fetch SPECTER2 embeddings from Semantic Scholar.
+        Batch-fetch SPECTER2 embeddings and TLDRs from Semantic Scholar.
 
         Uses POST /paper/batch endpoint for efficiency.
         Caches each embedding individually (7-day TTL — embeddings are immutable).
@@ -712,12 +714,13 @@ class AcademicSearchTools:
             paper_ids: List of S2 paper IDs
 
         Returns:
-            Dict mapping paper_id → embedding vector
+            Tuple of (embeddings_dict, tldrs_dict)
         """
         if not paper_ids:
-            return {}
+            return {}, {}
 
         result = {}
+        tldrs: Dict[str, str] = {}
         uncached_ids = []
 
         # Check cache first
@@ -732,7 +735,7 @@ class AcademicSearchTools:
 
         if not uncached_ids:
             logger.debug(f"All {len(paper_ids)} embeddings from cache")
-            return result
+            return result, tldrs
 
         # Batch fetch from S2
         await self._s2_rate_limiter.wait_if_needed()
@@ -779,11 +782,20 @@ class AcademicSearchTools:
                                     vec, ttl=CACHE_TTL_EMBEDDINGS,
                                 )
 
-            logger.info(f"Fetched {len(result)} SPECTER2 embeddings ({len(uncached_ids)} from API)")
+                    tldr_data = item.get("tldr")
+                    if tldr_data and isinstance(tldr_data, dict):
+                        tldr_text = tldr_data.get("text")
+                        if tldr_text:
+                            tldrs[pid] = tldr_text
+
+            logger.info(
+                "Fetched %d embeddings + %d TLDRs (%d from API)",
+                len(result), len(tldrs), len(uncached_ids),
+            )
         except httpx.HTTPError as e:
             logger.error(f"S2 batch embedding error: {e}")
 
-        return result
+        return result, tldrs
 
     async def get_crossref_references(self, doi: str) -> List[str]:
         """
