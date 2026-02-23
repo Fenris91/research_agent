@@ -67,6 +67,21 @@ class WebSearchTool:
             await self._client.aclose()
             self._client = None
 
+    def set_provider(self, provider: str, api_key: str | None = None) -> None:
+        """Switch web search provider at runtime.
+
+        Args:
+            provider: One of "duckduckgo", "tavily", "serper", "perplexity".
+            api_key: API key for the new provider (required for tavily/serper/perplexity).
+        """
+        valid = {"duckduckgo", "tavily", "serper", "perplexity"}
+        if provider not in valid:
+            raise ValueError(f"Unknown provider: {provider}. Valid: {valid}")
+        self.provider = provider
+        if api_key is not None:
+            self.api_key = api_key
+        logger.info("Web search provider switched to: %s", provider)
+
     @timed
     async def search(
         self,

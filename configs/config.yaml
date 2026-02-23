@@ -150,6 +150,11 @@ search:
     enabled: true
     email: null  # Optional: for polite pool
     
+  core:
+    enabled: true
+    # CORE_API_KEY env var. Free tier works without key.
+    api_key: null
+
   # Web search for grey literature
   web_search:
     enabled: true

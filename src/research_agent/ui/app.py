@@ -1045,6 +1045,67 @@ def create_app(agent=None):
                             placeholder="Using config defaults",
                         )
 
+                        gr.Markdown("Web search provider")
+                        with gr.Row():
+                            web_search_provider = gr.Dropdown(
+                                choices=[
+                                    ("DuckDuckGo (free)", "duckduckgo"),
+                                    ("Perplexity AI", "perplexity"),
+                                    ("Tavily", "tavily"),
+                                    ("Serper", "serper"),
+                                ],
+                                value="duckduckgo",
+                                show_label=False,
+                                container=False,
+                                scale=2,
+                            )
+                            web_search_status = gr.Textbox(
+                                value="DuckDuckGo (free)",
+                                show_label=False,
+                                interactive=False,
+                                container=False,
+                                scale=3,
+                            )
+
+                        use_core = gr.Checkbox(
+                            label="Include CORE (300M+ open access papers)",
+                            value=True,
+                            info="Adds CORE to academic search alongside OpenAlex and S2",
+                        )
+
+                    with gr.Accordion("Pipeline Models", open=False):
+                        gr.Markdown(
+                            "Assign different models per task. "
+                            "'default' uses the main model."
+                        )
+                        with gr.Row():
+                            pipeline_classify = gr.Dropdown(
+                                choices=["default"],
+                                value="default",
+                                label="Classify",
+                                interactive=True,
+                                scale=1,
+                            )
+                            pipeline_keywords = gr.Dropdown(
+                                choices=["default"],
+                                value="default",
+                                label="Keywords",
+                                interactive=True,
+                                scale=1,
+                            )
+                            pipeline_synthesize = gr.Dropdown(
+                                choices=["default"],
+                                value="default",
+                                label="Synthesize",
+                                interactive=True,
+                                scale=1,
+                            )
+                        pipeline_status = gr.Textbox(
+                            value="All tasks using default model",
+                            label="Pipeline",
+                            interactive=False,
+                        )
+
                 # ── Researcher Lookup tab ─────────────────────────────────
                 with gr.Tab("Researcher Lookup"):
                     gr.Markdown("""
@@ -1852,6 +1913,93 @@ def create_app(agent=None):
                 status,
                 status,
             )
+
+        # ── Web search provider switching ─────────────────────────
+        def _set_web_search_provider(provider):
+            """Switch web search provider at runtime."""
+            if agent is None or agent.web_search is None:
+                return "No agent loaded"
+            import os as _os
+            api_key = None
+            if provider == "perplexity":
+                api_key = _os.getenv("PERPLEXITY_API_KEY")
+            elif provider == "tavily":
+                api_key = _os.getenv("TAVILY_API_KEY")
+            elif provider == "serper":
+                api_key = _os.getenv("SERPER_API_KEY")
+
+            if provider != "duckduckgo" and not api_key:
+                return f"No API key for {provider}"
+
+            try:
+                agent.web_search.set_provider(provider, api_key)
+                labels = {
+                    "duckduckgo": "DuckDuckGo (free)",
+                    "perplexity": "Perplexity AI",
+                    "tavily": "Tavily",
+                    "serper": "Serper",
+                }
+                return f"Using {labels.get(provider, provider)}"
+            except Exception as e:
+                return f"Error: {e}"
+
+        # ── Pipeline model UI ─────────────────────────────────────
+        def _get_pipeline_choices():
+            """Get available models plus 'default' for pipeline dropdowns."""
+            if agent is None:
+                return ["default"]
+            try:
+                models = agent.list_available_models()
+            except Exception:
+                models = []
+            if not models or models == ["No models found"]:
+                return ["default"]
+            return ["default"] + models
+
+        def _update_pipeline(classify, keywords, synthesize):
+            """Apply pipeline model overrides."""
+            if agent is None:
+                return "No agent loaded"
+
+            pipeline = {}
+            if classify and classify != "default":
+                pipeline["classify"] = classify
+            if keywords and keywords != "default":
+                pipeline["extract_keywords"] = keywords
+            if synthesize and synthesize != "default":
+                pipeline["synthesize"] = synthesize
+
+            agent.configure_pipeline(pipeline)
+
+            if not pipeline:
+                return "All tasks using default model"
+            parts = [f"{k}: {v}" for k, v in sorted(pipeline.items())]
+            return "Pipeline: " + ", ".join(parts)
+
+        def _init_pipeline_dropdowns():
+            """Initialize pipeline dropdowns from current agent state."""
+            choices = _get_pipeline_choices()
+            current = agent._pipeline if agent else {}
+            classify_val = current.get("classify", "default")
+            keywords_val = current.get("extract_keywords", "default")
+            synthesize_val = current.get("synthesize", "default")
+            for val in [classify_val, keywords_val, synthesize_val]:
+                if val not in choices:
+                    choices.append(val)
+            status = _update_pipeline(classify_val, keywords_val, synthesize_val)
+            return (
+                gr.update(choices=choices, value=classify_val),
+                gr.update(choices=choices, value=keywords_val),
+                gr.update(choices=choices, value=synthesize_val),
+                status,
+            )
+
+        def _toggle_core_search(enabled):
+            """Enable/disable CORE in external academic search."""
+            if agent is None:
+                return
+            agent.config.include_core_search = bool(enabled)
+            logger.info("CORE search %s", "enabled" if enabled else "disabled")
 
         def _format_papers_table(papers, year_from=None, year_to=None, min_citations=0):
             if not papers:
@@ -4000,6 +4148,28 @@ def create_app(agent=None):
                 rerank_status_kb,
             ],
         )
+
+        # Web search provider switching
+        web_search_provider.change(
+            _set_web_search_provider,
+            inputs=[web_search_provider],
+            outputs=[web_search_status],
+        )
+
+        # Pipeline model assignment
+        for _dd in [pipeline_classify, pipeline_keywords, pipeline_synthesize]:
+            _dd.change(
+                _update_pipeline,
+                inputs=[pipeline_classify, pipeline_keywords, pipeline_synthesize],
+                outputs=[pipeline_status],
+            )
+        app.load(
+            _init_pipeline_dropdowns,
+            outputs=[pipeline_classify, pipeline_keywords, pipeline_synthesize, pipeline_status],
+        )
+
+        # CORE search toggle
+        use_core.change(_toggle_core_search, inputs=[use_core])
 
         # Researcher lookup events
         lookup_btn.click(
