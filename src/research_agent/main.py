@@ -223,9 +223,9 @@ def main():
     )
     parser.add_argument(
         "--mode",
-        choices=["ui", "cli", "check"],
+        choices=["ui", "cli", "check", "init"],
         default="ui",
-        help="Run mode: ui (Gradio), cli (command line), check (verify setup)",
+        help="Run mode: ui (Gradio), cli (command line), check (verify setup), init (interactive setup)",
     )
     parser.add_argument("--port", type=int, default=7860, help="Port for UI mode")
     parser.add_argument(
@@ -236,6 +236,12 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.mode == "init":
+        from research_agent.init_cmd import run_init
+        run_init()
+        return
+
     config = load_config(args.config)
 
     if args.mode == "check":
