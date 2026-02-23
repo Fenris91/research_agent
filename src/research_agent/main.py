@@ -50,6 +50,27 @@ CLOUD_PROVIDERS = {
         "default_model": "meta-llama/llama-3.1-8b-instruct:free",
         "models": ["meta-llama/llama-3.1-8b-instruct:free", "google/gemma-2-9b-it:free"],
     },
+    "gemini": {
+        "name": "Google Gemini",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "api_key_env": "GEMINI_API_KEY",
+        "default_model": "gemini-2.0-flash",
+        "models": ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-pro-preview-06-05"],
+    },
+    "mistral": {
+        "name": "Mistral AI",
+        "base_url": "https://api.mistral.ai/v1",
+        "api_key_env": "MISTRAL_API_KEY",
+        "default_model": "mistral-small-latest",
+        "models": ["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"],
+    },
+    "xai": {
+        "name": "xAI (Grok)",
+        "base_url": "https://api.x.ai/v1",
+        "api_key_env": "XAI_API_KEY",
+        "default_model": "grok-3-mini-fast",
+        "models": ["grok-3-mini-fast", "grok-3-mini", "grok-3-fast", "grok-3"],
+    },
 }
 
 
@@ -82,7 +103,7 @@ def detect_available_provider(config: dict) -> Tuple[str, Optional[dict]]:
     model_cfg = config.get("model", {}) if isinstance(config, dict) else {}
 
     # Check cloud providers in priority order
-    for provider_key in ["openai", "anthropic", "groq", "openrouter"]:
+    for provider_key in ["openai", "anthropic", "groq", "gemini", "mistral", "xai", "openrouter"]:
         provider = CLOUD_PROVIDERS[provider_key]
         api_key = os.getenv(provider["api_key_env"])
         if api_key:
@@ -398,7 +419,7 @@ def build_agent_from_config(config: dict):
         openai_models = openai_compat_models
         openai_default_model = openai_compat_default_model
 
-    return create_research_agent(
+    agent = create_research_agent(
         vector_store=vector_store,
         embedder=embedder,
         academic_search=academic_search,
@@ -416,6 +437,13 @@ def build_agent_from_config(config: dict):
         openai_compat_api_key=openai_compat_api_key,
         openai_compat_models=openai_compat_models,
     )
+
+    # Apply multi-model pipeline overrides from config
+    pipeline_cfg = model_cfg.get("pipeline")
+    if pipeline_cfg and isinstance(pipeline_cfg, dict):
+        agent.configure_pipeline(pipeline_cfg)
+
+    return agent
 
 
 if __name__ == "__main__":

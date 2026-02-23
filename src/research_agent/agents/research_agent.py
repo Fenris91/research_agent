@@ -178,6 +178,7 @@ class ResearchAgent:
         self.llm_generate = llm_generate
         self.config = config or AgentConfig()
         self.ollama_base_url = ollama_base_url
+        self._pipeline: dict[str, str] = {}  # task_type → model_name overrides
 
         # Build the workflow graph
         self.graph = self._build_graph()
@@ -417,6 +418,36 @@ class ResearchAgent:
             # General failure fallback
             return f"Error: {str(e)}. Try simplifying your query or reducing output length."
 
+    def configure_pipeline(self, pipeline: dict[str, str]):
+        """Set per-task model overrides.
+
+        Args:
+            pipeline: Mapping of task type to model name.
+                      Valid task types: classify, extract_keywords, synthesize.
+        """
+        valid_tasks = {"classify", "extract_keywords", "synthesize"}
+        self._pipeline = {k: v for k, v in pipeline.items() if k in valid_tasks}
+        if self._pipeline:
+            logger.info("Pipeline configured: %s", self._pipeline)
+
+    def task_infer(self, task: str, prompt: str, max_tokens: int = 512) -> str:
+        """Run inference with an optional per-task model override.
+
+        If ``self._pipeline`` has an entry for *task*, the model is temporarily
+        switched before calling ``infer()``, then restored afterwards.
+        """
+        override = self._pipeline.get(task)
+        if not override or not self.model or not hasattr(self.model, "switch_model"):
+            return self.infer(prompt, max_tokens=max_tokens)
+
+        original = getattr(self.model, "model_name", None)
+        try:
+            self.model.switch_model(override)
+            return self.infer(prompt, max_tokens=max_tokens)
+        finally:
+            if original is not None:
+                self.model.switch_model(original)
+
     def _cpu_inference_fallback(self, prompt: str):
         """
         Emergency fallback when GPU is unavailable
@@ -529,7 +560,7 @@ Respond with ONLY the category name, nothing else."""
 
         try:
             if self.model:
-                response = self.infer(classification_prompt, max_tokens=20)
+                response = self.task_infer("classify", classification_prompt, max_tokens=20)
                 response = response.strip().lower()
 
                 # Parse the response
@@ -609,7 +640,7 @@ Return ONLY the keywords separated by spaces, nothing else.
 Query: {query}
 
 Keywords:"""
-                keywords = self.infer(prompt, max_tokens=60).strip()
+                keywords = self.task_infer("extract_keywords", prompt, max_tokens=60).strip()
                 # Sanity check: if the LLM returned something reasonable
                 if 5 < len(keywords) < max_len and "\n" not in keywords:
                     return keywords
@@ -1068,7 +1099,7 @@ Keywords:"""
         # Generate response — LLM synthesis or formatted fallback
         try:
             if self.model:
-                answer = self.infer(prompt, max_tokens=1024)
+                answer = self.task_infer("synthesize", prompt, max_tokens=1024)
             else:
                 answer = self._format_results_without_llm(query, all_results)
 

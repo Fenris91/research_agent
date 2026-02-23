@@ -40,6 +40,14 @@ model:
   top_p: 0.9
   repetition_penalty: 1.1
 
+  # Multi-model pipeline: assign different models per task type.
+  # If unset, every task uses the default model above.
+  # Task types: classify, extract_keywords, synthesize
+  # pipeline:
+  #   classify: "llama-3.1-8b-instant"          # fast/cheap for classification
+  #   extract_keywords: "llama-3.1-8b-instant"   # fast for keyword extraction
+  #   synthesize: "llama-3.3-70b-versatile"      # capable for synthesis
+
   # OpenAI settings (provider: "openai")
   openai:
     base_url: "https://api.openai.com/v1"
