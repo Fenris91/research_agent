@@ -5,6 +5,7 @@ Run with: python -m research_agent.main
 """
 
 import argparse
+import logging
 import os
 from typing import Optional, Tuple
 
@@ -16,6 +17,77 @@ except Exception:
     pass
 
 from research_agent.utils.config import load_config
+
+logger = logging.getLogger(__name__)
+
+
+# Recommended pipeline presets per provider.
+# "fast" = cheap/fast model for classification/extraction
+# "default" = the provider's main capable model (used for synthesis)
+PROVIDER_PIPELINE_DEFAULTS: dict[str, dict[str, str]] = {
+    "groq": {
+        "fast": "llama-3.1-8b-instant",
+        "default": "llama-3.3-70b-versatile",
+    },
+    "openai": {
+        "fast": "gpt-4o-mini",
+        "default": "gpt-4o",
+    },
+    "anthropic": {
+        "fast": "claude-haiku-4-5",
+        "default": "claude-sonnet-4-6",
+    },
+    "ollama": {
+        "fast": "llama3.2:3b",
+        "default": "qwen3:32b",
+    },
+    "openrouter": {
+        "fast": "meta-llama/llama-3.1-8b-instruct:free",
+        "default": "meta-llama/llama-3.1-8b-instruct:free",
+    },
+    "gemini": {
+        "fast": "gemini-2.0-flash-lite",
+        "default": "gemini-2.0-flash",
+    },
+    "mistral": {
+        "fast": "mistral-small-latest",
+        "default": "mistral-large-latest",
+    },
+    "xai": {
+        "fast": "grok-3-mini-fast",
+        "default": "grok-3-fast",
+    },
+}
+
+
+def resolve_pipeline_aliases(
+    pipeline: dict[str, str],
+    provider_key: str,
+) -> dict[str, str]:
+    """Resolve ``"fast"``/``"default"`` aliases to real model names.
+
+    Any value that is *not* one of the recognised aliases is passed through
+    unchanged (it is assumed to be a literal model name).
+
+    Args:
+        pipeline: Mapping of task type to model name or alias.
+        provider_key: The canonical provider key (e.g. ``"groq"``, ``"openai"``).
+
+    Returns:
+        A new dict with aliases replaced by concrete model names.
+    """
+    presets = PROVIDER_PIPELINE_DEFAULTS.get(provider_key, {})
+    resolved: dict[str, str] = {}
+    for task, model in pipeline.items():
+        if model in presets:
+            resolved[task] = presets[model]
+            logger.info(
+                "Pipeline alias resolved: %s.%s  '%s' -> '%s'",
+                provider_key, task, model, presets[model],
+            )
+        else:
+            resolved[task] = model
+    return resolved
 
 
 # Cloud provider configurations (OpenAI-compatible endpoints)
@@ -320,9 +392,13 @@ def build_agent_from_config(config: dict):
 
     # Auto-detect provider if set to "auto"
     detected_cloud_config = None
+    # Keep the canonical provider key (e.g. "groq") for pipeline alias resolution
+    # before it gets remapped to the generic "openai" transport below.
+    canonical_provider = provider
     if provider == "auto":
         print("Auto-detecting LLM provider...")
         provider, detected_cloud_config = detect_available_provider(config)
+        canonical_provider = provider
         print(f"  Selected provider: {provider}")
     elif provider in CLOUD_PROVIDERS:
         # Explicit cloud provider selection
@@ -441,7 +517,8 @@ def build_agent_from_config(config: dict):
     # Apply multi-model pipeline overrides from config
     pipeline_cfg = model_cfg.get("pipeline")
     if pipeline_cfg and isinstance(pipeline_cfg, dict):
-        agent.configure_pipeline(pipeline_cfg)
+        resolved = resolve_pipeline_aliases(pipeline_cfg, canonical_provider)
+        agent.configure_pipeline(resolved)
 
     return agent
 

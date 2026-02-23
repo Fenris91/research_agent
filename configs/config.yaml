@@ -43,10 +43,32 @@ model:
   # Multi-model pipeline: assign different models per task type.
   # If unset, every task uses the default model above.
   # Task types: classify, extract_keywords, synthesize
-  # pipeline:
-  #   classify: "llama-3.1-8b-instant"          # fast/cheap for classification
-  #   extract_keywords: "llama-3.1-8b-instant"   # fast for keyword extraction
-  #   synthesize: "llama-3.3-70b-versatile"      # capable for synthesis
+  #
+  # Use "fast" or "default" aliases — they resolve to the active provider's
+  # recommended models automatically (see PROVIDER_PIPELINE_DEFAULTS in main.py).
+  # Or specify literal model names for full control.
+  pipeline:
+    classify: "fast"              # cheap/fast model for classification
+    extract_keywords: "fast"      # cheap/fast model for keyword extraction
+    synthesize: "default"         # main capable model for synthesis
+  #
+  # Provider-specific examples (literal model names):
+  # Groq free tier:
+  #   classify: "llama-3.1-8b-instant"
+  #   extract_keywords: "llama-3.1-8b-instant"
+  #   synthesize: "llama-3.3-70b-versatile"
+  # OpenAI:
+  #   classify: "gpt-4o-mini"
+  #   extract_keywords: "gpt-4o-mini"
+  #   synthesize: "gpt-4o"
+  # Anthropic:
+  #   classify: "claude-haiku-4-5"
+  #   extract_keywords: "claude-haiku-4-5"
+  #   synthesize: "claude-sonnet-4-6"
+  # Ollama:
+  #   classify: "llama3.2:3b"
+  #   extract_keywords: "llama3.2:3b"
+  #   synthesize: "qwen3:32b"
 
   # OpenAI settings (provider: "openai")
   openai:
