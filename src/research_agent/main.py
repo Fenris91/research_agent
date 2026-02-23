@@ -419,7 +419,7 @@ def build_agent_from_config(config: dict):
         openai_models = openai_compat_models
         openai_default_model = openai_compat_default_model
 
-    return create_research_agent(
+    agent = create_research_agent(
         vector_store=vector_store,
         embedder=embedder,
         academic_search=academic_search,
@@ -437,6 +437,13 @@ def build_agent_from_config(config: dict):
         openai_compat_api_key=openai_compat_api_key,
         openai_compat_models=openai_compat_models,
     )
+
+    # Apply multi-model pipeline overrides from config
+    pipeline_cfg = model_cfg.get("pipeline")
+    if pipeline_cfg and isinstance(pipeline_cfg, dict):
+        agent.configure_pipeline(pipeline_cfg)
+
+    return agent
 
 
 if __name__ == "__main__":
