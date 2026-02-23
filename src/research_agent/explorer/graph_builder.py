@@ -603,11 +603,15 @@ class GraphBuilder:
     # Convenience: build graph from KB papers
     # ------------------------------------------------------------------
 
-    def build_from_kb_papers(self, papers: list[dict]) -> "GraphBuilder":
+    def build_from_kb_papers(self, papers: list[dict], researcher_registry=None) -> "GraphBuilder":
         """Populate the graph from a list of KB paper dicts.
 
         Groups papers by ``researcher`` metadata, creates researcher nodes
         with authorship edges, then builds structural context (fields/domains).
+
+        If *researcher_registry* is provided, researcher nodes are enriched
+        with h_index, affiliations, and IDs from persisted profiles.
+
         Returns self for chaining.
         """
         import json as _json
@@ -646,12 +650,36 @@ class GraphBuilder:
             all_fields: list[str] = []
             for pp in rpapers:
                 all_fields.extend(pp.get("fields") or [])
-            rid = self.add_researcher({
+
+            researcher_dict: dict = {
                 "name": name,
                 "works_count": len(rpapers),
                 "citations_count": total_cites,
                 "fields": list(dict.fromkeys(all_fields)),  # deduplicated, order-preserving
-            })
+            }
+
+            # Enrich from researcher registry if available
+            if researcher_registry is not None:
+                try:
+                    profile = researcher_registry.get(name)
+                    if profile is not None:
+                        pd = profile.to_dict() if hasattr(profile, "to_dict") else {}
+                        researcher_dict["openalex_id"] = pd.get("openalex_id")
+                        researcher_dict["semantic_scholar_id"] = pd.get("semantic_scholar_id")
+                        researcher_dict["h_index"] = pd.get("h_index")
+                        researcher_dict["affiliations"] = pd.get("affiliations", [])
+                        if (pd.get("works_count") or 0) > researcher_dict["works_count"]:
+                            researcher_dict["works_count"] = pd["works_count"]
+                        if (pd.get("citations_count") or 0) > researcher_dict["citations_count"]:
+                            researcher_dict["citations_count"] = pd["citations_count"]
+                        merged = list(dict.fromkeys(
+                            researcher_dict["fields"] + pd.get("fields", [])
+                        ))
+                        researcher_dict["fields"] = merged
+                except Exception:
+                    pass  # graceful degradation — use KB-derived data only
+
+            rid = self.add_researcher(researcher_dict)
             for pp in rpapers:
                 pid = self.add_paper(pp)
                 self.add_authorship_edge(rid, pid)
