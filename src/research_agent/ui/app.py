@@ -2962,7 +2962,7 @@ def create_app(agent=None):
                     ).hexdigest()[:16]
 
                     # Skip if already in KB
-                    if store._meta and store._meta.paper_exists(source_id):
+                    if store._meta and store._meta.web_source_exists(source_id):
                         skipped += 1
                         continue
 

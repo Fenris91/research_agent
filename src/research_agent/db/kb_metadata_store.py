@@ -226,6 +226,13 @@ class KBMetadataStore:
             ).fetchone()
             return row is not None
 
+    def web_source_exists(self, source_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM web_sources WHERE source_id = ?", (source_id,)
+            ).fetchone()
+            return row is not None
+
     def update_paper_fields(self, paper_id: str, fields: str) -> bool:
         """Update just the fields column for an existing paper."""
         with self._connect() as conn:
