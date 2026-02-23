@@ -7,14 +7,14 @@ Active priorities and future ideas for the Research Agent.
 - [x] **Auto-Save Web Results from Researcher Lookup** — save DuckDuckGo results to `web_sources`, "Save to KB" button next to each result
 - [x] **Auto-Save Citation Abstracts** — persist cited/citing paper abstracts to KB via S2 batch API, auto-save toggle in Citation Explorer
 - [x] **Additional Cloud LLM Providers** — Gemini, Mistral, xAI/Grok via OpenAI-compatible APIs
-- [ ] **Multi-Model Pipeline** — fast/cheap model for query classification, capable model for synthesis, configurable per task type
-- [ ] **Perplexity Integration** — web-grounded answers with citations, replace/augment DuckDuckGo
+- [x] **Multi-Model Pipeline** — fast/cheap model for query classification, capable model for synthesis, configurable per task type
+- [x] **Perplexity Integration** — web-grounded answers with citations, replace/augment DuckDuckGo
 
 ## Medium Priority
 
 - [x] **Notes Browser in KB Tab** — list, refresh, delete by ID
 - [x] **Web Sources Browser in KB Tab** — list with URL/title/date, delete
-- [ ] **Researcher Profile Persistence** — persist ResearcherRegistry to SQLite, link researchers to KB papers
+- [x] **Researcher Profile Persistence** — persist ResearcherRegistry to SQLite, link researchers to KB papers, cache enrichment artifacts
 
 ## Low Priority
 
