@@ -1,11 +1,16 @@
 """Playwright test: verify Knowledge Explorer layer buttons are clickable and work."""
 import re
+
+import pytest
+
+playwright = pytest.importorskip("playwright", reason="playwright not installed")
 from playwright.sync_api import sync_playwright, expect
 
 
 APP_URL = "http://127.0.0.1:7860"
 
 
+@pytest.mark.slow
 def test_layer_buttons_switch():
     """Click Structure, People, Topics buttons and verify active state changes."""
     with sync_playwright() as p:
