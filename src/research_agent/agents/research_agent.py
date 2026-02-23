@@ -426,9 +426,34 @@ class ResearchAgent:
                       Valid task types: classify, extract_keywords, synthesize.
         """
         valid_tasks = {"classify", "extract_keywords", "synthesize"}
+        rejected = {k for k in pipeline if k not in valid_tasks}
+        if rejected:
+            logger.warning(
+                "Pipeline: ignoring unknown task types: %s (valid: %s)",
+                ", ".join(sorted(rejected)),
+                ", ".join(sorted(valid_tasks)),
+            )
+
         self._pipeline = {k: v for k, v in pipeline.items() if k in valid_tasks}
+
         if self._pipeline:
-            logger.info("Pipeline configured: %s", self._pipeline)
+            for task, model in sorted(self._pipeline.items()):
+                logger.info("Pipeline: %s -> %s", task, model)
+
+            # Soft-warn if the model is not in the provider's known model list.
+            # Wrapped in try/except so partial init (e.g. tests) never crashes.
+            try:
+                known_models = self.list_available_models()
+            except Exception:
+                known_models = []
+            if known_models:
+                for task, model in self._pipeline.items():
+                    if model not in known_models:
+                        logger.warning(
+                            "Pipeline: model '%s' (task '%s') not in known model "
+                            "list %s — it may still work if the provider accepts it",
+                            model, task, known_models[:6],
+                        )
 
     def task_infer(self, task: str, prompt: str, max_tokens: int = 512) -> str:
         """Run inference with an optional per-task model override.
