@@ -143,6 +143,13 @@ CLOUD_PROVIDERS = {
         "default_model": "grok-3-mini-fast",
         "models": ["grok-3-mini-fast", "grok-3-mini", "grok-3-fast", "grok-3"],
     },
+    "perplexity": {
+        "name": "Perplexity AI",
+        "base_url": "https://api.perplexity.ai",
+        "api_key_env": "PERPLEXITY_API_KEY",
+        "default_model": "sonar",
+        "models": ["sonar", "sonar-pro", "sonar-reasoning"],
+    },
 }
 
 
@@ -164,10 +171,11 @@ def detect_available_provider(config: dict) -> Tuple[str, Optional[dict]]:
     1. OpenAI (if OPENAI_API_KEY is set)
     2. Anthropic (if ANTHROPIC_API_KEY is set)
     3. Groq (if GROQ_API_KEY is set - free tier!)
-    4. OpenRouter (if OPENROUTER_API_KEY is set)
-    5. Ollama (if server is reachable)
-    6. HuggingFace (local, requires GPU)
-    7. None (retrieval-only mode)
+    4. Perplexity (if PERPLEXITY_API_KEY is set)
+    5. OpenRouter (if OPENROUTER_API_KEY is set)
+    6. Ollama (if server is reachable)
+    7. HuggingFace (local, requires GPU)
+    8. None (retrieval-only mode)
 
     Returns:
         Tuple of (provider_name, provider_config) or (provider_name, None) for local providers
@@ -175,7 +183,7 @@ def detect_available_provider(config: dict) -> Tuple[str, Optional[dict]]:
     model_cfg = config.get("model", {}) if isinstance(config, dict) else {}
 
     # Check cloud providers in priority order
-    for provider_key in ["openai", "anthropic", "groq", "gemini", "mistral", "xai", "openrouter"]:
+    for provider_key in ["openai", "anthropic", "groq", "perplexity", "gemini", "mistral", "xai", "openrouter"]:
         provider = CLOUD_PROVIDERS[provider_key]
         api_key = os.getenv(provider["api_key_env"])
         if api_key:
@@ -475,6 +483,8 @@ def build_agent_from_config(config: dict):
         web_api_key = os.getenv("TAVILY_API_KEY")
     elif web_provider == "serper":
         web_api_key = os.getenv("SERPER_API_KEY")
+    elif web_provider == "perplexity":
+        web_api_key = os.getenv("PERPLEXITY_API_KEY")
 
     web_search = WebSearchTool(api_key=web_api_key, provider=web_provider)
 
