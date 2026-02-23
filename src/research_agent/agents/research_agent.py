@@ -61,6 +61,7 @@ class AgentConfig:
     auto_ingest: bool = False
     auto_ingest_threshold: float = 0.85
     include_web_search: bool = True
+    include_core_search: bool = True
     year_range: Optional[tuple] = None
     min_citations: int = 0
 
@@ -426,9 +427,34 @@ class ResearchAgent:
                       Valid task types: classify, extract_keywords, synthesize.
         """
         valid_tasks = {"classify", "extract_keywords", "synthesize"}
+        rejected = {k for k in pipeline if k not in valid_tasks}
+        if rejected:
+            logger.warning(
+                "Pipeline: ignoring unknown task types: %s (valid: %s)",
+                ", ".join(sorted(rejected)),
+                ", ".join(sorted(valid_tasks)),
+            )
+
         self._pipeline = {k: v for k, v in pipeline.items() if k in valid_tasks}
+
         if self._pipeline:
-            logger.info("Pipeline configured: %s", self._pipeline)
+            for task, model in sorted(self._pipeline.items()):
+                logger.info("Pipeline: %s -> %s", task, model)
+
+            # Soft-warn if the model is not in the provider's known model list.
+            # Wrapped in try/except so partial init (e.g. tests) never crashes.
+            try:
+                known_models = self.list_available_models()
+            except Exception:
+                known_models = []
+            if known_models:
+                for task, model in self._pipeline.items():
+                    if model not in known_models:
+                        logger.warning(
+                            "Pipeline: model '%s' (task '%s') not in known model "
+                            "list %s — it may still work if the provider accepts it",
+                            model, task, known_models[:6],
+                        )
 
     def task_infer(self, task: str, prompt: str, max_tokens: int = 512) -> str:
         """Run inference with an optional per-task model override.
@@ -995,8 +1021,21 @@ Keywords:"""
                     logger.error(f"Semantic Scholar search error: {e}")
                     return []
 
-            openalex_papers, s2_papers = await asyncio.gather(
-                _fetch_openalex(), _fetch_s2()
+            async def _fetch_core():
+                if not self.config.include_core_search:
+                    return []
+                try:
+                    core_limit = max(1, max_ext // 3)
+                    return await self.academic_search.search_core(
+                        query, limit=core_limit,
+                        from_year=from_year, to_year=to_year,
+                    )
+                except Exception as e:
+                    logger.error(f"CORE search error: {e}")
+                    return []
+
+            openalex_papers, s2_papers, core_papers = await asyncio.gather(
+                _fetch_openalex(), _fetch_s2(), _fetch_core()
             )
 
             # Process OpenAlex results first (primary source)
@@ -1019,7 +1058,17 @@ Keywords:"""
                 _mark_seen(paper)
                 external_results.append(_paper_to_dict(paper, "semantic_scholar"))
 
-            logger.info(f"Found {len(external_results)} academic results (OpenAlex: {len(openalex_papers)}, S2: {len(s2_papers)})")
+            # CORE results (open access papers, deduped)
+            for paper in core_papers:
+                citation_count = paper.citation_count or 0
+                if min_citations and citation_count < min_citations:
+                    continue
+                if _is_duplicate(paper):
+                    continue
+                _mark_seen(paper)
+                external_results.append(_paper_to_dict(paper, "core"))
+
+            logger.info(f"Found {len(external_results)} academic results (OpenAlex: {len(openalex_papers)}, S2: {len(s2_papers)}, CORE: {len(core_papers)})")
 
         # Search web if configured and query type warrants it
         if self.web_search and self.config.include_web_search:
