@@ -471,6 +471,27 @@ def build_agent_from_config(config: dict):
         persist_dir=vector_cfg.get("persist_directory", "./data/chroma_db")
     )
 
+    # Check embedding dimension compatibility with existing data
+    try:
+        if vector_store.papers.count() > 0:
+            sample = vector_store.papers.peek(1)
+            sample_embs = sample.get("embeddings")
+            if sample_embs and len(sample_embs) > 0 and len(sample_embs[0]) != embedder.dimension:
+                existing_dim = len(sample_embs[0])
+                logger.warning(
+                    "Existing KB uses %d-dim embeddings but current embedder produces %d-dim. "
+                    "Search quality will be degraded. Install research-agent[local] for "
+                    "matching BGE embeddings.",
+                    existing_dim, embedder.dimension,
+                )
+                print(
+                    f"\n⚠ Embedding dimension mismatch: existing KB = {existing_dim}-dim, "
+                    f"current embedder = {embedder.dimension}-dim.\n"
+                    f"  Run: pip install research-agent[local]\n"
+                )
+    except Exception:
+        pass  # Non-critical check
+
     search_cfg = config.get("search", {}) if isinstance(config, dict) else {}
     openalex_email = (search_cfg.get("openalex", {}) or {}).get("email")
     unpaywall_email = (search_cfg.get("unpaywall", {}) or {}).get("email")
