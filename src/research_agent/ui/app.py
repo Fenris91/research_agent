@@ -1069,6 +1069,13 @@ def create_app(agent=None):
 
                     with gr.Accordion("Web Results", open=False):
                         web_results_output = gr.JSON(label="Web Search Results")
+                        with gr.Row():
+                            save_web_results_btn = gr.Button(
+                                "Save Web Results to KB", variant="primary", scale=1
+                            )
+                            save_web_results_status = gr.Textbox(
+                                label="Status", interactive=False, scale=3
+                            )
 
                     with gr.Row():
                         export_csv_btn = gr.Button("Export CSV")
@@ -2835,6 +2842,61 @@ def create_app(agent=None):
 
             return ". ".join(status_parts), stats, table
 
+        def save_web_results_to_kb(web_results_data):
+            """Save researcher web results (DuckDuckGo) to KB as web sources."""
+            if not web_results_data:
+                return "No web results to save. Run a researcher lookup first."
+
+            store, embedder_model, _ = _get_kb_resources()
+            added = 0
+            skipped = 0
+
+            for researcher_name, results in web_results_data.items():
+                if not results:
+                    continue
+                for result in results:
+                    title = result.get("title", "")
+                    url = result.get("url", "")
+                    snippet = result.get("snippet", "")
+
+                    if not snippet and not title:
+                        skipped += 1
+                        continue
+
+                    import hashlib
+                    source_id = hashlib.md5(
+                        (url or title or snippet).encode()
+                    ).hexdigest()[:16]
+
+                    # Skip if already in KB
+                    if store._meta and store._meta.paper_exists(source_id):
+                        skipped += 1
+                        continue
+
+                    content = f"{title}\n\n{snippet}" if snippet else title
+                    try:
+                        embedding = embedder_model.embed(content)
+                        metadata = {
+                            "title": title,
+                            "url": url,
+                            "researcher": researcher_name,
+                            "source": "duckduckgo",
+                        }
+                        store.add_web_source(
+                            source_id=source_id,
+                            chunks=[content],
+                            embeddings=[embedding],
+                            metadata=metadata,
+                        )
+                        added += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to save web result: {e}")
+                        skipped += 1
+
+            if added == 0 and skipped > 0:
+                return f"All {skipped} web results already in KB or empty."
+            return f"Saved {added} web result(s) to KB. Skipped {skipped}."
+
         def export_to_csv(results):
             """Export results to CSV."""
             if not results:
@@ -3937,6 +3999,12 @@ def create_app(agent=None):
                 kb_stats,
                 papers_table,
             ],
+        )
+
+        save_web_results_btn.click(
+            save_web_results_to_kb,
+            inputs=[web_results_output],
+            outputs=[save_web_results_status],
         )
 
         export_csv_btn.click(
