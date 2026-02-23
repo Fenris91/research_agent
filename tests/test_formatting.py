@@ -11,9 +11,9 @@ from unittest.mock import MagicMock, patch
 @pytest.fixture
 def agent():
     """Create a ResearchAgent with no LLM (formatting-only tests)."""
-    with patch("research_agent.agents.research_agent.torch"):
-        from research_agent.agents.research_agent import ResearchAgent, AgentConfig
+    from research_agent.agents.research_agent import ResearchAgent, AgentConfig
 
+    with patch.object(ResearchAgent, "__init__", lambda self: None):
         a = ResearchAgent.__new__(ResearchAgent)
         a.config = AgentConfig()
         a.model = None

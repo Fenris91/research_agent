@@ -8,6 +8,10 @@ input validation, and output formatting.
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
+# Citation explorer depends on matplotlib + networkx (in [local] extra)
+pytest.importorskip("matplotlib", reason="matplotlib required (install research-agent[local])")
+pytest.importorskip("networkx", reason="networkx required (install research-agent[local])")
+
 
 # ============================================
 # UI Component Tests

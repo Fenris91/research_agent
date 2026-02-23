@@ -6,8 +6,6 @@ Provides LLM integration with multiple backends:
 - HuggingFace Transformers (fallback)
 """
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import torch
 import logging
 import requests
 import json
@@ -27,6 +25,11 @@ class OllamaUnavailableError(Exception):
 
 def get_vram_info():
     """Get detailed VRAM information"""
+    try:
+        import torch
+    except ImportError:
+        return {"available": 0, "total": 0, "device": None}
+
     if not torch.cuda.is_available():
         return {"available": 0, "total": 0, "device": None}
 
@@ -46,6 +49,11 @@ def get_vram_info():
 
 def check_vram(threshold_gb=28):  # Leave 4GB headroom
     """Check VRAM and provide detailed diagnostics"""
+    try:
+        import torch
+    except ImportError:
+        return
+
     vram_info = get_vram_info()
 
     if not torch.cuda.is_available():
@@ -65,6 +73,9 @@ def check_vram(threshold_gb=28):  # Leave 4GB headroom
 
 def get_qlora_pipeline():
     """Return quantized Qwen2.5 LLM with memory optimizations"""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    import torch
+
     vram_info = get_vram_info()
 
     logger.info(f"Attempting to load Qwen2.5-32B model...")
@@ -348,6 +359,124 @@ class OpenAICompatibleModel:
         except Exception as e:
             logger.error("OpenAI generation failed: %s", e)
             return f"Error: OpenAI request failed: {e}"
+
+
+class AnthropicNativeModel:
+    """Claude model using the native Anthropic SDK with tool-use support.
+
+    Unlike the OpenAI-compatible shim, this uses Claude's native tool calling
+    to let the model decide which tools to invoke and in what order.
+    """
+
+    MAX_TOOL_ROUNDS = 5  # Safety cap on tool-use iterations
+
+    def __init__(self, model_name: str, api_key: str):
+        try:
+            import anthropic
+        except ImportError:
+            raise ImportError(
+                "anthropic package required: pip install anthropic"
+            )
+        self.client = anthropic.Anthropic(api_key=api_key)
+        self.model_name = model_name
+        self.api_key = api_key
+
+    def switch_model(self, model_name: str):
+        self.model_name = model_name
+        logger.info("Switched Anthropic model to: %s", model_name)
+
+    def run_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        system: str = "",
+        tool_executor=None,
+        max_tokens: int = 4096,
+    ) -> dict:
+        """Run a tool-use conversation loop.
+
+        Args:
+            messages: Conversation messages [{"role": "user", "content": "..."}]
+            tools: Tool definitions in Anthropic format
+            system: System prompt
+            tool_executor: Callable(tool_name, tool_input) -> str
+            max_tokens: Max tokens per response
+
+        Returns:
+            {"answer": str, "tool_calls": [{"name", "input", "result"}]}
+        """
+        all_tool_calls = []
+
+        for _round in range(self.MAX_TOOL_ROUNDS):
+            kwargs = {
+                "model": self.model_name,
+                "max_tokens": max_tokens,
+                "messages": messages,
+            }
+            if system:
+                kwargs["system"] = system
+            if tools:
+                kwargs["tools"] = tools
+
+            try:
+                response = self.client.messages.create(**kwargs)
+            except Exception as e:
+                logger.error("Anthropic API error: %s", e)
+                return {"answer": f"Error: Anthropic API error: {e}", "tool_calls": all_tool_calls}
+
+            # Extract text blocks and tool_use blocks
+            text_parts = []
+            tool_uses = []
+            for block in response.content:
+                if block.type == "text":
+                    text_parts.append(block.text)
+                elif block.type == "tool_use":
+                    tool_uses.append(block)
+
+            # If no tool calls, we're done — return the text answer
+            if not tool_uses or response.stop_reason != "tool_use":
+                return {
+                    "answer": "\n".join(text_parts),
+                    "tool_calls": all_tool_calls,
+                }
+
+            # Execute each tool call and build tool_result messages
+            # First, append the assistant's response (with tool_use blocks) to messages
+            messages.append({"role": "assistant", "content": response.content})
+
+            tool_results = []
+            for tool_use in tool_uses:
+                tool_name = tool_use.name
+                tool_input = tool_use.input
+
+                if tool_executor:
+                    try:
+                        result_str = tool_executor(tool_name, tool_input)
+                    except Exception as e:
+                        logger.error("Tool %s failed: %s", tool_name, e)
+                        result_str = json.dumps({"error": str(e)})
+                else:
+                    result_str = json.dumps({"error": "No tool executor provided"})
+
+                all_tool_calls.append({
+                    "name": tool_name,
+                    "input": tool_input,
+                    "result": result_str,
+                })
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
+                    "content": result_str,
+                })
+
+            messages.append({"role": "user", "content": tool_results})
+
+        # Exhausted rounds — return whatever text we have
+        logger.warning("Claude tool-use loop hit max rounds (%d)", self.MAX_TOOL_ROUNDS)
+        return {
+            "answer": "\n".join(text_parts) if text_parts else "I wasn't able to complete the research within the allowed steps.",
+            "tool_calls": all_tool_calls,
+        }
 
 
 def get_ollama_pipeline(model_name: str = "mistral", base_url: str = "http://localhost:11434") -> OllamaModel:
