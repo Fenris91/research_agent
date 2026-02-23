@@ -924,6 +924,52 @@ def create_app(agent=None):
                         placeholder="Reset will remove all KB data",
                     )
 
+                    with gr.Accordion("Browse Notes", open=False):
+                        notes_table = gr.Dataframe(
+                            headers=["Title", "Preview", "Tags", "Added", "Note ID"],
+                            label="Notes in Knowledge Base",
+                        )
+                        with gr.Row():
+                            refresh_notes_btn = gr.Button(
+                                "Refresh", variant="secondary", scale=1
+                            )
+                        with gr.Row():
+                            delete_note_id = gr.Textbox(
+                                label="Note ID",
+                                placeholder="Enter note ID to delete",
+                                scale=4,
+                            )
+                            delete_note_btn = gr.Button(
+                                "Delete Note", variant="stop", scale=1
+                            )
+                        delete_note_status = gr.Textbox(
+                            label="Status",
+                            interactive=False,
+                        )
+
+                    with gr.Accordion("Browse Web Sources", open=False):
+                        web_sources_table = gr.Dataframe(
+                            headers=["Title", "URL", "Added", "Source ID"],
+                            label="Web Sources in Knowledge Base",
+                        )
+                        with gr.Row():
+                            refresh_web_btn = gr.Button(
+                                "Refresh", variant="secondary", scale=1
+                            )
+                        with gr.Row():
+                            delete_web_id = gr.Textbox(
+                                label="Source ID",
+                                placeholder="Enter source ID to delete",
+                                scale=4,
+                            )
+                            delete_web_btn = gr.Button(
+                                "Delete Web Source", variant="stop", scale=1
+                            )
+                        delete_web_status = gr.Textbox(
+                            label="Status",
+                            interactive=False,
+                        )
+
                     gr.Markdown("### Export")
                     with gr.Row():
                         export_bibtex_btn = gr.Button("Export BibTeX", variant="secondary")
@@ -1710,6 +1756,33 @@ def create_app(agent=None):
                 )
             return table_data
 
+        def _format_notes_table(notes):
+            if not notes:
+                return []
+            return [
+                [
+                    n.get("title", "Untitled"),
+                    n.get("preview", ""),
+                    n.get("tags", ""),
+                    n.get("added_at", ""),
+                    n.get("note_id", ""),
+                ]
+                for n in notes
+            ]
+
+        def _format_web_sources_table(sources):
+            if not sources:
+                return []
+            return [
+                [
+                    s.get("title", ""),
+                    s.get("url", ""),
+                    s.get("added_at", ""),
+                    s.get("source_id", ""),
+                ]
+                for s in sources
+            ]
+
         def refresh_stats_and_table(
             year_from=None, year_to=None, min_citations=0, context_state=None
         ):
@@ -1944,6 +2017,36 @@ def create_app(agent=None):
                 year_from, year_to, min_citations, context_state
             )
             return "Knowledge base reset.", stats, table
+
+        def refresh_notes_table():
+            """Refresh the notes table."""
+            store, _, _ = _get_kb_resources()
+            notes = store.list_notes(limit=500)
+            return _format_notes_table(notes)
+
+        def delete_note(note_id):
+            """Delete a note from the knowledge base."""
+            if not note_id:
+                return "Enter a note ID to delete.", refresh_notes_table()
+            store, _, _ = _get_kb_resources()
+            deleted = store.delete_note(note_id)
+            status = f"Deleted note {note_id}." if deleted else f"Note not found: {note_id}."
+            return status, refresh_notes_table()
+
+        def refresh_web_sources_table():
+            """Refresh the web sources table."""
+            store, _, _ = _get_kb_resources()
+            sources = store.list_web_sources(limit=500)
+            return _format_web_sources_table(sources)
+
+        def delete_web_source(source_id):
+            """Delete a web source from the knowledge base."""
+            if not source_id:
+                return "Enter a source ID to delete.", refresh_web_sources_table()
+            store, _, _ = _get_kb_resources()
+            deleted = store.delete_web_source(source_id)
+            status = f"Deleted web source {source_id}." if deleted else f"Source not found: {source_id}."
+            return status, refresh_web_sources_table()
 
         def _get_researcher_choices():
             from research_agent.tools.researcher_registry import get_researcher_registry
@@ -3419,6 +3522,30 @@ def create_app(agent=None):
             reset_kb,
             inputs=[year_from_kb, year_to_kb, min_citations_kb, context_state],
             outputs=[reset_kb_status, kb_stats, papers_table],
+        )
+
+        # Notes browser handlers
+        refresh_notes_btn.click(
+            refresh_notes_table,
+            outputs=[notes_table],
+        )
+
+        delete_note_btn.click(
+            delete_note,
+            inputs=[delete_note_id],
+            outputs=[delete_note_status, notes_table],
+        )
+
+        # Web sources browser handlers
+        refresh_web_btn.click(
+            refresh_web_sources_table,
+            outputs=[web_sources_table],
+        )
+
+        delete_web_btn.click(
+            delete_web_source,
+            inputs=[delete_web_id],
+            outputs=[delete_web_status, web_sources_table],
         )
 
         papers_table.select(

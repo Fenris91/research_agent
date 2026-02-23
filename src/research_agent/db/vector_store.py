@@ -747,6 +747,42 @@ class ResearchVectorStore:
         notes.sort(key=lambda x: x.get("added_at", ""), reverse=True)
         return notes[offset : offset + limit]
 
+    def list_web_sources(self, limit: int = 100, offset: int = 0) -> List[Dict]:
+        """List web sources in the knowledge base."""
+        # Fast path: delegate to SQLite index
+        if self._meta:
+            try:
+                return self._meta.list_web_sources(limit=limit, offset=offset)
+            except Exception as e:
+                logger.warning(f"SQLite list_web_sources failed, falling back: {e}")
+
+        # Fallback: ChromaDB scan
+        results = cast(
+            Dict[str, Any], self.web_sources.get(include=["metadatas"])
+        )
+        all_metadatas = results.get("metadatas") or []
+
+        if not all_metadatas:
+            return []
+
+        seen_ids = set()
+        sources = []
+        for meta in all_metadatas:
+            source_id = meta.get("source_id", "")
+            if source_id and source_id not in seen_ids:
+                seen_ids.add(source_id)
+                sources.append(
+                    {
+                        "source_id": source_id,
+                        "title": meta.get("title", ""),
+                        "url": meta.get("url", ""),
+                        "added_at": meta.get("added_at", ""),
+                    }
+                )
+
+        sources.sort(key=lambda x: x.get("added_at", ""), reverse=True)
+        return sources[offset : offset + limit]
+
     def clear_collection(self, collection: str) -> None:
         """Clear all documents from a collection."""
         coll = self._get_collection(collection)

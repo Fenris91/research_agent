@@ -396,6 +396,25 @@ class KBMetadataStore:
             )
             return cur.rowcount > 0
 
+    def list_web_sources(self, limit: int = 100, offset: int = 0) -> List[Dict]:
+        """Return web sources in a format matching list_notes() style."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT source_id, title, url, added_at, chunk_count "
+                "FROM web_sources ORDER BY added_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+        return [
+            {
+                "source_id": r["source_id"],
+                "title": r["title"] or "",
+                "url": r["url"] or "",
+                "added_at": r["added_at"] or "",
+                "chunk_count": r["chunk_count"] or 1,
+            }
+            for r in rows
+        ]
+
     def count_web_sources(self) -> int:
         with self._connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM web_sources").fetchone()[0]
