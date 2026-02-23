@@ -226,6 +226,21 @@ class KBMetadataStore:
             ).fetchone()
             return row is not None
 
+    def web_source_exists(self, source_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM web_sources WHERE source_id = ?", (source_id,)
+            ).fetchone()
+            return row is not None
+
+    def update_paper_fields(self, paper_id: str, fields: str) -> bool:
+        """Update just the fields column for an existing paper."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE papers SET fields = ? WHERE paper_id = ?", (fields, paper_id)
+            )
+            return cur.rowcount > 0
+
     def paper_exists_by_doi(self, doi: str) -> bool:
         with self._connect() as conn:
             row = conn.execute(
@@ -283,6 +298,15 @@ class KBMetadataStore:
     def count_papers(self) -> int:
         with self._connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+
+    def list_researchers(self) -> List[str]:
+        """Return distinct researcher names from papers table."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT researcher FROM papers "
+                "WHERE researcher IS NOT NULL AND researcher != ''"
+            ).fetchall()
+            return [r[0] for r in rows]
 
     # ------------------------------------------------------------------
     # Notes

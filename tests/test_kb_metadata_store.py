@@ -155,6 +155,12 @@ class TestWebSources:
         store.upsert_web_source_from_metadata("w1", meta, chunk_count=5)
         assert store.count_web_sources() == 1
 
+    def test_web_source_exists(self, store):
+        assert store.web_source_exists("w1") is False
+        store.upsert_web_source("w1", "2025-01-01T00:00:00Z", title="Site")
+        assert store.web_source_exists("w1") is True
+        assert store.web_source_exists("w2") is False
+
 
 # ============================================
 # Aggregate stats

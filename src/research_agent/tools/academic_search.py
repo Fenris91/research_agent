@@ -24,7 +24,7 @@ import httpx
 
 from research_agent.models.paper import BasePaper
 from research_agent.utils.cache import TTLCache, PersistentCache, make_cache_key
-from research_agent.utils.openalex import reconstruct_abstract
+from research_agent.utils.openalex import reconstruct_abstract, extract_openalex_fields
 from research_agent.utils.retry import retry_with_backoff
 from research_agent.utils.observability import timed
 
@@ -415,10 +415,7 @@ class AcademicSearchTools:
                         authors.append(author["display_name"])
 
                 # Extract fields/concepts
-                fields = []
-                for concept in (item.get("concepts") or [])[:5]:  # Top 5 concepts
-                    if concept.get("display_name"):
-                        fields.append(concept["display_name"])
+                fields = extract_openalex_fields(item)
 
                 # Get open access URL
                 oa_url = None
@@ -669,7 +666,7 @@ class AcademicSearchTools:
 
                 abstract = self._reconstruct_abstract(item.get("abstract_inverted_index"))
                 authors = [(a.get("author") or {}).get("display_name", "") for a in item.get("authorships") or []]
-                fields = [c.get("display_name", "") for c in (item.get("concepts") or [])[:5]]
+                fields = extract_openalex_fields(item)
 
                 oa_url = None
                 oa_info = item.get("open_access") or {}

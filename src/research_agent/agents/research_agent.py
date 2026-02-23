@@ -545,16 +545,16 @@ class ResearchAgent:
 Query: {query}
 
 Categories:
-- literature_review: Requests for overview of research on a topic, state of the field, key papers, what does a report/paper say about something
+- literature_review: Requests for overview of research on a topic, state of the field, key papers, or what a researcher/paper/report says
 - factual: Specific factual questions about research content that need precise answers from sources
 - analysis: Requests to analyze, compare, or evaluate concepts, theories, or findings from research
 - general: Greetings, casual conversation, administrative questions, anything NOT about research content
 
 Rules:
+- If the query mentions a researcher name, topic, or paper — even casually like "tell me about X" — classify as "literature_review"
 - If the query asks about what a paper/report says, classify as "literature_review" or "factual"
-- If the query is a greeting, small talk, or asks about YOUR capabilities, classify as "general"
-- If the query does not reference any specific research topic, paper, theory, or data, classify as "general"
-- Only classify as "factual" or "literature_review" if the query clearly asks about academic/research content
+- ONLY classify as "general" for pure greetings ("hello", "hi") or meta questions about your capabilities
+- When in doubt between "general" and a research category, choose the research category
 
 Respond with ONLY the category name, nothing else."""
 
@@ -589,7 +589,8 @@ Respond with ONLY the category name, nothing else."""
                     query_type = "literature_review"
                 elif any(
                     kw in query_lower
-                    for kw in ["what is", "who is", "when did", "define", "how many"]
+                    for kw in ["what is", "who is", "when did", "define", "how many",
+                               "tell me about", "what do you know about"]
                 ):
                     query_type = "factual"
                 elif any(
@@ -1080,8 +1081,10 @@ Keywords:"""
         # Combine all results
         all_results = local_results + external_results
 
-        # For casual/general queries with no sources, respond without calling the LLM
-        if query_type == "general" and not all_results:
+        # For trivial greetings with no sources, respond without calling the LLM
+        query_words = query.strip().split()
+        is_trivial = query_type == "general" and len(query_words) <= 5 and not all_results
+        if is_trivial:
             return {
                 **state,
                 "final_answer": "Hello! I'm your research assistant. I can help you search your knowledge base, find academic papers, and analyze research topics. What would you like to explore?",
