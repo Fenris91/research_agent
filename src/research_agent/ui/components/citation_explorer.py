@@ -1,9 +1,13 @@
 """Gradio components for the Citation Explorer tab."""
 
+import logging
+
 import gradio as gr
 from research_agent.utils.config import load_config as _load_config
 import matplotlib.pyplot as plt
 import networkx as nx
+
+logger = logging.getLogger(__name__)
 
 from research_agent.tools.academic_search import AcademicSearchTools
 from research_agent.tools.citation_explorer import (
@@ -72,6 +76,12 @@ def render_citation_explorer():
                     step=5,
                     label="Search Depth",
                     info="Maximum papers to fetch per direction",
+                )
+
+                auto_save_kb = gr.Checkbox(
+                    label="Auto-save discovered papers to KB",
+                    value=False,
+                    info="Fetch abstracts and save all discovered papers to your Knowledge Base",
                 )
 
                 with gr.Row():
@@ -149,7 +159,7 @@ def render_citation_explorer():
         # Event handlers
         search_btn.click(
             fn=explore_citations,
-            inputs=[paper_input, direction, depth],
+            inputs=[paper_input, direction, depth, auto_save_kb],
             outputs=[
                 summary_output,
                 citing_output,
@@ -212,7 +222,7 @@ def render_citation_explorer():
 
         explore_researcher_btn.click(
             fn=explore_researcher_network,
-            inputs=[researcher_dropdown, depth],
+            inputs=[researcher_dropdown, depth, auto_save_kb],
             outputs=[
                 summary_output,
                 citing_output,
@@ -228,6 +238,7 @@ def render_citation_explorer():
         "direction": direction,
         "depth": depth,
         "search_btn": search_btn,
+        "auto_save_kb": auto_save_kb,
         "summary_output": summary_output,
         "citing_output": citing_output,
         "cited_output": cited_output,
@@ -241,7 +252,111 @@ def render_citation_explorer():
     }
 
 
-async def explore_citations(paper_input: str, direction: str, depth: int):
+async def _auto_save_papers_to_kb(
+    papers: list,
+    search_tools: "AcademicSearchTools",
+    ingest_source: str = "citation_explorer_auto",
+) -> tuple[int, int, list[str]]:
+    """Fetch abstracts and save papers to KB in batches.
+
+    Uses S2 batch endpoint for efficiency.  Returns (added, skipped, errors).
+    """
+    from research_agent.ui.kb_ingest import ingest_paper_to_kb
+
+    store, embedder = _get_kb_resources()
+
+    # Deduplicate and filter papers already in KB
+    seen_ids: set[str] = set()
+    to_fetch: list = []
+    for p in papers:
+        pid = getattr(p, "paper_id", None)
+        if not pid or pid in seen_ids:
+            continue
+        seen_ids.add(pid)
+        if store.get_paper(pid):
+            continue
+        to_fetch.append(p)
+
+    if not to_fetch:
+        return 0, len(papers), []
+
+    # Batch-fetch full details from Semantic Scholar (up to 500 per request)
+    details_map: dict[str, dict] = {}
+    batch_size = 100
+    for i in range(0, len(to_fetch), batch_size):
+        batch_ids = [p.paper_id for p in to_fetch[i : i + batch_size]]
+        try:
+            await search_tools._s2_rate_limiter.wait_if_needed()
+            client = await search_tools._get_client()
+            from research_agent.utils.retry import retry_with_backoff
+
+            resp = await retry_with_backoff(
+                lambda ids=batch_ids: client.post(
+                    f"{search_tools.SEMANTIC_SCHOLAR_API}/paper/batch",
+                    json={"ids": ids},
+                    params={
+                        "fields": "paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,venue,externalIds"
+                    },
+                ),
+                max_retries=3,
+                base_delay=2.0,
+                retry_on=(429, 503, 504),
+            )
+            resp.raise_for_status()
+            for item in resp.json() or []:
+                if item and item.get("paperId"):
+                    details_map[item["paperId"]] = item
+        except Exception as e:
+            logger.warning("Batch fetch failed for chunk %d: %s", i, e)
+
+    added = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for p in to_fetch:
+        detail = details_map.get(p.paper_id)
+        title = (detail or {}).get("title") or getattr(p, "title", "Unknown")
+        abstract = (detail or {}).get("abstract") or ""
+        year = (detail or {}).get("year") or getattr(p, "year", None)
+        citation_count = (detail or {}).get("citationCount") or getattr(
+            p, "citation_count", None
+        )
+        venue = (detail or {}).get("venue") or ""
+        authors_raw = (detail or {}).get("authors") or []
+        authors = [a.get("name", "") for a in authors_raw] if authors_raw else []
+        fields = (detail or {}).get("fieldsOfStudy") or []
+        doi = None
+        ext_ids = (detail or {}).get("externalIds") or {}
+        if "DOI" in ext_ids:
+            doi = ext_ids["DOI"]
+
+        try:
+            ok, _reason = ingest_paper_to_kb(
+                store=store,
+                embedder=embedder,
+                paper_id=p.paper_id,
+                title=title,
+                abstract=abstract,
+                venue=venue,
+                fields=fields,
+                doi=doi,
+                year=year,
+                citation_count=citation_count,
+                authors=authors,
+                source="semantic_scholar",
+                extra_metadata={"ingest_source": ingest_source},
+            )
+            if ok:
+                added += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            errors.append(f"{p.paper_id}: {e}")
+
+    return added, skipped, errors
+
+
+async def explore_citations(paper_input: str, direction: str, depth: int, auto_save: bool = False):
     """Explore citation relationships for a paper."""
     if not paper_input.strip():
         return "Please enter a paper ID or title.", None, None, None, None, None
@@ -373,6 +488,26 @@ async def explore_citations(paper_input: str, direction: str, depth: int):
             store.save_edges(seed_id, edges)
         except Exception:
             pass
+
+        # Auto-save discovered papers to KB
+        if auto_save:
+            all_papers = (
+                [network.seed_paper]
+                + network.citing_papers
+                + network.cited_papers
+                + network.highly_connected
+                + related_papers
+            )
+            try:
+                added, skipped, errs = await _auto_save_papers_to_kb(
+                    all_papers, search_tools, ingest_source="citation_explorer_auto"
+                )
+                summary += f"\n\n**KB Auto-save:** {added} added, {skipped} skipped"
+                if errs:
+                    summary += f", {len(errs)} errors"
+            except Exception as e:
+                logger.warning("Auto-save to KB failed: %s", e)
+                summary += f"\n\n**KB Auto-save:** failed ({e})"
 
         # Generate network visualization
         network_fig = _render_network_graph(network)
@@ -691,12 +826,8 @@ def on_researcher_selected(researcher_name: str):
     return data
 
 
-async def explore_researcher_network(researcher_name: str, depth: int):
+async def explore_researcher_network(researcher_name: str, depth: int, auto_save: bool = False):
     """Explore citation network for a researcher."""
-    import logging
-
-    logger = logging.getLogger(__name__)
-
     if not researcher_name:
         return "Please select a researcher first.", None, None, None, None, None
 
@@ -801,6 +932,27 @@ async def explore_researcher_network(researcher_name: str, depth: int):
             store.save_edges(seed_id, edges)
         except Exception:
             pass
+
+        # Auto-save discovered papers to KB
+        if auto_save:
+            all_papers = (
+                network.author_papers
+                + network.papers_citing_author
+                + network.papers_cited_by_author
+                + network.highly_connected
+            )
+            try:
+                added, skipped, errs = await _auto_save_papers_to_kb(
+                    all_papers,
+                    search_tools,
+                    ingest_source="citation_explorer_auto",
+                )
+                summary += f"\n\n**KB Auto-save:** {added} added, {skipped} skipped"
+                if errs:
+                    summary += f", {len(errs)} errors"
+            except Exception as e:
+                logger.warning("Auto-save to KB failed: %s", e)
+                summary += f"\n\n**KB Auto-save:** failed ({e})"
 
         # Generate network visualization
         network_fig = _render_author_network_graph(network)
