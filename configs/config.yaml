@@ -10,6 +10,7 @@ model:
   # - "openai" - OpenAI API (requires OPENAI_API_KEY)
   # - "anthropic" - Anthropic Claude (requires ANTHROPIC_API_KEY)
   # - "groq" - Groq API with free tier (requires GROQ_API_KEY)
+  # - "perplexity" - Perplexity AI with web-grounded models (requires PERPLEXITY_API_KEY)
   # - "openrouter" - OpenRouter with free models (requires OPENROUTER_API_KEY)
   # - "ollama" - Local Ollama server
   # - "huggingface" - Local HuggingFace models (requires GPU)
@@ -20,10 +21,11 @@ model:
   # 1. OPENAI_API_KEY -> use OpenAI
   # 2. ANTHROPIC_API_KEY -> use Anthropic (Claude)
   # 3. GROQ_API_KEY -> use Groq (free tier!)
-  # 4. OPENROUTER_API_KEY -> use OpenRouter (has free models)
-  # 5. Ollama server -> use Ollama if running
-  # 6. GPU available -> use HuggingFace
-  # 7. Nothing -> retrieval-only mode (still works!)
+  # 4. PERPLEXITY_API_KEY -> use Perplexity AI
+  # 5. OPENROUTER_API_KEY -> use OpenRouter (has free models)
+  # 6. Ollama server -> use Ollama if running
+  # 7. GPU available -> use HuggingFace
+  # 8. Nothing -> retrieval-only mode (still works!)
 
   provider: "groq"
 
@@ -129,8 +131,8 @@ search:
   # Web search for grey literature
   web_search:
     enabled: true
-    provider: "duckduckgo"  # "duckduckgo" (free, no key), "tavily", or "serper"
-    # API key loaded from environment: TAVILY_API_KEY or SERPER_API_KEY
+    provider: "duckduckgo"  # "duckduckgo" (free, no key), "tavily", "serper", or "perplexity"
+    # API key loaded from environment: TAVILY_API_KEY, SERPER_API_KEY, or PERPLEXITY_API_KEY
 
 # ============================================
 # Knowledge Base Ingestion
