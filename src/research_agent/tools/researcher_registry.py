@@ -131,6 +131,29 @@ class ResearcherRegistry:
                     return profile
             return None
 
+    def match_author_name(self, author: str) -> Optional[str]:
+        """Match an author string to a known researcher.
+
+        Args:
+            author: Author name (e.g. from paper metadata)
+
+        Returns:
+            Display name of the matched researcher, or None
+        """
+        with self._registry_lock:
+            key = author.lower().strip()
+            if not key:
+                return None
+            # Direct key lookup
+            profile = self._researchers.get(key)
+            if profile:
+                return profile.name
+            # Fallback: match against display names
+            for p in self._researchers.values():
+                if p.name.lower().strip() == key:
+                    return p.name
+            return None
+
     def list_all(self) -> List[ResearcherProfile]:
         """
         Get all researcher profiles in the registry.

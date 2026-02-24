@@ -1016,6 +1016,36 @@ def create_app(agent=None):
                             interactive=False,
                         )
 
+                    with gr.Accordion("Browse Researchers", open=False):
+                        researchers_table = gr.Dataframe(
+                            headers=["Name", "Affiliation", "Registry Papers", "KB Papers", "Citations", "h-index", "Updated"],
+                            label="Persisted Researchers",
+                        )
+                        with gr.Row():
+                            refresh_researchers_btn = gr.Button(
+                                "Refresh", variant="secondary", scale=1
+                            )
+                            relink_btn = gr.Button(
+                                "Re-link KB Papers", variant="secondary", scale=1
+                            )
+                        relink_status = gr.Textbox(
+                            label="Link Status",
+                            interactive=False,
+                        )
+                        with gr.Row():
+                            delete_researcher_name = gr.Textbox(
+                                label="Researcher Name",
+                                placeholder="Enter name to delete",
+                                scale=4,
+                            )
+                            delete_researcher_btn = gr.Button(
+                                "Delete Researcher", variant="stop", scale=1
+                            )
+                        delete_researcher_status = gr.Textbox(
+                            label="Status",
+                            interactive=False,
+                        )
+
                     gr.Markdown("### Export")
                     with gr.Row():
                         export_bibtex_btn = gr.Button("Export BibTeX", variant="secondary")
@@ -2321,6 +2351,60 @@ def create_app(agent=None):
             status = f"Deleted web source {source_id}." if deleted else f"Source not found: {source_id}."
             return status, refresh_web_sources_table()
 
+        def _format_researchers_table():
+            """Build table rows for the researchers browser."""
+            from research_agent.tools.researcher_registry import get_researcher_registry
+
+            registry = get_researcher_registry()
+            profiles = registry.list_all()
+            store, _, _ = _get_kb_resources()
+            meta = store._meta
+
+            rows = []
+            for p in profiles:
+                kb_count = 0
+                if meta:
+                    try:
+                        kb_count = meta.count_papers_by_researcher(p.name)
+                    except Exception:
+                        pass
+                rows.append([
+                    p.name,
+                    "; ".join(p.affiliations[:2]) if p.affiliations else "",
+                    len(p.top_papers),
+                    kb_count,
+                    f"{p.citations_count:,}" if p.citations_count else "0",
+                    p.h_index or "",
+                    p.lookup_timestamp[:10] if p.lookup_timestamp else "",
+                ])
+            return rows
+
+        def refresh_researchers_browser():
+            return _format_researchers_table()
+
+        def relink_kb_papers():
+            from research_agent.tools.researcher_registry import get_researcher_registry
+            from research_agent.db.researcher_linker import link_papers_to_researchers
+
+            store, _, _ = _get_kb_resources()
+            registry = get_researcher_registry()
+            linked, scanned = link_papers_to_researchers(store, registry)
+            status = f"Scanned {scanned} unlinked papers, linked {linked}."
+            return status, _format_researchers_table()
+
+        def delete_researcher_from_registry(name):
+            from research_agent.tools.researcher_registry import get_researcher_registry
+
+            if not name or not name.strip():
+                return "Enter a researcher name to delete.", _format_researchers_table()
+            registry = get_researcher_registry()
+            removed = registry.remove(name.strip())
+            if removed:
+                status = f"Removed '{name.strip()}' from registry."
+            else:
+                status = f"Researcher '{name.strip()}' not found in registry."
+            return status, _format_researchers_table()
+
         def _get_researcher_choices():
             from research_agent.tools.researcher_registry import get_researcher_registry
 
@@ -2813,6 +2897,15 @@ def create_app(agent=None):
             # Store in registry for cross-tab access (Citation Explorer)
             registry = get_researcher_registry()
             registry.add_batch(profiles)
+
+            # Auto-link KB papers to newly added researchers
+            try:
+                from research_agent.db.researcher_linker import link_papers_for_researcher
+                store_for_link, _, _ = _get_kb_resources()
+                for p in profiles:
+                    link_papers_for_researcher(store_for_link, p.name)
+            except Exception:
+                logger.debug("Auto-link after lookup failed", exc_info=True)
 
             incoming_results = [p.to_dict() for p in profiles]
             combined = {r.get("name"): r for r in (existing_results or [])}
@@ -3876,6 +3969,23 @@ def create_app(agent=None):
             outputs=[delete_web_status, web_sources_table],
         )
 
+        # Researchers browser handlers
+        refresh_researchers_btn.click(
+            refresh_researchers_browser,
+            outputs=[researchers_table],
+        )
+
+        relink_btn.click(
+            relink_kb_papers,
+            outputs=[relink_status, researchers_table],
+        )
+
+        delete_researcher_btn.click(
+            delete_researcher_from_registry,
+            inputs=[delete_researcher_name],
+            outputs=[delete_researcher_status, researchers_table],
+        )
+
         papers_table.select(
             select_kb_paper_with_context,
             inputs=[
@@ -4842,6 +4952,14 @@ def create_app(agent=None):
                 # Store in registry
                 registry = get_researcher_registry()
                 registry.add(profile)
+
+                # Auto-link KB papers to this researcher
+                try:
+                    from research_agent.db.researcher_linker import link_papers_for_researcher
+                    store_for_link, _, _ = _get_kb_resources()
+                    link_papers_for_researcher(store_for_link, profile.name)
+                except Exception:
+                    logger.debug("Auto-link after explorer lookup failed", exc_info=True)
 
                 # ── Enrich papers with live API data ──────────────
                 from research_agent.tools.academic_search import AcademicSearchTools

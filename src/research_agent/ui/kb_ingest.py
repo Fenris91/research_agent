@@ -84,6 +84,21 @@ def ingest_paper_to_kb(
         metadata.update(extra_metadata)
 
     store.add_paper(paper_id, [content], embeddings, metadata)
+
+    # Auto-link to known researcher if not already set
+    if not (extra_metadata or {}).get("researcher") and authors:
+        try:
+            from research_agent.tools.researcher_registry import get_researcher_registry
+
+            registry = get_researcher_registry()
+            for author in authors:
+                match = registry.match_author_name(author)
+                if match:
+                    store.update_paper_metadata(paper_id, {"researcher": match})
+                    break
+        except Exception:
+            pass  # Never fail ingestion due to auto-link
+
     return True, "added"
 
 
