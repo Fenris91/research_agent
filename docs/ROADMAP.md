@@ -15,7 +15,7 @@ Active priorities and future ideas for the Research Agent.
 
 - [x] **Notes Browser in KB Tab** — list, refresh, delete by ID
 - [x] **Web Sources Browser in KB Tab** — list with URL/title/date, delete
-- [ ] **Researcher Profile Persistence** — persist ResearcherRegistry to SQLite, link researchers to KB papers
+- [x] **Researcher Profile Persistence** — persist ResearcherRegistry to SQLite, link researchers to KB papers, Researchers Browser UI
 
 ## Low Priority
 

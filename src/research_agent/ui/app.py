@@ -2714,7 +2714,7 @@ def create_app(agent=None):
             stats, table = refresh_stats_and_table(
                 year_from, year_to, min_citations, new_state
             )
-            return new_state, paper_id, stats, table
+            return new_state, paper_id, paper_id, stats, table
 
         async def open_kb_citations(paper_id, direction, depth):
             """Open a KB paper in the citation explorer."""
@@ -3995,19 +3995,7 @@ def create_app(agent=None):
                 year_to_kb,
                 min_citations_kb,
             ],
-            outputs=[context_state, kb_selected_paper_id, kb_stats, papers_table],
-        )
-
-        papers_table.select(
-            select_kb_paper_with_context,
-            inputs=[
-                papers_table,
-                context_state,
-                year_from_kb,
-                year_to_kb,
-                min_citations_kb,
-            ],
-            outputs=[context_state, current_paper_id, kb_stats, papers_table],
+            outputs=[context_state, kb_selected_paper_id, current_paper_id, kb_stats, papers_table],
         )
 
         open_kb_citations_btn.click(
