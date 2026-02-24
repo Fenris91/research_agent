@@ -34,7 +34,13 @@ class AuthorPaper(BasePaper):
     """A paper authored by a researcher.
 
     Inherits all fields from BasePaper. Source defaults to "unknown".
+    Enrichment fields are populated after initial lookup by
+    ``enrich_papers_oa_status()`` and the S2 batch embedding endpoint.
     """
+
+    oa_status: Optional[str] = None
+    open_access_url: Optional[str] = None
+    tldr: Optional[str] = None
 
     def __post_init__(self):
         if self.source is None:

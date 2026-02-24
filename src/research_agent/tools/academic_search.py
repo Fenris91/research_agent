@@ -14,6 +14,7 @@ Features:
 
 import asyncio
 import logging
+import os
 import random
 import time
 from dataclasses import dataclass, field
@@ -133,6 +134,7 @@ class AcademicSearchTools:
     SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1"
     OPENALEX_API = "https://api.openalex.org"
     UNPAYWALL_API = "https://api.unpaywall.org/v2"
+    CORE_API = "https://api.core.ac.uk/v3"
 
     def __init__(
         self,
@@ -168,6 +170,10 @@ class AcademicSearchTools:
             max_calls=s2_rate_limit,
             window_seconds=s2_rate_window
         )
+
+        # CORE API key + rate limiter (~1 req/2s free, higher with key)
+        self._core_api_key = (self.config.get("core", {}) or {}).get("api_key") or os.getenv("CORE_API_KEY")
+        self._core_rate_limiter = RateLimiter(max_calls=25, window_seconds=60)
 
         # Response cache — disk-backed if persistent_cache_dir provided
         self.cache_enabled = cache_enabled
@@ -458,6 +464,106 @@ class AcademicSearchTools:
             logger.error(f"OpenAlex API error: {e}")
             return []
 
+    @timed
+    async def search_core(
+        self,
+        query: str,
+        limit: int = 20,
+        from_year: Optional[int] = None,
+        to_year: Optional[int] = None,
+    ) -> List[Paper]:
+        """Search CORE for open access papers (300M+ articles).
+
+        Free tier: ~1 req/2s. API key gives higher limits.
+
+        Args:
+            query: Search query
+            limit: Maximum number of results
+            from_year: Optional start year filter
+            to_year: Optional end year filter
+
+        Returns:
+            List of Paper objects
+        """
+        cache_key = make_cache_key("core_search", query, limit=limit,
+                                   from_year=from_year, to_year=to_year)
+        if self._cache:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                logger.info("Cache hit for CORE search: %s", query)
+                return cached
+
+        await self._core_rate_limiter.wait_if_needed()
+        client = await self._get_client()
+
+        q = query
+        year_parts = []
+        if from_year:
+            year_parts.append(f"yearPublished>={from_year}")
+        if to_year:
+            year_parts.append(f"yearPublished<={to_year}")
+        if year_parts:
+            q = f"{query} AND {' AND '.join(year_parts)}"
+
+        params = {"q": q, "limit": min(limit, 100)}
+        headers = {}
+        if self._core_api_key:
+            headers["Authorization"] = f"Bearer {self._core_api_key}"
+
+        try:
+            response = await retry_with_backoff(
+                lambda: client.get(
+                    f"{self.CORE_API}/search/works",
+                    params=params,
+                    headers=headers,
+                ),
+                max_retries=2,
+                base_delay=2.0,
+                retry_on=(429, 503, 504),
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            papers = []
+            for item in data.get("results", []):
+                authors = []
+                for author in item.get("authors", []):
+                    name = author.get("name") if isinstance(author, dict) else str(author)
+                    if name:
+                        authors.append(name)
+
+                doi = item.get("doi")
+                if doi and doi.startswith("https://doi.org/"):
+                    doi = doi.replace("https://doi.org/", "")
+
+                source_urls = item.get("sourceFulltextUrls") or []
+                download_url = item.get("downloadUrl") or (source_urls[0] if source_urls else None)
+
+                paper = Paper(
+                    paper_id=str(item.get("id", "")),
+                    title=item.get("title") or "",
+                    abstract=item.get("abstract"),
+                    year=item.get("yearPublished"),
+                    authors=authors,
+                    citation_count=item.get("citationCount"),
+                    doi=doi,
+                    open_access_url=download_url,
+                    source="core",
+                    venue=item.get("publisher"),
+                    url=f"https://core.ac.uk/works/{item.get('id', '')}",
+                )
+                papers.append(paper)
+
+            if self._cache:
+                self._cache.set(cache_key, papers, ttl=CACHE_TTL_SEARCH)
+
+            logger.info("CORE found %d papers for: %s", len(papers), query)
+            return papers
+
+        except Exception as e:
+            logger.error("CORE API error: %s", e)
+            return []
+
     def _reconstruct_abstract(self, inverted_index: Optional[Dict]) -> Optional[str]:
         """Reconstruct abstract from OpenAlex inverted index format."""
         return reconstruct_abstract(inverted_index)
@@ -701,9 +807,11 @@ class AcademicSearchTools:
 
         return paper
 
-    async def get_paper_embeddings(self, paper_ids: List[str]) -> Dict[str, List[float]]:
+    async def get_paper_embeddings(
+        self, paper_ids: List[str],
+    ) -> tuple[Dict[str, List[float]], Dict[str, str]]:
         """
-        Batch-fetch SPECTER2 embeddings from Semantic Scholar.
+        Batch-fetch SPECTER2 embeddings and TLDRs from Semantic Scholar.
 
         Uses POST /paper/batch endpoint for efficiency.
         Caches each embedding individually (7-day TTL — embeddings are immutable).
@@ -712,12 +820,13 @@ class AcademicSearchTools:
             paper_ids: List of S2 paper IDs
 
         Returns:
-            Dict mapping paper_id → embedding vector
+            Tuple of (embeddings_dict, tldrs_dict)
         """
         if not paper_ids:
-            return {}
+            return {}, {}
 
         result = {}
+        tldrs: Dict[str, str] = {}
         uncached_ids = []
 
         # Check cache first
@@ -732,7 +841,7 @@ class AcademicSearchTools:
 
         if not uncached_ids:
             logger.debug(f"All {len(paper_ids)} embeddings from cache")
-            return result
+            return result, tldrs
 
         # Batch fetch from S2
         await self._s2_rate_limiter.wait_if_needed()
@@ -779,11 +888,20 @@ class AcademicSearchTools:
                                     vec, ttl=CACHE_TTL_EMBEDDINGS,
                                 )
 
-            logger.info(f"Fetched {len(result)} SPECTER2 embeddings ({len(uncached_ids)} from API)")
+                    tldr_data = item.get("tldr")
+                    if tldr_data and isinstance(tldr_data, dict):
+                        tldr_text = tldr_data.get("text")
+                        if tldr_text:
+                            tldrs[pid] = tldr_text
+
+            logger.info(
+                "Fetched %d embeddings + %d TLDRs (%d from API)",
+                len(result), len(tldrs), len(uncached_ids),
+            )
         except httpx.HTTPError as e:
             logger.error(f"S2 batch embedding error: {e}")
 
-        return result
+        return result, tldrs
 
     async def get_crossref_references(self, doi: str) -> List[str]:
         """

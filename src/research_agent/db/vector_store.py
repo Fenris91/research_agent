@@ -511,6 +511,50 @@ class ResearchVectorStore:
             "num_chunks": len(chunks_with_meta),
         }
 
+    def update_paper_metadata(
+        self, paper_id: str, updates: Dict[str, Any]
+    ) -> bool:
+        """Update metadata on all chunks of a paper (dual-write).
+
+        Args:
+            paper_id: Paper to update
+            updates: Metadata fields to merge (e.g. {"researcher": "Name"})
+
+        Returns:
+            True if anything was updated (ChromaDB and/or SQLite)
+        """
+        updated = False
+
+        # ChromaDB: update all chunks
+        results = cast(
+            Dict[str, Any],
+            self.papers.get(
+                where={"paper_id": paper_id}, include=["metadatas"]
+            ),
+        )
+        chunk_ids = results.get("ids") or []
+        chunk_metas = results.get("metadatas") or []
+
+        if chunk_ids:
+            new_metas = []
+            for meta in chunk_metas:
+                merged = {**meta, **updates}
+                new_metas.append(self._sanitize_metadata(merged))
+            self.papers.update(ids=chunk_ids, metadatas=cast(Any, new_metas))
+            updated = True
+
+        # Dual-write: sync researcher to SQLite
+        if self._meta and "researcher" in updates:
+            try:
+                if self._meta.update_paper_researcher(paper_id, updates["researcher"]):
+                    updated = True
+            except Exception as e:
+                logger.warning(f"Failed to update researcher in SQLite: {e}")
+
+        if updated:
+            logger.debug(f"Updated metadata for paper {paper_id}: {list(updates.keys())}")
+        return updated
+
     def delete_paper(self, paper_id: str) -> bool:
         """
         Remove a paper from the knowledge base.

@@ -2,6 +2,17 @@
 
 Implementation history for the Research Agent project.
 
+## February 24, 2026
+- **Researcher ↔ KB Paper Linking** — auto-link KB papers to known researchers on ingestion and lookup; `update_paper_metadata()` dual-write in VectorStore; `match_author_name()` in ResearcherRegistry; `researcher_linker` module for full-scan and targeted linking
+- **Researchers Browser** — new accordion in KB tab: table with Name/Affiliation/Registry Papers/KB Papers/Citations/h-index, Re-link button, delete by name
+- **Duplicate wiring fix** — merged two `papers_table.select` bindings into one (was firing `select_kb_paper_with_context` twice per click)
+- **13 new tests** for researcher persistence (SQLite methods, name matching, auto-linking, idempotency)
+- **Evaluation Suite** (`tests/eval/`) — 52 tests across 4 files:
+  - *Retrieval quality* — recall@1, recall@3, MRR (0.70 threshold), distractor suppression across 11 gold queries on 7-paper seed corpus (GPU, real BGE embeddings)
+  - *Reranker effectiveness* — surface-vs-deep promotion test, no-degradation guard on seed corpus (CPU+GPU)
+  - *Context boosting* — 5 tests verifying +0.15/+0.30/+0.075 boost mechanics, cap at 1.0 (CPU-only)
+  - *Synthesis unit* — query classification heuristics (11 cases), prompt citation structure, graceful no-source handling (CPU-only)
+
 ## February 22, 2026
 - **SQLite Metadata Index** — dual-write/delegated-read layer (`KBMetadataStore`) alongside ChromaDB; `list_papers()`, `get_stats()`, `list_notes()` now hit SQLite instead of scanning all chunks ([rationale](STORAGE_PHILOSOPHY.md))
 - **Auto-rebuild** — if SQLite index is empty but ChromaDB has data, rebuilds automatically on startup

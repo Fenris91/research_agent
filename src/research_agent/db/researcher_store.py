@@ -77,6 +77,19 @@ class ResearcherStore:
                 """
             )
             conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS researcher_enrichment (
+                    researcher_name TEXT NOT NULL,
+                    artifact_type TEXT NOT NULL,
+                    data_json TEXT NOT NULL,
+                    updated_at TEXT,
+                    PRIMARY KEY (researcher_name, artifact_type),
+                    FOREIGN KEY (researcher_name)
+                        REFERENCES researchers(normalized_name) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rp_researcher "
                 "ON researcher_papers(researcher_name)"
             )
@@ -84,6 +97,28 @@ class ResearcherStore:
                 "CREATE INDEX IF NOT EXISTS idx_rw_researcher "
                 "ON researcher_web_results(researcher_name)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_re_researcher "
+                "ON researcher_enrichment(researcher_name)"
+            )
+            self._migrate_researcher_papers(conn)
+
+    def _migrate_researcher_papers(self, conn) -> None:
+        """Add enrichment columns to researcher_papers if missing."""
+        existing = {
+            row[1] for row in conn.execute("PRAGMA table_info(researcher_papers)").fetchall()
+        }
+        migrations = [
+            ("oa_status", "TEXT"),
+            ("open_access_url", "TEXT"),
+            ("tldr", "TEXT"),
+        ]
+        for col_name, col_type in migrations:
+            if col_name not in existing:
+                conn.execute(
+                    f"ALTER TABLE researcher_papers ADD COLUMN {col_name} {col_type}"
+                )
+                logger.info("Migrated researcher_papers: added column %s", col_name)
 
     # ------------------------------------------------------------------
     # Save
@@ -139,8 +174,9 @@ class ResearcherStore:
                     """
                     INSERT INTO researcher_papers
                         (researcher_name, paper_id, title, year, citation_count,
-                         venue, doi, abstract, fields, source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         venue, doi, abstract, fields, source,
+                         oa_status, open_access_url, tldr)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -154,6 +190,9 @@ class ResearcherStore:
                             p.abstract,
                             json.dumps(p.fields) if p.fields else None,
                             p.source,
+                            getattr(p, "oa_status", None),
+                            getattr(p, "open_access_url", None),
+                            getattr(p, "tldr", None),
                         )
                         for p in profile.top_papers
                     ],
@@ -231,8 +270,9 @@ class ResearcherStore:
                         """
                         INSERT INTO researcher_papers
                             (researcher_name, paper_id, title, year, citation_count,
-                             venue, doi, abstract, fields, source)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             venue, doi, abstract, fields, source,
+                             oa_status, open_access_url, tldr)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [
                             (
@@ -246,6 +286,9 @@ class ResearcherStore:
                                 p.abstract,
                                 json.dumps(p.fields) if p.fields else None,
                                 p.source,
+                                getattr(p, "oa_status", None),
+                                getattr(p, "open_access_url", None),
+                                getattr(p, "tldr", None),
                             )
                             for p in profile.top_papers
                         ],
@@ -355,6 +398,7 @@ class ResearcherStore:
             ResearcherProfile,
         )
 
+        col_names = set(paper_rows[0].keys()) if paper_rows else set()
         papers = [
             AuthorPaper(
                 paper_id=p["paper_id"],
@@ -366,6 +410,9 @@ class ResearcherStore:
                 abstract=p["abstract"],
                 fields=json.loads(p["fields"]) if p["fields"] else None,
                 source=p["source"] or "unknown",
+                oa_status=p["oa_status"] if "oa_status" in col_names else None,
+                open_access_url=p["open_access_url"] if "open_access_url" in col_names else None,
+                tldr=p["tldr"] if "tldr" in col_names else None,
             )
             for p in paper_rows
         ]
@@ -389,6 +436,69 @@ class ResearcherStore:
             web_results=web_results,
             lookup_timestamp=row["lookup_timestamp"] or "",
         )
+
+    # ------------------------------------------------------------------
+    # Enrichment artifacts (embeddings, refs, tldrs)
+    # ------------------------------------------------------------------
+
+    def save_enrichment(
+        self, normalized_name: str, artifact_type: str, data: dict,
+    ) -> None:
+        """Save an enrichment artifact for a researcher (upsert)."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO researcher_enrichment
+                    (researcher_name, artifact_type, data_json, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(researcher_name, artifact_type) DO UPDATE SET
+                    data_json=excluded.data_json,
+                    updated_at=excluded.updated_at
+                """,
+                (normalized_name, artifact_type, json.dumps(data), now),
+            )
+
+    def load_enrichment(
+        self, normalized_name: str, artifact_type: str,
+    ) -> Optional[dict]:
+        """Load an enrichment artifact. Returns None if not cached."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT data_json FROM researcher_enrichment "
+                "WHERE researcher_name = ? AND artifact_type = ?",
+                (normalized_name, artifact_type),
+            ).fetchone()
+            if row:
+                return json.loads(row[0])
+            return None
+
+    def save_researcher_enrichment(
+        self,
+        normalized_name: str,
+        embeddings: Optional[Dict] = None,
+        ref_map: Optional[Dict] = None,
+        tldrs: Optional[Dict] = None,
+    ) -> None:
+        """Save all enrichment artifacts for a researcher at once."""
+        if embeddings:
+            self.save_enrichment(normalized_name, "specter_embeddings", embeddings)
+        if ref_map:
+            self.save_enrichment(normalized_name, "crossref_refs", ref_map)
+        if tldrs:
+            self.save_enrichment(normalized_name, "tldrs", tldrs)
+
+    def load_researcher_enrichment(
+        self, normalized_name: str,
+    ) -> tuple:
+        """Load all enrichment artifacts.
+
+        Returns ``(embeddings, ref_map, tldrs)`` — empty dicts if not cached.
+        """
+        embeddings = self.load_enrichment(normalized_name, "specter_embeddings") or {}
+        ref_map = self.load_enrichment(normalized_name, "crossref_refs") or {}
+        tldrs = self.load_enrichment(normalized_name, "tldrs") or {}
+        return embeddings, ref_map, tldrs
 
     # ------------------------------------------------------------------
     # Delete / utility

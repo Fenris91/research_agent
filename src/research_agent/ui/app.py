@@ -28,14 +28,38 @@ def _get_kb_graph_data() -> dict:
         papers = store.list_papers_detailed(limit=500)
         if papers:
             logger.info("[Explorer] Building KB graph: %d papers", len(papers))
+            from research_agent.tools.researcher_registry import get_researcher_registry
+            registry = get_researcher_registry()
             gb = GraphBuilder()
-            gb.build_from_kb_papers(papers)
+            gb.build_from_kb_papers(papers, researcher_registry=registry)
             return gb.to_dict()
         else:
             logger.info("[Explorer] KB is empty, using mock data")
     except Exception as e:
         logger.warning("[Explorer] KB graph build failed, using mock data: %s", e)
     return get_mock_graph_data()
+
+
+def _inject_cached_enrichment(gb, profile) -> None:
+    """Inject cached enrichment (embeddings, refs, tldrs) into a graph builder.
+
+    No-op if enrichment is not cached yet (graceful degradation for
+    researchers looked up before the caching feature was added).
+    """
+    from research_agent.tools.researcher_registry import get_researcher_registry
+    try:
+        store = get_researcher_registry()._store
+        key = profile.normalized_name or profile.name.lower().strip()
+        embeddings, ref_map, tldrs = store.load_researcher_enrichment(key)
+        if embeddings:
+            gb.inject_embeddings(embeddings)
+            gb.compute_semantic_edges(threshold=0.65)
+        if tldrs:
+            gb.inject_tldrs(tldrs)
+        if ref_map:
+            gb.fill_citation_gaps(ref_map)
+    except Exception:
+        pass  # enrichment not available — skeleton graph is fine
 
 
 def create_app(agent=None):
@@ -992,6 +1016,36 @@ def create_app(agent=None):
                             interactive=False,
                         )
 
+                    with gr.Accordion("Browse Researchers", open=False):
+                        researchers_table = gr.Dataframe(
+                            headers=["Name", "Affiliation", "Registry Papers", "KB Papers", "Citations", "h-index", "Updated"],
+                            label="Persisted Researchers",
+                        )
+                        with gr.Row():
+                            refresh_researchers_btn = gr.Button(
+                                "Refresh", variant="secondary", scale=1
+                            )
+                            relink_btn = gr.Button(
+                                "Re-link KB Papers", variant="secondary", scale=1
+                            )
+                        relink_status = gr.Textbox(
+                            label="Link Status",
+                            interactive=False,
+                        )
+                        with gr.Row():
+                            delete_researcher_name = gr.Textbox(
+                                label="Researcher Name",
+                                placeholder="Enter name to delete",
+                                scale=4,
+                            )
+                            delete_researcher_btn = gr.Button(
+                                "Delete Researcher", variant="stop", scale=1
+                            )
+                        delete_researcher_status = gr.Textbox(
+                            label="Status",
+                            interactive=False,
+                        )
+
                     gr.Markdown("### Export")
                     with gr.Row():
                         export_bibtex_btn = gr.Button("Export BibTeX", variant="secondary")
@@ -1019,6 +1073,67 @@ def create_app(agent=None):
                             label="Reranker Status",
                             interactive=False,
                             placeholder="Using config defaults",
+                        )
+
+                        gr.Markdown("Web search provider")
+                        with gr.Row():
+                            web_search_provider = gr.Dropdown(
+                                choices=[
+                                    ("DuckDuckGo (free)", "duckduckgo"),
+                                    ("Perplexity AI", "perplexity"),
+                                    ("Tavily", "tavily"),
+                                    ("Serper", "serper"),
+                                ],
+                                value="duckduckgo",
+                                show_label=False,
+                                container=False,
+                                scale=2,
+                            )
+                            web_search_status = gr.Textbox(
+                                value="DuckDuckGo (free)",
+                                show_label=False,
+                                interactive=False,
+                                container=False,
+                                scale=3,
+                            )
+
+                        use_core = gr.Checkbox(
+                            label="Include CORE (300M+ open access papers)",
+                            value=True,
+                            info="Adds CORE to academic search alongside OpenAlex and S2",
+                        )
+
+                    with gr.Accordion("Pipeline Models", open=False):
+                        gr.Markdown(
+                            "Assign different models per task. "
+                            "'default' uses the main model."
+                        )
+                        with gr.Row():
+                            pipeline_classify = gr.Dropdown(
+                                choices=["default"],
+                                value="default",
+                                label="Classify",
+                                interactive=True,
+                                scale=1,
+                            )
+                            pipeline_keywords = gr.Dropdown(
+                                choices=["default"],
+                                value="default",
+                                label="Keywords",
+                                interactive=True,
+                                scale=1,
+                            )
+                            pipeline_synthesize = gr.Dropdown(
+                                choices=["default"],
+                                value="default",
+                                label="Synthesize",
+                                interactive=True,
+                                scale=1,
+                            )
+                        pipeline_status = gr.Textbox(
+                            value="All tasks using default model",
+                            label="Pipeline",
+                            interactive=False,
                         )
 
                 # ── Researcher Lookup tab ─────────────────────────────────
@@ -1696,6 +1811,7 @@ def create_app(agent=None):
                         pid = gb.add_paper(paper)
                         gb.add_authorship_edge(rid, pid)
                     gb.build_structural_context()
+                    _inject_cached_enrichment(gb, profile)
                     graph_data = gb.to_dict(
                         active_layer=target_layer,
                         highlight_terms=focus_terms,
@@ -1827,6 +1943,93 @@ def create_app(agent=None):
                 status,
                 status,
             )
+
+        # ── Web search provider switching ─────────────────────────
+        def _set_web_search_provider(provider):
+            """Switch web search provider at runtime."""
+            if agent is None or agent.web_search is None:
+                return "No agent loaded"
+            import os as _os
+            api_key = None
+            if provider == "perplexity":
+                api_key = _os.getenv("PERPLEXITY_API_KEY")
+            elif provider == "tavily":
+                api_key = _os.getenv("TAVILY_API_KEY")
+            elif provider == "serper":
+                api_key = _os.getenv("SERPER_API_KEY")
+
+            if provider != "duckduckgo" and not api_key:
+                return f"No API key for {provider}"
+
+            try:
+                agent.web_search.set_provider(provider, api_key)
+                labels = {
+                    "duckduckgo": "DuckDuckGo (free)",
+                    "perplexity": "Perplexity AI",
+                    "tavily": "Tavily",
+                    "serper": "Serper",
+                }
+                return f"Using {labels.get(provider, provider)}"
+            except Exception as e:
+                return f"Error: {e}"
+
+        # ── Pipeline model UI ─────────────────────────────────────
+        def _get_pipeline_choices():
+            """Get available models plus 'default' for pipeline dropdowns."""
+            if agent is None:
+                return ["default"]
+            try:
+                models = agent.list_available_models()
+            except Exception:
+                models = []
+            if not models or models == ["No models found"]:
+                return ["default"]
+            return ["default"] + models
+
+        def _update_pipeline(classify, keywords, synthesize):
+            """Apply pipeline model overrides."""
+            if agent is None:
+                return "No agent loaded"
+
+            pipeline = {}
+            if classify and classify != "default":
+                pipeline["classify"] = classify
+            if keywords and keywords != "default":
+                pipeline["extract_keywords"] = keywords
+            if synthesize and synthesize != "default":
+                pipeline["synthesize"] = synthesize
+
+            agent.configure_pipeline(pipeline)
+
+            if not pipeline:
+                return "All tasks using default model"
+            parts = [f"{k}: {v}" for k, v in sorted(pipeline.items())]
+            return "Pipeline: " + ", ".join(parts)
+
+        def _init_pipeline_dropdowns():
+            """Initialize pipeline dropdowns from current agent state."""
+            choices = _get_pipeline_choices()
+            current = agent._pipeline if agent else {}
+            classify_val = current.get("classify", "default")
+            keywords_val = current.get("extract_keywords", "default")
+            synthesize_val = current.get("synthesize", "default")
+            for val in [classify_val, keywords_val, synthesize_val]:
+                if val not in choices:
+                    choices.append(val)
+            status = _update_pipeline(classify_val, keywords_val, synthesize_val)
+            return (
+                gr.update(choices=choices, value=classify_val),
+                gr.update(choices=choices, value=keywords_val),
+                gr.update(choices=choices, value=synthesize_val),
+                status,
+            )
+
+        def _toggle_core_search(enabled):
+            """Enable/disable CORE in external academic search."""
+            if agent is None:
+                return
+            agent.config.include_core_search = bool(enabled)
+            logger.info("CORE search %s", "enabled" if enabled else "disabled")
 
         def _format_papers_table(papers, year_from=None, year_to=None, min_citations=0):
             if not papers:
@@ -2148,6 +2351,60 @@ def create_app(agent=None):
             status = f"Deleted web source {source_id}." if deleted else f"Source not found: {source_id}."
             return status, refresh_web_sources_table()
 
+        def _format_researchers_table():
+            """Build table rows for the researchers browser."""
+            from research_agent.tools.researcher_registry import get_researcher_registry
+
+            registry = get_researcher_registry()
+            profiles = registry.list_all()
+            store, _, _ = _get_kb_resources()
+            meta = store._meta
+
+            rows = []
+            for p in profiles:
+                kb_count = 0
+                if meta:
+                    try:
+                        kb_count = meta.count_papers_by_researcher(p.name)
+                    except Exception:
+                        pass
+                rows.append([
+                    p.name,
+                    "; ".join(p.affiliations[:2]) if p.affiliations else "",
+                    len(p.top_papers),
+                    kb_count,
+                    f"{p.citations_count:,}" if p.citations_count else "0",
+                    p.h_index or "",
+                    p.lookup_timestamp[:10] if p.lookup_timestamp else "",
+                ])
+            return rows
+
+        def refresh_researchers_browser():
+            return _format_researchers_table()
+
+        def relink_kb_papers():
+            from research_agent.tools.researcher_registry import get_researcher_registry
+            from research_agent.db.researcher_linker import link_papers_to_researchers
+
+            store, _, _ = _get_kb_resources()
+            registry = get_researcher_registry()
+            linked, scanned = link_papers_to_researchers(store, registry)
+            status = f"Scanned {scanned} unlinked papers, linked {linked}."
+            return status, _format_researchers_table()
+
+        def delete_researcher_from_registry(name):
+            from research_agent.tools.researcher_registry import get_researcher_registry
+
+            if not name or not name.strip():
+                return "Enter a researcher name to delete.", _format_researchers_table()
+            registry = get_researcher_registry()
+            removed = registry.remove(name.strip())
+            if removed:
+                status = f"Removed '{name.strip()}' from registry."
+            else:
+                status = f"Researcher '{name.strip()}' not found in registry."
+            return status, _format_researchers_table()
+
         def _get_researcher_choices():
             from research_agent.tools.researcher_registry import get_researcher_registry
 
@@ -2457,7 +2714,7 @@ def create_app(agent=None):
             stats, table = refresh_stats_and_table(
                 year_from, year_to, min_citations, new_state
             )
-            return new_state, paper_id, stats, table
+            return new_state, paper_id, paper_id, stats, table
 
         async def open_kb_citations(paper_id, direction, depth):
             """Open a KB paper in the citation explorer."""
@@ -2640,6 +2897,15 @@ def create_app(agent=None):
             # Store in registry for cross-tab access (Citation Explorer)
             registry = get_researcher_registry()
             registry.add_batch(profiles)
+
+            # Auto-link KB papers to newly added researchers
+            try:
+                from research_agent.db.researcher_linker import link_papers_for_researcher
+                store_for_link, _, _ = _get_kb_resources()
+                for p in profiles:
+                    link_papers_for_researcher(store_for_link, p.name)
+            except Exception:
+                logger.debug("Auto-link after lookup failed", exc_info=True)
 
             incoming_results = [p.to_dict() for p in profiles]
             combined = {r.get("name"): r for r in (existing_results or [])}
@@ -3703,16 +3969,21 @@ def create_app(agent=None):
             outputs=[delete_web_status, web_sources_table],
         )
 
-        papers_table.select(
-            select_kb_paper_with_context,
-            inputs=[
-                papers_table,
-                context_state,
-                year_from_kb,
-                year_to_kb,
-                min_citations_kb,
-            ],
-            outputs=[context_state, kb_selected_paper_id, kb_stats, papers_table],
+        # Researchers browser handlers
+        refresh_researchers_btn.click(
+            refresh_researchers_browser,
+            outputs=[researchers_table],
+        )
+
+        relink_btn.click(
+            relink_kb_papers,
+            outputs=[relink_status, researchers_table],
+        )
+
+        delete_researcher_btn.click(
+            delete_researcher_from_registry,
+            inputs=[delete_researcher_name],
+            outputs=[delete_researcher_status, researchers_table],
         )
 
         papers_table.select(
@@ -3724,7 +3995,7 @@ def create_app(agent=None):
                 year_to_kb,
                 min_citations_kb,
             ],
-            outputs=[context_state, current_paper_id, kb_stats, papers_table],
+            outputs=[context_state, kb_selected_paper_id, current_paper_id, kb_stats, papers_table],
         )
 
         open_kb_citations_btn.click(
@@ -3975,6 +4246,28 @@ def create_app(agent=None):
                 rerank_status_kb,
             ],
         )
+
+        # Web search provider switching
+        web_search_provider.change(
+            _set_web_search_provider,
+            inputs=[web_search_provider],
+            outputs=[web_search_status],
+        )
+
+        # Pipeline model assignment
+        for _dd in [pipeline_classify, pipeline_keywords, pipeline_synthesize]:
+            _dd.change(
+                _update_pipeline,
+                inputs=[pipeline_classify, pipeline_keywords, pipeline_synthesize],
+                outputs=[pipeline_status],
+            )
+        app.load(
+            _init_pipeline_dropdowns,
+            outputs=[pipeline_classify, pipeline_keywords, pipeline_synthesize, pipeline_status],
+        )
+
+        # CORE search toggle
+        use_core.change(_toggle_core_search, inputs=[use_core])
 
         # Researcher lookup events
         lookup_btn.click(
@@ -4648,6 +4941,14 @@ def create_app(agent=None):
                 registry = get_researcher_registry()
                 registry.add(profile)
 
+                # Auto-link KB papers to this researcher
+                try:
+                    from research_agent.db.researcher_linker import link_papers_for_researcher
+                    store_for_link, _, _ = _get_kb_resources()
+                    link_papers_for_researcher(store_for_link, profile.name)
+                except Exception:
+                    logger.debug("Auto-link after explorer lookup failed", exc_info=True)
+
                 # ── Enrich papers with live API data ──────────────
                 from research_agent.tools.academic_search import AcademicSearchTools
 
@@ -4662,7 +4963,14 @@ def create_app(agent=None):
 
                         # SPECTER2 embeddings + TLDRs from S2
                         s2_ids = [p.paper_id for p in papers if p.paper_id]
-                        embeddings = await search.get_paper_embeddings(s2_ids) if s2_ids else {}
+                        embeddings, tldrs = (
+                            await search.get_paper_embeddings(s2_ids) if s2_ids else ({}, {})
+                        )
+
+                        # Apply TLDRs to paper objects so they persist with profile
+                        for p in papers:
+                            if p.paper_id in tldrs:
+                                p.tldr = tldrs[p.paper_id]
 
                         # CrossRef citation gap-filling
                         dois = [p.doi for p in papers if p.doi]
@@ -4672,17 +4980,35 @@ def create_app(agent=None):
                             if refs:
                                 ref_map[doi] = refs
 
-                        return embeddings, ref_map
+                        return embeddings, ref_map, tldrs
                     finally:
                         await search.close()
 
                 try:
-                    embeddings, ref_map = pool.submit(
+                    embeddings, ref_map, tldrs = pool.submit(
                         asyncio.run, _enrich_papers(profile.top_papers or [], explorer_cfg)
                     ).result()
                 except Exception as enrich_err:
                     logger.warning(f"[Explorer] Enrichment partial failure: {enrich_err}")
-                    embeddings, ref_map = {}, {}
+                    embeddings, ref_map, tldrs = {}, {}, {}
+
+                # Persist enrichment: re-save profile (papers now have OA/TLDR)
+                # and store large artifacts (embeddings, refs) separately
+                try:
+                    _key = profile.normalized_name or profile.name.lower().strip()
+                    registry._store.save_researcher(profile)
+                    registry._store.save_researcher_enrichment(
+                        _key,
+                        embeddings=embeddings or None,
+                        ref_map=ref_map or None,
+                        tldrs=tldrs or None,
+                    )
+                    logger.info(
+                        "[Explorer] Cached enrichment for %s: %d emb, %d refs, %d tldrs",
+                        profile.name, len(embeddings), len(ref_map), len(tldrs),
+                    )
+                except Exception as save_err:
+                    logger.warning("[Explorer] Failed to save enrichment: %s", save_err)
 
                 # Build graph
                 gb = GraphBuilder()
@@ -4695,16 +5021,9 @@ def create_app(agent=None):
                 # Inject embeddings + compute semantic edges
                 if embeddings:
                     gb.inject_embeddings(embeddings)
-                    # Also inject TLDRs from papers that have them
-                    tldrs = {}
-                    for p in (profile.top_papers or []):
-                        pid = getattr(p, "paper_id", None)
-                        tldr = p.tldr if hasattr(p, "tldr") else None
-                        if pid and tldr:
-                            tldrs[pid] = tldr
-                    if tldrs:
-                        gb.inject_tldrs(tldrs)
                     gb.compute_semantic_edges(threshold=0.65)
+                if tldrs:
+                    gb.inject_tldrs(tldrs)
 
                 # Fill citation gaps from CrossRef
                 if ref_map:
@@ -4833,7 +5152,7 @@ def create_app(agent=None):
             return items
 
         def _build_from_registry_full(name, state):
-            """Build explorer from registry, returning all _lookup_outputs.
+            """Build explorer from registry with cached enrichment.
 
             Instant — no API calls. Returns None if researcher not in registry.
             """
@@ -4852,6 +5171,7 @@ def create_app(agent=None):
                 gb.add_authorship_edge(researcher_id, paper_id)
 
             gb.build_structural_context()
+            _inject_cached_enrichment(gb, profile)
 
             new_state = dict(state or {})
             new_state["active_layer_left"] = "author"
@@ -5004,6 +5324,7 @@ def create_app(agent=None):
                 gb.add_authorship_edge(researcher_id, paper_id)
 
             gb.build_structural_context()
+            _inject_cached_enrichment(gb, profile)
 
             new_state = dict(state or {})
             new_state["active_layer_left"] = "author"

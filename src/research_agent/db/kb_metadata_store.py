@@ -241,6 +241,41 @@ class KBMetadataStore:
             )
             return cur.rowcount > 0
 
+    def update_paper_researcher(self, paper_id: str, researcher: str) -> bool:
+        """Update the researcher column for an existing paper."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE papers SET researcher = ? WHERE paper_id = ?",
+                (researcher, paper_id),
+            )
+            return cur.rowcount > 0
+
+    def count_papers_by_researcher(self, researcher_name: str) -> int:
+        """Count KB papers linked to a given researcher."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM papers WHERE researcher = ?",
+                (researcher_name,),
+            ).fetchone()
+            return row[0] if row else 0
+
+    def list_unlinked_papers(self) -> List[Dict]:
+        """Return papers that have authors but no linked researcher."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT paper_id, title, authors FROM papers "
+                "WHERE (researcher IS NULL OR researcher = '') "
+                "AND authors IS NOT NULL AND authors != ''"
+            ).fetchall()
+        return [
+            {
+                "paper_id": r["paper_id"],
+                "title": r["title"],
+                "authors": r["authors"],
+            }
+            for r in rows
+        ]
+
     def paper_exists_by_doi(self, doi: str) -> bool:
         with self._connect() as conn:
             row = conn.execute(

@@ -10,6 +10,7 @@ model:
   # - "openai" - OpenAI API (requires OPENAI_API_KEY)
   # - "anthropic" - Anthropic Claude (requires ANTHROPIC_API_KEY)
   # - "groq" - Groq API with free tier (requires GROQ_API_KEY)
+  # - "perplexity" - Perplexity AI with web-grounded models (requires PERPLEXITY_API_KEY)
   # - "openrouter" - OpenRouter with free models (requires OPENROUTER_API_KEY)
   # - "ollama" - Local Ollama server
   # - "huggingface" - Local HuggingFace models (requires GPU)
@@ -20,10 +21,11 @@ model:
   # 1. OPENAI_API_KEY -> use OpenAI
   # 2. ANTHROPIC_API_KEY -> use Anthropic (Claude)
   # 3. GROQ_API_KEY -> use Groq (free tier!)
-  # 4. OPENROUTER_API_KEY -> use OpenRouter (has free models)
-  # 5. Ollama server -> use Ollama if running
-  # 6. GPU available -> use HuggingFace
-  # 7. Nothing -> retrieval-only mode (still works!)
+  # 4. PERPLEXITY_API_KEY -> use Perplexity AI
+  # 5. OPENROUTER_API_KEY -> use OpenRouter (has free models)
+  # 6. Ollama server -> use Ollama if running
+  # 7. GPU available -> use HuggingFace
+  # 8. Nothing -> retrieval-only mode (still works!)
 
   provider: "groq"
 
@@ -43,10 +45,32 @@ model:
   # Multi-model pipeline: assign different models per task type.
   # If unset, every task uses the default model above.
   # Task types: classify, extract_keywords, synthesize
-  # pipeline:
-  #   classify: "llama-3.1-8b-instant"          # fast/cheap for classification
-  #   extract_keywords: "llama-3.1-8b-instant"   # fast for keyword extraction
-  #   synthesize: "llama-3.3-70b-versatile"      # capable for synthesis
+  #
+  # Use "fast" or "default" aliases — they resolve to the active provider's
+  # recommended models automatically (see PROVIDER_PIPELINE_DEFAULTS in main.py).
+  # Or specify literal model names for full control.
+  pipeline:
+    classify: "fast"              # cheap/fast model for classification
+    extract_keywords: "fast"      # cheap/fast model for keyword extraction
+    synthesize: "default"         # main capable model for synthesis
+  #
+  # Provider-specific examples (literal model names):
+  # Groq free tier:
+  #   classify: "llama-3.1-8b-instant"
+  #   extract_keywords: "llama-3.1-8b-instant"
+  #   synthesize: "llama-3.3-70b-versatile"
+  # OpenAI:
+  #   classify: "gpt-4o-mini"
+  #   extract_keywords: "gpt-4o-mini"
+  #   synthesize: "gpt-4o"
+  # Anthropic:
+  #   classify: "claude-haiku-4-5"
+  #   extract_keywords: "claude-haiku-4-5"
+  #   synthesize: "claude-sonnet-4-6"
+  # Ollama:
+  #   classify: "llama3.2:3b"
+  #   extract_keywords: "llama3.2:3b"
+  #   synthesize: "qwen3:32b"
 
   # OpenAI settings (provider: "openai")
   openai:
@@ -126,11 +150,16 @@ search:
     enabled: true
     email: null  # Optional: for polite pool
     
+  core:
+    enabled: true
+    # CORE_API_KEY env var. Free tier works without key.
+    api_key: null
+
   # Web search for grey literature
   web_search:
     enabled: true
-    provider: "duckduckgo"  # "duckduckgo" (free, no key), "tavily", or "serper"
-    # API key loaded from environment: TAVILY_API_KEY or SERPER_API_KEY
+    provider: "duckduckgo"  # "duckduckgo" (free, no key), "tavily", "serper", or "perplexity"
+    # API key loaded from environment: TAVILY_API_KEY, SERPER_API_KEY, or PERPLEXITY_API_KEY
 
 # ============================================
 # Knowledge Base Ingestion
