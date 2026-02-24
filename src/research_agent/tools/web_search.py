@@ -6,6 +6,7 @@ Supports multiple providers:
 - DuckDuckGo (free, no API key required)
 - Tavily (optimized for AI, requires API key)
 - Serper (Google search results, requires API key)
+- Perplexity (web-grounded answers with citations, requires API key)
 """
 
 import asyncio
@@ -66,6 +67,21 @@ class WebSearchTool:
             await self._client.aclose()
             self._client = None
 
+    def set_provider(self, provider: str, api_key: str | None = None) -> None:
+        """Switch web search provider at runtime.
+
+        Args:
+            provider: One of "duckduckgo", "tavily", "serper", "perplexity".
+            api_key: API key for the new provider (required for tavily/serper/perplexity).
+        """
+        valid = {"duckduckgo", "tavily", "serper", "perplexity"}
+        if provider not in valid:
+            raise ValueError(f"Unknown provider: {provider}. Valid: {valid}")
+        self.provider = provider
+        if api_key is not None:
+            self.api_key = api_key
+        logger.info("Web search provider switched to: %s", provider)
+
     @timed
     async def search(
         self,
@@ -83,6 +99,8 @@ class WebSearchTool:
             return await self._search_tavily(query, max_results)
         elif self.provider == "serper":
             return await self._search_serper(query, max_results)
+        elif self.provider == "perplexity":
+            return await self._search_perplexity(query, max_results)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -249,3 +267,125 @@ class WebSearchTool:
         except httpx.HTTPError as e:
             logger.error(f"Serper API error: {e}")
             return []
+
+    async def _search_perplexity(
+        self,
+        query: str,
+        max_results: int
+    ) -> List[WebResult]:
+        """
+        Search using Perplexity's sonar model for web-grounded answers.
+
+        Returns a synthesized answer with cited sources.
+        Each citation URL becomes a WebResult.
+        Requires PERPLEXITY_API_KEY.
+        """
+        if not self.api_key:
+            raise ValueError(
+                "Perplexity API key required. Set PERPLEXITY_API_KEY in your environment."
+            )
+
+        client = await self._get_client()
+
+        try:
+            response = await retry_with_backoff(
+                lambda: client.post(
+                    "https://api.perplexity.ai/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "sonar",
+                        "messages": [
+                            {"role": "user", "content": f"Search: {query}"}
+                        ],
+                    },
+                ),
+                max_retries=2, base_delay=1.0, retry_on=(429, 503, 504),
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Extract the synthesized answer
+            content = ""
+            if data.get("choices"):
+                content = data["choices"][0].get("message", {}).get("content", "")
+
+            # Extract citations (list of URLs at the top level of the response)
+            citations = data.get("citations", [])
+
+            results = []
+            if citations:
+                # Build one WebResult per citation, linking snippet context
+                for i, url in enumerate(citations[:max_results]):
+                    # Try to extract the snippet around the citation reference [i+1]
+                    marker = f"[{i + 1}]"
+                    snippet = _extract_citation_snippet(content, marker)
+                    title = _title_from_url(url)
+
+                    results.append(WebResult(
+                        title=title,
+                        url=url,
+                        content=snippet or content,
+                        raw_content=content if i == 0 else None,
+                        score=None,
+                    ))
+            elif content:
+                # No citations returned — wrap the whole answer as a single result
+                results.append(WebResult(
+                    title=f"Perplexity answer: {query[:80]}",
+                    url="",
+                    content=content,
+                    raw_content=content,
+                    score=None,
+                ))
+
+            logger.info(
+                f"Perplexity found {len(results)} results for: {query}"
+            )
+            return results
+
+        except httpx.HTTPError as e:
+            logger.error(f"Perplexity API error: {e}")
+            return []
+
+
+def _extract_citation_snippet(content: str, marker: str, context_chars: int = 200) -> str:
+    """Extract text surrounding a citation marker like [1] from the response."""
+    import re
+    # Escape the marker for regex (brackets are special)
+    escaped = re.escape(marker)
+    # Find the sentence(s) containing this marker
+    # Look for text around the marker
+    match = re.search(escaped, content)
+    if not match:
+        return ""
+    start = max(0, match.start() - context_chars)
+    end = min(len(content), match.end() + context_chars)
+    snippet = content[start:end].strip()
+    # Clean up partial words at boundaries
+    if start > 0:
+        snippet = "..." + snippet.split(" ", 1)[-1] if " " in snippet else "..." + snippet
+    if end < len(content):
+        snippet = snippet.rsplit(" ", 1)[0] + "..." if " " in snippet else snippet + "..."
+    return snippet
+
+
+def _title_from_url(url: str) -> str:
+    """Derive a readable title from a URL."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc.replace("www.", "")
+        # Use the last meaningful path segment as a hint
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if path_parts:
+            slug = path_parts[-1].replace("-", " ").replace("_", " ")
+            # Truncate very long slugs
+            if len(slug) > 60:
+                slug = slug[:57] + "..."
+            return f"{slug} ({domain})"
+        return domain
+    except Exception:
+        return url[:80]

@@ -61,6 +61,7 @@ class AgentConfig:
     auto_ingest: bool = False
     auto_ingest_threshold: float = 0.85
     include_web_search: bool = True
+    include_core_search: bool = True
     year_range: Optional[tuple] = None
     min_citations: int = 0
 
@@ -80,6 +81,7 @@ class ResearchAgent:
         config: Optional[AgentConfig] = None,
         use_ollama: bool = False,
         provider: Optional[str] = None,
+        canonical_provider: Optional[str] = None,
         ollama_model: str = "mistral",
         ollama_base_url: str = "http://localhost:11434",
         openai_model: str = "gpt-4o-mini",
@@ -103,6 +105,7 @@ class ResearchAgent:
         self._load_model_on_demand = True
         self.use_ollama = use_ollama
         self.provider = provider or ("ollama" if use_ollama else "huggingface")
+        self._canonical_provider = canonical_provider or self.provider
         self._openai_fallback_models = openai_models or []
         self._openai_compat_fallback_models = openai_compat_models or []
         self._ollama_base_url = ollama_base_url
@@ -218,6 +221,11 @@ class ResearchAgent:
         elif self.tokenizer:
             return self.tokenizer.name_or_path
         return "unknown"
+
+    @property
+    def is_claude(self) -> bool:
+        """True when the underlying provider is Anthropic (native tool-use eligible)."""
+        return self._canonical_provider == "anthropic" and bool(self._openai_api_key)
 
     def list_available_models(self) -> list:
         """List available models for the active provider."""
@@ -340,6 +348,7 @@ class ResearchAgent:
                 fallback_models=cloud_cfg["models"],
             )
             self.tokenizer = None
+            self._canonical_provider = provider_key
             self.provider = "openai"
             self.use_ollama = False
             self._load_model_on_demand = False
@@ -426,9 +435,34 @@ class ResearchAgent:
                       Valid task types: classify, extract_keywords, synthesize.
         """
         valid_tasks = {"classify", "extract_keywords", "synthesize"}
+        rejected = {k for k in pipeline if k not in valid_tasks}
+        if rejected:
+            logger.warning(
+                "Pipeline: ignoring unknown task types: %s (valid: %s)",
+                ", ".join(sorted(rejected)),
+                ", ".join(sorted(valid_tasks)),
+            )
+
         self._pipeline = {k: v for k, v in pipeline.items() if k in valid_tasks}
+
         if self._pipeline:
-            logger.info("Pipeline configured: %s", self._pipeline)
+            for task, model in sorted(self._pipeline.items()):
+                logger.info("Pipeline: %s -> %s", task, model)
+
+            # Soft-warn if the model is not in the provider's known model list.
+            # Wrapped in try/except so partial init (e.g. tests) never crashes.
+            try:
+                known_models = self.list_available_models()
+            except Exception:
+                known_models = []
+            if known_models:
+                for task, model in self._pipeline.items():
+                    if model not in known_models:
+                        logger.warning(
+                            "Pipeline: model '%s' (task '%s') not in known model "
+                            "list %s — it may still work if the provider accepts it",
+                            model, task, known_models[:6],
+                        )
 
     def task_infer(self, task: str, prompt: str, max_tokens: int = 512) -> str:
         """Run inference with an optional per-task model override.
@@ -995,8 +1029,21 @@ Keywords:"""
                     logger.error(f"Semantic Scholar search error: {e}")
                     return []
 
-            openalex_papers, s2_papers = await asyncio.gather(
-                _fetch_openalex(), _fetch_s2()
+            async def _fetch_core():
+                if not self.config.include_core_search:
+                    return []
+                try:
+                    core_limit = max(1, max_ext // 3)
+                    return await self.academic_search.search_core(
+                        query, limit=core_limit,
+                        from_year=from_year, to_year=to_year,
+                    )
+                except Exception as e:
+                    logger.error(f"CORE search error: {e}")
+                    return []
+
+            openalex_papers, s2_papers, core_papers = await asyncio.gather(
+                _fetch_openalex(), _fetch_s2(), _fetch_core()
             )
 
             # Process OpenAlex results first (primary source)
@@ -1019,7 +1066,17 @@ Keywords:"""
                 _mark_seen(paper)
                 external_results.append(_paper_to_dict(paper, "semantic_scholar"))
 
-            logger.info(f"Found {len(external_results)} academic results (OpenAlex: {len(openalex_papers)}, S2: {len(s2_papers)})")
+            # CORE results (open access papers, deduped)
+            for paper in core_papers:
+                citation_count = paper.citation_count or 0
+                if min_citations and citation_count < min_citations:
+                    continue
+                if _is_duplicate(paper):
+                    continue
+                _mark_seen(paper)
+                external_results.append(_paper_to_dict(paper, "core"))
+
+            logger.info(f"Found {len(external_results)} academic results (OpenAlex: {len(openalex_papers)}, S2: {len(s2_papers)}, CORE: {len(core_papers)})")
 
         # Search web if configured and query type warrants it
         if self.web_search and self.config.include_web_search:
@@ -1325,6 +1382,589 @@ Response:"""
 
         return {**state, "final_answer": final_answer}
 
+    # ── Native Claude tool-use path ─────────────────────────────────────
+
+    def _get_claude_tool_definitions(self) -> List[Dict]:
+        """Return Anthropic tool schemas for the research agent's capabilities."""
+        return [
+            {
+                "name": "search_local_kb",
+                "description": (
+                    "Search the user's personal knowledge base (papers, notes, "
+                    "and web sources stored in the vector database). Use this "
+                    "first to check what the user already has before searching "
+                    "externally."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query to find relevant papers, notes, or web sources",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "search_academic",
+                "description": (
+                    "Search academic databases (OpenAlex, Semantic Scholar, CORE) "
+                    "for published research papers. Returns papers with titles, "
+                    "authors, years, citation counts, and abstracts."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Academic search query (keywords, author names, topics)",
+                        },
+                        "year_from": {
+                            "type": "integer",
+                            "description": "Only return papers published after this year",
+                        },
+                        "year_to": {
+                            "type": "integer",
+                            "description": "Only return papers published before this year",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "search_web",
+                "description": (
+                    "Search the web for grey literature, reports, news articles, "
+                    "and non-academic sources. Use for current events, policy "
+                    "documents, or organizational reports."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Web search query",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        ]
+
+    def _build_claude_system_prompt(self, context: Dict) -> str:
+        """Build system prompt for Claude's native tool-use mode."""
+        parts = [
+            "You are a research assistant with access to a personal knowledge base "
+            "of academic papers, notes, and web sources.",
+            "",
+            "Your workflow:",
+            "1. ALWAYS search the local knowledge base first to check what the user already has.",
+            "2. If local results are insufficient (fewer than 3 relevant results), search academic databases.",
+            "3. For current events, policy documents, or grey literature, also search the web.",
+            "4. Synthesize all findings into a clear, well-organized answer.",
+            "",
+            "Citation format:",
+            "- Number all sources sequentially as [1], [2], [3], etc.",
+            "- Cite sources inline in your answer using these numbers.",
+            "- Base your answer on the CONTENT of sources, not just their titles.",
+            "- If sources conflict, note the disagreement.",
+            "",
+            "Response style:",
+            "- Use markdown formatting for readability.",
+            "- For literature reviews: provide thematic overview, key findings, and research gaps.",
+            "- For factual questions: give precise answers with specific citations.",
+            "- For analysis requests: compare perspectives and evaluate evidence.",
+            "- For casual greetings or simple questions: respond naturally without using tools.",
+        ]
+
+        # Add context from UI selection
+        current_researcher = context.get("researcher")
+        current_paper_id = context.get("paper_id")
+        auth_items = context.get("auth_items", [])
+        chat_items = context.get("chat_items", [])
+
+        if current_researcher:
+            parts.append(
+                f"\nThe user is currently focused on researcher: {current_researcher}. "
+                "Prioritize information about their work."
+            )
+        if current_paper_id:
+            parts.append(
+                f"\nThe user has a specific paper selected (ID: {current_paper_id[:30]}). "
+                "Consider this context when searching."
+            )
+        if auth_items:
+            parts.append(f"\nPinned research topics: {', '.join(auth_items)}")
+        if chat_items:
+            parts.append(f"\nRecent conversation topics: {', '.join(chat_items)}")
+
+        return "\n".join(parts)
+
+    def _format_tool_results(self, results: List[Dict], source_type: str) -> str:
+        """Format search results as text for Claude to reference in its answer."""
+        if not results:
+            return f"No {source_type} results found."
+
+        lines = [f"Found {len(results)} {source_type} result(s):\n"]
+        for i, r in enumerate(results, 1):
+            title = r.get("title", "Unknown")
+            authors = r.get("authors", "")
+            year = r.get("year", "")
+            content = str(r.get("content", ""))[:600]
+            citations = r.get("citation_count")
+            url = r.get("url", "")
+
+            lines.append(f"[{i}] {title}")
+            if authors and authors != "User Note":
+                lines.append(f"    Authors: {authors}")
+            if year:
+                lines.append(f"    Year: {year}")
+            if citations:
+                lines.append(f"    Citations: {citations}")
+            if url:
+                lines.append(f"    URL: {url}")
+            if content:
+                lines.append(f"    Excerpt: {content}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    async def _execute_claude_tool(
+        self,
+        tool_name: str,
+        tool_input: Dict,
+        all_local: List[Dict],
+        all_external: List[Dict],
+        context: Dict,
+    ) -> str:
+        """Execute a Claude tool call against existing search infrastructure."""
+
+        if tool_name == "search_local_kb":
+            return await self._claude_search_local(
+                tool_input["query"], all_local, context,
+            )
+
+        elif tool_name == "search_academic":
+            return await self._claude_search_academic(
+                tool_input["query"],
+                year_from=tool_input.get("year_from"),
+                year_to=tool_input.get("year_to"),
+                results_out=all_external,
+            )
+
+        elif tool_name == "search_web":
+            return await self._claude_search_web(
+                tool_input["query"], all_external,
+            )
+
+        return f"Unknown tool: {tool_name}"
+
+    async def _claude_search_local(
+        self,
+        query: str,
+        results_out: List[Dict],
+        context: Dict,
+    ) -> str:
+        """Local KB search for Claude tool-use path."""
+        if not self.vector_store or not self.embedder:
+            return "Knowledge base is not configured."
+
+        try:
+            # Generate query embedding (same logic as _search_local)
+            if hasattr(self.embedder, "embed_query"):
+                query_embedding = self.embedder.embed_query(query)
+            elif hasattr(self.embedder, "embed"):
+                query_embedding = self.embedder.embed(query)
+            elif hasattr(self.embedder, "encode"):
+                query_embedding = self.embedder.encode(query)
+            else:
+                return "Error: Embedder does not support query embedding."
+
+            if hasattr(query_embedding, "tolist"):
+                query_embedding = query_embedding.tolist()
+
+            # Year filters from config
+            filter_dict = None
+            if self.config.year_range:
+                year_from, year_to = self.config.year_range
+                filter_dict = {
+                    "$and": [
+                        {"year": {"$gte": year_from}},
+                        {"year": {"$lte": year_to}},
+                    ]
+                }
+
+            _empty = {"documents": [], "metadatas": [], "distances": []}
+            loop = asyncio.get_running_loop()
+
+            def _search_papers():
+                return self.vector_store.search(
+                    query_embedding=query_embedding,
+                    collection="papers",
+                    n_results=self.config.max_local_results * 2,
+                    filter_dict=filter_dict,
+                    query_text=query,
+                )
+
+            def _search_notes():
+                try:
+                    return self.vector_store.search(
+                        query_embedding=query_embedding,
+                        collection="notes",
+                        n_results=max(3, self.config.max_local_results // 2),
+                        query_text=query,
+                    )
+                except Exception:
+                    return _empty
+
+            def _search_web_sources():
+                try:
+                    return self.vector_store.search(
+                        query_embedding=query_embedding,
+                        collection="web_sources",
+                        n_results=max(3, self.config.max_local_results // 2),
+                        query_text=query,
+                    )
+                except Exception:
+                    return _empty
+
+            paper_results, notes_results, web_results = await asyncio.gather(
+                loop.run_in_executor(None, _search_papers),
+                loop.run_in_executor(None, _search_notes),
+                loop.run_in_executor(None, _search_web_sources),
+            )
+
+            local_results = []
+
+            # Format paper results
+            for i, doc in enumerate(paper_results.get("documents", [])):
+                meta = paper_results.get("metadatas", [{}])[i] if paper_results.get("metadatas") else {}
+                dist = paper_results.get("distances", [1.0])[i] if paper_results.get("distances") else 1.0
+                raw_authors = meta.get("authors", "")
+                authors_str = ", ".join(raw_authors) if isinstance(raw_authors, list) else (raw_authors or "")
+                local_results.append({
+                    "content": doc,
+                    "title": meta.get("title", "Unknown"),
+                    "authors": authors_str,
+                    "year": meta.get("year"),
+                    "paper_id": meta.get("paper_id", ""),
+                    "source": "local_kb",
+                    "relevance_score": 1 - dist,
+                })
+
+            # Format notes results
+            for i, doc in enumerate(notes_results.get("documents", [])):
+                meta = notes_results.get("metadatas", [{}])[i] if notes_results.get("metadatas") else {}
+                dist = notes_results.get("distances", [1.0])[i] if notes_results.get("distances") else 1.0
+                local_results.append({
+                    "content": doc,
+                    "title": meta.get("title", "Research Note"),
+                    "authors": "User Note",
+                    "year": None,
+                    "paper_id": meta.get("note_id", ""),
+                    "source": "local_note",
+                    "tags": meta.get("tags", ""),
+                    "relevance_score": 1 - dist,
+                })
+
+            # Format web source results
+            for i, doc in enumerate(web_results.get("documents", [])):
+                meta = web_results.get("metadatas", [{}])[i] if web_results.get("metadatas") else {}
+                dist = web_results.get("distances", [1.0])[i] if web_results.get("distances") else 1.0
+                local_results.append({
+                    "content": doc,
+                    "title": meta.get("title", "Web Source"),
+                    "authors": "",
+                    "year": None,
+                    "paper_id": meta.get("source_id", ""),
+                    "url": meta.get("url", ""),
+                    "source": "local_web",
+                    "relevance_score": 1 - dist,
+                })
+
+            # Apply context boosting (same as _search_local:860-898)
+            current_researcher = context.get("researcher")
+            current_paper_id = context.get("paper_id")
+            if current_researcher or current_paper_id:
+                boost_amount = 0.15
+
+                def _str_authors(val):
+                    if isinstance(val, list):
+                        return ", ".join(str(a) for a in val)
+                    return str(val) if val else ""
+
+                context_paper = None
+                if current_paper_id:
+                    context_paper = self.vector_store.get_paper(current_paper_id)
+
+                for result in local_results:
+                    if current_researcher:
+                        authors = _str_authors(result.get("authors", "")).lower()
+                        if current_researcher.lower() in authors:
+                            result["relevance_score"] = min(1.0, result["relevance_score"] + boost_amount)
+
+                    if current_paper_id and context_paper:
+                        pid = result.get("paper_id", "")
+                        if pid == current_paper_id:
+                            result["relevance_score"] = min(1.0, result["relevance_score"] + boost_amount * 2)
+                        elif context_paper.get("metadata", {}).get("authors"):
+                            ctx_authors = _str_authors(context_paper["metadata"]["authors"]).lower()
+                            res_authors = _str_authors(result.get("authors", "")).lower()
+                            if any(a.strip() in res_authors for a in ctx_authors.split(",") if len(a.strip()) > 3):
+                                result["relevance_score"] = min(1.0, result["relevance_score"] + boost_amount * 0.5)
+
+            local_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+            local_results = local_results[:self.config.max_local_results]
+
+            results_out.extend(local_results)
+            return self._format_tool_results(local_results, "local knowledge base")
+
+        except Exception as e:
+            logger.error(f"Claude local search error: {e}")
+            return f"Error searching knowledge base: {e}"
+
+    async def _claude_search_academic(
+        self,
+        query: str,
+        year_from: Optional[int] = None,
+        year_to: Optional[int] = None,
+        results_out: Optional[List[Dict]] = None,
+    ) -> str:
+        """Academic search for Claude tool-use path."""
+        if not self.academic_search:
+            return "Academic search is not configured."
+
+        # Use config year range as fallback
+        if year_from is None and self.config.year_range:
+            year_from = self.config.year_range[0]
+        if year_to is None and self.config.year_range:
+            year_to = self.config.year_range[1]
+        year_range = (year_from, year_to) if year_from and year_to else None
+        min_citations = max(0, int(self.config.min_citations or 0))
+
+        max_ext = self.config.max_external_results
+        openalex_limit = max(1, (max_ext * 2) // 3)
+        s2_limit = max_ext - openalex_limit
+
+        try:
+            async def _fetch_openalex():
+                try:
+                    return await self.academic_search.search_openalex(
+                        query, limit=openalex_limit,
+                        from_year=year_from, to_year=year_to,
+                    )
+                except Exception as e:
+                    logger.error(f"OpenAlex search error: {e}")
+                    return []
+
+            async def _fetch_s2():
+                try:
+                    return await self.academic_search.search_semantic_scholar(
+                        query, limit=s2_limit, year_range=year_range,
+                    )
+                except Exception as e:
+                    logger.error(f"Semantic Scholar search error: {e}")
+                    return []
+
+            async def _fetch_core():
+                if not self.config.include_core_search:
+                    return []
+                try:
+                    return await self.academic_search.search_core(
+                        query, limit=max(1, max_ext // 3),
+                        from_year=year_from, to_year=year_to,
+                    )
+                except Exception as e:
+                    logger.error(f"CORE search error: {e}")
+                    return []
+
+            oa_papers, s2_papers, core_papers = await asyncio.gather(
+                _fetch_openalex(), _fetch_s2(), _fetch_core(),
+            )
+
+            # Dedup by DOI / title (same logic as _search_external)
+            seen_dois: set = set()
+            seen_titles: set = set()
+            external_results: List[Dict] = []
+
+            def _title_key(title: str) -> str:
+                return (title or "").strip().lower()[:80]
+
+            for papers, source_label in [
+                (oa_papers, "openalex"),
+                (s2_papers, "semantic_scholar"),
+                (core_papers, "core"),
+            ]:
+                for paper in papers:
+                    cites = paper.citation_count or 0
+                    if min_citations and cites < min_citations:
+                        continue
+                    if paper.doi and paper.doi in seen_dois:
+                        continue
+                    tk = _title_key(paper.title)
+                    if tk and tk in seen_titles:
+                        continue
+                    if paper.doi:
+                        seen_dois.add(paper.doi)
+                    if tk:
+                        seen_titles.add(tk)
+                    external_results.append({
+                        "content": paper.abstract or "",
+                        "title": paper.title,
+                        "authors": ", ".join(paper.authors) if paper.authors else "",
+                        "year": paper.year,
+                        "paper_id": paper.paper_id,
+                        "doi": paper.doi,
+                        "citation_count": cites,
+                        "url": paper.url,
+                        "source": source_label,
+                    })
+
+            if results_out is not None:
+                results_out.extend(external_results)
+            return self._format_tool_results(external_results, "academic")
+
+        except Exception as e:
+            logger.error(f"Claude academic search error: {e}")
+            return f"Error searching academic databases: {e}"
+
+    async def _claude_search_web(
+        self,
+        query: str,
+        results_out: List[Dict],
+    ) -> str:
+        """Web search for Claude tool-use path."""
+        if not self.web_search:
+            return "Web search is not configured."
+
+        try:
+            web_results = await self.web_search.search(query, max_results=5)
+            formatted = []
+            for result in web_results:
+                title = result.get("title") if isinstance(result, dict) else getattr(result, "title", "")
+                url = result.get("url") if isinstance(result, dict) else getattr(result, "url", "")
+                content = result.get("snippet") if isinstance(result, dict) else getattr(result, "content", "")
+                entry = {
+                    "content": content or "",
+                    "title": title or "",
+                    "url": url or "",
+                    "source": "web",
+                }
+                formatted.append(entry)
+
+            results_out.extend(formatted)
+            return self._format_tool_results(formatted, "web")
+
+        except Exception as e:
+            logger.error(f"Claude web search error: {e}")
+            return f"Error searching the web: {e}"
+
+    async def _run_with_claude_tools(
+        self,
+        user_query: str,
+        search_filters: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Run the agent using Claude's native tool calling.
+
+        Claude decides which tools to call and in what order. Falls back
+        to the LangGraph pipeline if the anthropic SDK is not installed
+        or the API call fails.
+        """
+        import anthropic
+
+        context = context or {}
+
+        # Apply search filters to config (same as _run_async)
+        if search_filters:
+            if "year_from" in search_filters or "year_to" in search_filters:
+                year_from = search_filters.get("year_from", 1900)
+                year_to = search_filters.get("year_to", 2030)
+                self.config.year_range = (year_from, year_to)
+            if search_filters.get("min_citations") is not None:
+                try:
+                    self.config.min_citations = int(search_filters["min_citations"])
+                except (TypeError, ValueError):
+                    self.config.min_citations = 0
+
+        client = anthropic.AsyncAnthropic(api_key=self._openai_api_key)
+        model = self.model.model_name if self.model else "claude-sonnet-4-6"
+        system_prompt = self._build_claude_system_prompt(context)
+        tools = self._get_claude_tool_definitions()
+        messages: List[Dict] = [{"role": "user", "content": user_query}]
+        all_local: List[Dict] = []
+        all_external: List[Dict] = []
+
+        MAX_TURNS = 6
+        final_text = ""
+
+        for _ in range(MAX_TURNS):
+            response = await client.messages.create(
+                model=model,
+                max_tokens=2048,
+                system=system_prompt,
+                tools=tools,
+                messages=messages,
+            )
+
+            # If Claude is done, extract the final text
+            if response.stop_reason == "end_turn":
+                final_text = "".join(
+                    b.text for b in response.content if b.type == "text"
+                )
+                break
+
+            # Append assistant turn (with tool_use blocks)
+            messages.append({"role": "assistant", "content": response.content})
+
+            # Execute each tool call and build tool_result blocks
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    result_text = await self._execute_claude_tool(
+                        block.name, block.input,
+                        all_local, all_external, context,
+                    )
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_text,
+                    })
+
+            if tool_results:
+                messages.append({"role": "user", "content": tool_results})
+        else:
+            final_text = (
+                "I wasn't able to complete the research in the allowed number of steps. "
+                "Please try a more specific query."
+            )
+
+        logger.info(
+            "Claude tool-use complete: %d local, %d external sources",
+            len(all_local), len(all_external),
+        )
+
+        # Return same dict format as _run_async
+        all_sources = all_local + all_external
+        return {
+            "query": user_query,
+            "answer": final_text,
+            "query_type": "general" if not all_sources else "literature_review",
+            "local_sources": len(all_local),
+            "external_sources": len(all_external),
+            "sources": [
+                {
+                    "title": s.get("title"),
+                    "authors": s.get("authors", ""),
+                    "source": s.get("source"),
+                    "year": s.get("year"),
+                    "url": s.get("url", ""),
+                }
+                for s in all_sources[:10]
+            ],
+        }
+
     async def _run_async(
         self,
         user_query: str,
@@ -1392,6 +2032,21 @@ Response:"""
 
         if search_filters:
             result["search_filters"] = search_filters
+
+        # Native Claude tool-use path (bypasses LangGraph)
+        if self.is_claude:
+            try:
+                return await self._run_with_claude_tools(
+                    user_query, search_filters, context,
+                )
+            except ImportError:
+                logger.warning(
+                    "anthropic SDK not installed, using LangGraph pipeline"
+                )
+            except Exception as e:
+                logger.error(
+                    "Claude tool-use failed (%s), falling back to LangGraph", e,
+                )
 
         try:
             # Run the graph
@@ -1476,6 +2131,7 @@ def create_research_agent(
     config: Optional[AgentConfig] = None,
     use_ollama: bool = False,
     provider: Optional[str] = None,
+    canonical_provider: Optional[str] = None,
     ollama_model: str = "mistral",
     ollama_base_url: str = "http://localhost:11434",
     openai_model: str = "gpt-4o-mini",
@@ -1502,6 +2158,7 @@ def create_research_agent(
         config=config,
         use_ollama=use_ollama,
         provider=provider,
+        canonical_provider=canonical_provider,
         ollama_model=ollama_model,
         ollama_base_url=ollama_base_url,
         openai_model=openai_model,

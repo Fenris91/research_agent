@@ -7,20 +7,27 @@ Active priorities and future ideas for the Research Agent.
 - [x] **Auto-Save Web Results from Researcher Lookup** — save DuckDuckGo results to `web_sources`, "Save to KB" button next to each result
 - [x] **Auto-Save Citation Abstracts** — persist cited/citing paper abstracts to KB via S2 batch API, auto-save toggle in Citation Explorer
 - [x] **Additional Cloud LLM Providers** — Gemini, Mistral, xAI/Grok via OpenAI-compatible APIs
-- [ ] **Multi-Model Pipeline** — fast/cheap model for query classification, capable model for synthesis, configurable per task type
-- [ ] **Perplexity Integration** — web-grounded answers with citations, replace/augment DuckDuckGo
+- [x] **Multi-Model Pipeline** — fast/cheap model for query classification, capable model for synthesis, configurable per task type via UI
+- [x] **Perplexity Integration** — web-grounded answers with citations, switchable web search provider (DuckDuckGo/Perplexity/Tavily/Serper)
+- [x] **CORE API Integration** — 300M+ open access papers, integrated into external search pipeline
 
 ## Medium Priority
 
 - [x] **Notes Browser in KB Tab** — list, refresh, delete by ID
 - [x] **Web Sources Browser in KB Tab** — list with URL/title/date, delete
-- [ ] **Researcher Profile Persistence** — persist ResearcherRegistry to SQLite, link researchers to KB papers
+- [x] **Researcher Profile Persistence** — persist ResearcherRegistry to SQLite, link researchers to KB papers, Researchers Browser UI
 
 ## Low Priority
 
-- [ ] **Evaluation Suite** — test retrieval and synthesis quality, benchmark embedding + reranker
+- [x] **Evaluation Suite** — retrieval quality (recall@1, MRR, distractor suppression), reranker effectiveness, context boosting, synthesis correctness
 - [ ] **Fine-tuning** — domain-specific model training
 - [ ] **Collaborative Features** — share knowledge bases
+
+## Claude & LLM Intelligence
+
+- [x] **Native Claude Tool Use** — when Anthropic key is set, Claude uses native tool calling (search_local_kb, search_academic, search_web) instead of rigid LangGraph pipeline; auto-fallback to LangGraph for other providers
+- [ ] **MCP Server** — expose KB search, researcher lookup, paper search as MCP tools for Claude Code CLI
+- [ ] **Reranker Fine-Tuning** — domain-specific CrossEncoder training on eval corpus (critical social theory, Sámi epistemology, Arctic geography)
 
 ## Ideas / Future
 
