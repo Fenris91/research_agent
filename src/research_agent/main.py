@@ -513,6 +513,7 @@ def build_agent_from_config(config: dict):
         config=agent_config,
         use_ollama=use_ollama,
         provider=provider,
+        canonical_provider=canonical_provider,
         ollama_model=ollama_model,
         ollama_base_url=ollama_base_url,
         openai_model=openai_default_model,

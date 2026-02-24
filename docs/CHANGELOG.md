@@ -3,6 +3,8 @@
 Implementation history for the Research Agent project.
 
 ## February 24, 2026
+- **Native Claude Tool Use** — when Anthropic API key is set, Claude uses native tool calling to decide which tools to use and in what order (search_local_kb, search_academic, search_web), bypassing the rigid LangGraph pipeline; falls back to LangGraph for other providers or on error; `is_claude` property, `_run_with_claude_tools()` async loop, `canonical_provider` threading through init chain
+- **25 new tests** for Claude tool-use integration (detection, tool schemas, dispatch, full loop, result format parity, fallback, BYOK)
 - **Researcher ↔ KB Paper Linking** — auto-link KB papers to known researchers on ingestion and lookup; `update_paper_metadata()` dual-write in VectorStore; `match_author_name()` in ResearcherRegistry; `researcher_linker` module for full-scan and targeted linking
 - **Researchers Browser** — new accordion in KB tab: table with Name/Affiliation/Registry Papers/KB Papers/Citations/h-index, Re-link button, delete by name
 - **Duplicate wiring fix** — merged two `papers_table.select` bindings into one (was firing `select_kb_paper_with_context` twice per click)

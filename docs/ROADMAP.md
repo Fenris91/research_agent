@@ -23,6 +23,12 @@ Active priorities and future ideas for the Research Agent.
 - [ ] **Fine-tuning** — domain-specific model training
 - [ ] **Collaborative Features** — share knowledge bases
 
+## Claude & LLM Intelligence
+
+- [x] **Native Claude Tool Use** — when Anthropic key is set, Claude uses native tool calling (search_local_kb, search_academic, search_web) instead of rigid LangGraph pipeline; auto-fallback to LangGraph for other providers
+- [ ] **MCP Server** — expose KB search, researcher lookup, paper search as MCP tools for Claude Code CLI
+- [ ] **Reranker Fine-Tuning** — domain-specific CrossEncoder training on eval corpus (critical social theory, Sámi epistemology, Arctic geography)
+
 ## Ideas / Future
 
 - [ ] Integration with Zotero
