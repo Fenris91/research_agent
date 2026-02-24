@@ -19,7 +19,7 @@ Active priorities and future ideas for the Research Agent.
 
 ## Low Priority
 
-- [ ] **Evaluation Suite** — test retrieval and synthesis quality, benchmark embedding + reranker
+- [x] **Evaluation Suite** — retrieval quality (recall@1, MRR, distractor suppression), reranker effectiveness, context boosting, synthesis correctness
 - [ ] **Fine-tuning** — domain-specific model training
 - [ ] **Collaborative Features** — share knowledge bases
 
